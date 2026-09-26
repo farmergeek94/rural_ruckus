@@ -8,6 +8,12 @@ tracks and trucks, and community-made ones.
 This repository contains no MTM2 files. You must supply them from your own copy of the
 game.
 
+## Acknowledgements
+
+The reverse-engineering work by [Juan Pablo Utreras](https://github.com/juanputrerasm)
+is a major source of knowledge for this project, especially for understanding MTM2's
+POD archives and file formats.
+
 ## 1. Install the tools
 
 1. Install Rust with [rustup](https://rustup.rs). Bevy 0.19 needs a recent stable Rust.
