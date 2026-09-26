@@ -1,0 +1,221 @@
+{
+    // Requires the CodeLLDB extension (vadimcn.vscode-lldb). The "cargo" block makes it
+    // build first and then debug whichever artifact the filter selects.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug game",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["build", "--bin=monster_truck_rural_ruckus"],
+                "filter": { "name": "monster_truck_rural_ruckus", "kind": "bin" }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                // Bevy looks for the `assets/` folder here; `cargo run` sets it, a debugger doesn't.
+                "CARGO_MANIFEST_DIR": "${workspaceFolder}",
+                "RUST_BACKTRACE": "1"
+            }
+        },
+        {
+            // Past the front end, straight onto the built-in track.
+            "name": "Debug game (race at once)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["build", "--bin=monster_truck_rural_ruckus"],
+                "filter": { "name": "monster_truck_rural_ruckus", "kind": "bin" }
+            },
+            "args": ["--race"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "CARGO_MANIFEST_DIR": "${workspaceFolder}",
+                "RUST_BACKTRACE": "1"
+            }
+        },
+        {
+            "name": "Debug track tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=track"],
+                "filter": { "name": "track", "kind": "test" }
+            },
+            // Add a test name here to run just that one.
+            // One thread, so breakpoints aren't hit by several tests at once.
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug POD truck tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=pod_truck"],
+                "filter": { "name": "pod_truck", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug game state tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=game_state"],
+                "filter": { "name": "game_state", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug front end tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=front_end"],
+                "filter": { "name": "front_end", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug camera smoothness tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=camera_smoothness"],
+                "filter": { "name": "camera_smoothness", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug store tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=store"],
+                "filter": { "name": "store", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug POD track tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=pod_track"],
+                "filter": { "name": "pod_track", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug real POD track tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=pod_real_tracks"],
+                "filter": { "name": "pod_real_tracks", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug real POD truck tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=pod_real_trucks"],
+                "filter": { "name": "pod_real_trucks", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug base game tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=base_game"],
+                "filter": { "name": "base_game", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug graphics debug tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=graphics_debug"],
+                "filter": { "name": "graphics_debug", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug water tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=water"],
+                "filter": { "name": "water", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug scenery tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=scenery"],
+                "filter": { "name": "scenery", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug dirt tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=dirt"],
+                "filter": { "name": "dirt", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
+            "name": "Debug weather tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=weather"],
+                "filter": { "name": "weather", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        }
+    ]
+}

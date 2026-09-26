@@ -1,0 +1,34 @@
+[package]
+name = "monster_truck_rural_ruckus"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# bevy_rapier3d releases are tied to one Bevy minor version: upgrade them together.
+bevy = "0.19"
+# `parallel` lets Rapier spread a step's work over the CPU's cores (rayon), with eight
+# trucks and their wheels to solve 120 times a second.
+bevy_rapier3d = { version = "0.36", features = ["parallel"] }
+# What `store` keeps between runs. Pure Rust, one file, transactional writes, and an
+# in-memory backend for tests. No redb type appears in `store`'s API, so that it can be
+# swapped or upgraded.
+redb = "4.3"
+# Decodes the PNG textures that MTM2 Community Patch 3 packs in archives. Bevy already
+# builds this version for its own image loading, so it adds nothing to compile.
+png = "0.18"
+
+# Our own code is unoptimised so the debugger can show every local and step line by line,
+# while full optimisation for dependencies keeps Bevy and Rapier usable in debug builds.
+[profile.dev]
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 3
+# Turn off debug info completely for all external dependencies
+debug = false
+
+# Aggressive optimizations for your final production build
+[profile.release]
+opt-level = 3
+lto = "thin"          # Link-Time Optimization merges optimization across crates
+codegen-units = 1     # Allows the compiler to optimize math streams globally
