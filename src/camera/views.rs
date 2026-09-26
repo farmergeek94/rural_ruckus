@@ -1,0 +1,261 @@
+//! The views the player can pick in a race: the chase camera, or the cockpit, from the
+//! driver's seat. And in either, a look to the left, the right or behind, while a key is
+//! held, to see the trucks round and behind the player's.
+//!
+//! The chase camera goes on following the truck whatever the view, so that it is settled
+//! behind it when the player comes back to it. A view is laid over what it has placed, after
+//! `CameraSystems::Place`:
+//!
+//! - Looking aside or back from the chase camera swings the eye round the truck, at the same
+//!   distance and height, and keeps it clear of the ground.
+//! - The cockpit is fixed to the drawn truck (`TruckVisual`), which is where the truck is
+//!   between its physics steps, and so moves as smoothly as the truck does. It leans and
+//!   pitches with the truck. The player's own truck is hidden in it: from inside, its body
+//!   would fill the picture.
+//!
+//! MTM2 has an in-cab view whose dashboard the truck's `Instrument Cluster` names, which
+//! `dashboard` lays over this view. Where the eye sits here is the game's own: near the
+//! front of the body and just under its roof. With a dashboard, it is tipped down a little,
+//! so that the road is in the dashboard's window (`dashboard::eye_pitch`).
+
+use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
+
+use super::ChaseCamera;
+use super::dashboard::eye_pitch;
+use crate::keys::{Control, KeyBindings};
+use crate::track::Track;
+use crate::truck::{ChosenTruck, Player, SeenFromInside, TruckVisual};
+
+/// Changes between the chase camera and the cockpit, as `Control::ChangeView`'s key does.
+const VIEW_BUTTON: GamepadButton = GamepadButton::North;
+/// How far the right stick must be pushed to look that way, from 0 to 1.
+const STICK_LOOK: f32 = 0.5;
+
+/// Where the eye sits in the cockpit: how far under the top of the body, in metres, and
+/// how far forward from its middle, as a share of the way to its front. Higher up sees
+/// more of the course over the bumps; further forward sees less of the bonnet.
+const COCKPIT_BELOW_ROOF: f32 = 0.35;
+const COCKPIT_FORWARD: f32 = 0.35;
+
+/// Which view the player's camera shows. Not remembered between races.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CameraView {
+    /// Behind and above the truck.
+    #[default]
+    Chase,
+    /// From the driver's seat.
+    Cockpit,
+}
+
+/// Which way the player is looking, from the way the truck faces. Kept up to date in
+/// `CameraSystems::Place`, for the dashboard.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Look {
+    #[default]
+    Ahead,
+    Left,
+    Right,
+    Back,
+}
+
+impl Look {
+    /// How far round from ahead, in radians, about the truck's up: left is positive.
+    fn angle(self) -> f32 {
+        match self {
+            Look::Ahead => 0.0,
+            Look::Left => std::f32::consts::FRAC_PI_2,
+            Look::Right => -std::f32::consts::FRAC_PI_2,
+            Look::Back => std::f32::consts::PI,
+        }
+    }
+
+    /// The way the keys and a stick ask to look. `stick` is the right stick, right and up
+    /// positive.
+    fn asked(left: bool, right: bool, back: bool, stick: Vec2) -> Look {
+        let left = left || stick.x < -STICK_LOOK;
+        let right = right || stick.x > STICK_LOOK;
+        let back = back || stick.y < -STICK_LOOK;
+        match (left, right, back) {
+            (_, _, true) | (true, true, _) => Look::Back,
+            (true, false, false) => Look::Left,
+            (false, true, false) => Look::Right,
+            (false, false, false) => Look::Ahead,
+        }
+    }
+}
+
+/// Its key, or the gamepad's top button, changes the view.
+pub(super) fn change_view(
+    keys: Res<ButtonInput<KeyCode>>,
+    bindings: Res<KeyBindings>,
+    gamepads: Query<&Gamepad>,
+    mut view: ResMut<CameraView>,
+    mut camera: Single<&mut ChaseCamera>,
+) {
+    let asked = bindings.just_pressed(&keys, Control::ChangeView)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(VIEW_BUTTON));
+    if !asked {
+        return;
+    }
+    *view = match *view {
+        CameraView::Chase => CameraView::Cockpit,
+        CameraView::Cockpit => CameraView::Chase,
+    };
+    // Back to the chase camera, it starts again settled behind the truck.
+    camera.snap();
+}
+
+/// A new race starts with the chase camera, looking ahead.
+pub(super) fn reset_view(mut view: ResMut<CameraView>, mut looking: ResMut<Look>) {
+    *view = CameraView::Chase;
+    *looking = Look::Ahead;
+}
+
+/// Lays the view and the look over where the chase camera has put the eye, and in the
+/// cockpit tells the truck slice that the player's truck is seen from inside, which hides
+/// its body and keeps its lamps lit (`truck::SeenFromInside`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn place_view(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    bindings: Res<KeyBindings>,
+    gamepads: Query<&Gamepad>,
+    view: Res<CameraView>,
+    mut looking: ResMut<Look>,
+    track: Res<Track>,
+    chosen: Res<ChosenTruck>,
+    player: Single<(Entity, &Collider), Player>,
+    visuals: Query<(Entity, &TruckVisual, &Transform, Has<SeenFromInside>), Without<ChaseCamera>>,
+    camera: Single<(&ChaseCamera, &mut Transform, Option<&Projection>)>,
+) {
+    let (player, collider) = *player;
+    let Some((drawn, _, truck, inside)) = visuals
+        .iter()
+        .find(|(_, visual, _, _)| visual.truck == player)
+    else {
+        return;
+    };
+    let cockpit = *view == CameraView::Cockpit;
+    if cockpit && !inside {
+        commands.entity(drawn).insert(SeenFromInside);
+    } else if !cockpit && inside {
+        commands.entity(drawn).remove::<SeenFromInside>();
+    }
+
+    let stick = gamepads.iter().fold(Vec2::ZERO, |sum, gamepad| {
+        sum + Vec2::new(
+            gamepad.get(GamepadAxis::RightStickX).unwrap_or(0.0),
+            gamepad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
+        )
+    });
+    let look = Look::asked(
+        bindings.pressed(&keys, Control::LookLeft),
+        bindings.pressed(&keys, Control::LookRight),
+        bindings.pressed(&keys, Control::LookBack),
+        stick,
+    );
+    looking.set_if_neq(look);
+
+    let (chase, mut transform, projection) = camera.into_inner();
+    if cockpit {
+        let body = collider.raw.compute_local_aabb();
+        let eye = cockpit_eye(body.mins, body.maxs);
+        let pitch = match (&chosen.dashboard, projection) {
+            (Some(dashboard), Some(Projection::Perspective(perspective))) => {
+                eye_pitch(dashboard, perspective.fov)
+            }
+            _ => 0.0,
+        };
+        *transform = cockpit_pose(truck, eye, look, pitch);
+    } else if look != Look::Ahead {
+        let aim = truck.translation + Vec3::Y * chase.config.look_above;
+        let eye = swing(transform.translation, aim, look);
+        let ground = track.heights.height_at(eye.x, eye.z);
+        let eye = eye.with_y(eye.y.max(ground + chase.config.clearance));
+        *transform = Transform::from_translation(eye).looking_at(aim, Vec3::Y);
+    }
+}
+
+/// Where the driver's eye is in a body that reaches from `mins` to `maxs`, in the body's
+/// own space, whose front is towards -Z.
+fn cockpit_eye(mins: Vec3, maxs: Vec3) -> Vec3 {
+    let middle = (mins.z + maxs.z) / 2.0;
+    Vec3::new(
+        (mins.x + maxs.x) / 2.0,
+        maxs.y - COCKPIT_BELOW_ROOF,
+        middle + (mins.z - middle) * COCKPIT_FORWARD,
+    )
+}
+
+/// The camera in the cockpit of a truck drawn at `truck`, with its eye at `eye` in the
+/// truck's own space, looking `look`, tipped down by `pitch` radians.
+fn cockpit_pose(truck: &Transform, eye: Vec3, look: Look, pitch: f32) -> Transform {
+    Transform {
+        translation: truck.transform_point(eye),
+        rotation: truck.rotation
+            * Quat::from_rotation_y(look.angle())
+            * Quat::from_rotation_x(-pitch),
+        scale: Vec3::ONE,
+    }
+}
+
+/// The chase camera's eye at `eye`, swung round `aim` to look `look`: behind the truck to
+/// look ahead, beside it on the right to look left, and in front of it to look back.
+fn swing(eye: Vec3, aim: Vec3, look: Look) -> Vec3 {
+    aim + Quat::from_rotation_y(look.angle()) * (eye - aim)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keys_and_the_stick_ask_which_way_to_look() {
+        let none = Vec2::ZERO;
+        assert_eq!(Look::asked(false, false, false, none), Look::Ahead);
+        assert_eq!(Look::asked(true, false, false, none), Look::Left);
+        assert_eq!(Look::asked(false, true, false, none), Look::Right);
+        assert_eq!(Look::asked(false, false, true, none), Look::Back);
+        assert_eq!(Look::asked(true, true, false, none), Look::Back);
+        assert_eq!(Look::asked(false, false, false, Vec2::X), Look::Right);
+        assert_eq!(Look::asked(false, false, false, -Vec2::Y), Look::Back);
+        assert_eq!(Look::asked(false, false, false, Vec2::X * 0.2), Look::Ahead);
+    }
+
+    #[test]
+    fn looking_left_from_the_chase_camera_puts_it_on_the_right() {
+        // A truck facing -Z, with the camera behind it.
+        let aim = Vec3::ZERO;
+        let eye = Vec3::new(0.0, 3.0, 10.0);
+        let left = swing(eye, aim, Look::Left);
+        assert!(left.abs_diff_eq(Vec3::new(10.0, 3.0, 0.0), 1e-4), "{left}");
+        let back = swing(eye, aim, Look::Back);
+        assert!(back.z < -9.9, "{back}");
+        assert_eq!(swing(eye, aim, Look::Ahead), eye);
+    }
+
+    #[test]
+    fn the_cockpit_looks_the_way_the_truck_faces_and_round() {
+        let truck = Transform::from_xyz(5.0, 1.0, 0.0);
+        let eye = cockpit_eye(Vec3::new(-1.0, -0.5, -2.0), Vec3::new(1.0, 1.5, 2.0));
+        assert_eq!(
+            eye,
+            Vec3::new(0.0, 1.5 - COCKPIT_BELOW_ROOF, -2.0 * COCKPIT_FORWARD)
+        );
+        let ahead = cockpit_pose(&truck, eye, Look::Ahead, 0.0);
+        assert!(ahead.forward().as_vec3().abs_diff_eq(Vec3::NEG_Z, 1e-5));
+        assert!(ahead.translation.abs_diff_eq(truck.translation + eye, 1e-5));
+        let left = cockpit_pose(&truck, eye, Look::Left, 0.0);
+        assert!(left.forward().as_vec3().abs_diff_eq(Vec3::NEG_X, 1e-5));
+        let back = cockpit_pose(&truck, eye, Look::Back, 0.0);
+        assert!(back.forward().as_vec3().abs_diff_eq(Vec3::Z, 1e-5));
+        // Tipped down, it still looks the way it turned.
+        let down = cockpit_pose(&truck, eye, Look::Left, 0.1)
+            .forward()
+            .as_vec3();
+        assert!(down.y < 0.0 && down.x < -0.99, "{down}");
+    }
+}

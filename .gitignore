@@ -1,0 +1,13 @@
+/target
+
+# Third-party game content. PODs and anything extracted from them are never committed.
+/tracks/
+
+/trucks/
+
+# The base game's archives, or links to them, from the player's own copy of MTM2.
+/base/
+
+# What the player chose last time (see `crates/store`).
+/saves/
+/venv/

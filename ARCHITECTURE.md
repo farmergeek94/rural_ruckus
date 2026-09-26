@@ -1,0 +1,150 @@
+# Architecture
+
+How the code is organised. `AGENTS.md` holds the short rules; this document holds the
+detail.
+
+## Vertical slices
+
+The game is organised by **feature, not by technical layer**. Each slice is one
+module under `src/` and owns everything about its feature: plugin, components,
+resources, systems, UI and tuning values. Adding or changing a feature should touch
+one slice.
+
+Do not create layer modules such as `components`, `systems`, `resources` or
+`hud`. A slice that wants something on screen spawns and updates its own UI, as
+`truck/speedometer.rs` does. `src/ui/` is not one of these: it is the front end by
+itself, and no slice puts its screens there.
+
+| Slice | Owns |
+| --- | --- |
+| `src/truck/` | The cast-wheel vehicle (a tire-shaped cylinder swept down from each mount, plus a wheel collider on the body, kept at each hub, that touches everything but the ground, so that trucks bump and climb over each other): `config` (tuning, and where the wheels are), `data` (`TruckData`: a truck as plain data, with `in_color` for telling built-in boxes apart, and its `Dashboard`, shared), `pod_import` (MTM2 trucks, and their dashboards), `input`, `spawn`, `looks` (a truck's meshes, textures and materials, and animated textures, switched from frame to frame on the game clock), `axle` (drawn axles, and the bars, shocks and driveshaft that join them to the body, all following their wheels), `drive` (suspension and tire forces, and the tip guard that eases the steering and brakes when an inside wheel lifts in a sharp turn, on the computer's trucks only), `interpolate` (the drawn truck, moved smoothly between physics steps), `reset` (flip upright, and the `PlaceTruck` message), `speedometer`, `lamps` (each `TruckData::lamps` lamp on the drawn truck: its own picture as a glow, and its beam as a spot light, shown while `TruckLamps::lit`; beacons turn and blink). A truck with `Held` has its brakes on and its throttle ignored. Holds the truck to drive in the `ChosenTruck` resource and the computer's trucks in `ComputerTrucks`; the player's gets `PlayerTruck`. Each truck's `GroundGrip` is how much of its tires' grip the ground under each tire gives; the slice leaves it at all of it, and `footing` writes it. |
+| `src/track/` | The track as data and the ground built from it: `data` (`TrackData`, `Gate`, `GroundTextures`, `Scenery`, `Footing`), `height_grid`, `course` (centreline), `generator` (the built-in track), `pod_import` and `pod_scenery` (MTM2 tracks and their models; an animated texture becomes consecutive tiles and a `TextureCycle`, and an animation control file its first frame's mesh with `Keyframes`), `ground_boxes` (the solid blocks of bridges and tunnel roofs, drawn and made solid as part of the ground), `mesh` (shaded or textured terrain), `shading` (smooth shading: a normal map of a smooth surface through the heights, which the ground's shader lights it by, with the shape and the physics left as they are), `tile_material` and `tiles.wgsl` (the mipmapped texture array of tiles, and the material extension that samples it, shared with `scenery` and `backdrop`; an unlit material shows the tiles' own colours; a vertex's second UV channel names its tile and its animated texture, and `TileCycles` says which frame each animated texture is on), `collider` (physics). Holds the current track in the `Track` resource. |
+| `src/backdrop.rs` | What a track shows round its horizon: the models its track file's Backdrop section names (`TrackData::backdrop`, in their own texture array, each texture through its own palette). Kept centred on the camera every frame and scaled to just inside its far plane, unlit and drawn from both sides, so that it never comes nearer and everything else is in front of it. It takes the weather's fog, and darkens with the sun (`environment::Sun`). `BackdropSettings::on` (the options screen, `--no-backdrop`) hides it: its low-resolution art looks poor on a large screen. Its textures have no mipmaps, since it is only ever magnified. Drawn only, and only when the app can draw. The rules are in `docs/formats/model.md`. |
+| `src/scenery/` | The objects standing around the track: one mesh per model, one material for all of them, and triangle-mesh colliders for the solid ones. `motion` (loose and moving objects) and `interpolate` (what is drawn of them). `animation`: animated textures, by writing which frame each is on into the material's `TileCycles` when it changes, and models that move by keyframes, in a straight line from one frame to the next on the game clock, so that every copy moves in step. A keyframed model's mesh goes to the graphics card once, with every keyframe after the first as a morph target (the move of each vertex and each face's normal). The CPU writes only the morph weights each frame, and every copy is drawn with one bounding box round all its keyframes. Drawn only, and only when the app can draw: a keyframed model is solid as its first frame. |
+| `src/water/` | The water of a track: one level surface at `TrackData::water_level`, over the whole track. `forces`: each truck is four columns, one over each wheel. The part of a column that is under the water is lifted (`BUOYANCY`, some of the weight) and held back (`LINEAR_DRAG`, `QUADRATIC_DRAG`). A truck drives through water and goes along the bottom when it is under: the water slows it and makes its tires lighter. It never stops a truck or puts it back. Its forces are added after `truck::TruckSystems::Drive`. `surface` and `water.wgsl`: the surface, a standard material with its own vertex and fragment shader. A swell rolls downwind and moves the surface up and down on a fine patch round the camera (`PATCH_SIZE`), which the shader moves under the camera on a fixed grid. A flat sheet of 20 m squares covers the rest. The same test on each pixel decides which of the two draws it. With MSAA, triangle edges left a dashed seam. A chop, raised by the wind and more in its gusts, and ripple rings with foam on young crests, bend the normal. Gusts sweep downwind as ruffled patches, and in strong gusts the crests break into whitecaps. `wind`: one direction, gusting as a pure function of time. It raises the chop and carries the spray. Trucks meet the water at its still level: the swell is only the look. It mirrors the colour of the sky (`ClearColor`) at a glancing angle, because there is no sky picture to reflect. `ripples`: the newest `MAX_RIPPLES` rings, which the shader reads from a storage buffer that both materials share. The buffer is written only when a ring starts or ends, and the materials are not sent again. `splash`: a tire at the surface throws spray, mostly up off its tread as a rooster tail and the rest out to the side. A wheel that comes down into the water throws a splash (30 to 50 drops up in a cone, a few wide puffs of mist that hold for half a second, and a flat ring of foam that spreads and fades) and starts a big ripple. A truck leaves a wake of rings. Drops and mist are squares turned to the camera with a soft round picture, drops drawn as a streak, a round head with a tapering tail, as long as the way they go in `EXPOSURE` (0.04 s). They end on the water or on the ground, and inside 6 m of the camera look smaller the nearer they come. `shore`: a map of the water's depth, every 2.5 m, from the ground's heights. The shader draws foam at the water's edge, lines of surf that come in over shallow water, and foam where rings break in the shallows. Near the camera, the shore throws spray when a crest of the swell or a ring comes to it, more where the bank is steep. It repeats the shader's swell and ring rules, and a test checks that their numbers agree. Drops and mist are two pools of `particles`, drawn only, up to `DROP_SLOTS` and `MIST_SLOTS`, with the wind as their air: a steady part and gusts, which `particles.wgsl` works out from its clock. `WaterSettings::splashes` turns off everything thrown up, and leaves the ripples. `ice`: in weather that freezes the water (`weather::Weather::freezes_water`, only snow), a slab of ice 1 m thick with its top at the water level, over the whole track, is solid and drawn, in the ground's collision group so that the wheels treat it as the ground; the liquid surface is hidden and the forces and the splashes stop. The slab is spawned with each race and switched on and off with the weather. The look (`surface`, `ripples`, `splash`) is added only when the app can draw. The values are the game's own: how MTM2's water looked and how its trucks moved in it is not measured. |
+| `src/dirt.rs` | The dirt that trucks throw up as they drive: a tire whose bottom is on the ground (within `TOUCHING`), and not in water, throws clods and puffs of dust (dust only in clear or overcast weather: `weather::Weather::dusty`), more the faster it goes, the more it slides, and the harder it is driven from slow (wheelspin). Clods are dark lumps that tumble, fall and end on the ground; dust rises a little, spreads and fades. Both are the colour of the ground tile under the tire, and are squares turned to the camera that look smaller the nearer the camera they come, in two pools of `particles` (`CLOD_SLOTS`, `DUST_SLOTS`). Drawn only, and only when the app can draw. `DirtSettings::on` turns it off. |
+| `src/footing.rs` | What the ground is under each tire. Each physics step, before `TruckSystems::Drive`, it sets every truck's `truck::GroundGrip` from `TrackData::footing_at` under the bottom of each tire: ice grips `ICE_GRIP` of the tire's grip, firm ground all of it. In weather that freezes the water, a tire over the water and near its level is on ice too. A POD track's footing comes from its texture types (.TTY, `docs/formats/texture_types.md`); the built-in track has none. The value is the game's own: how much MTM2's ice grips is not measured. |
+| `src/weather/` | The weather of a race: clear (the default, as the game was), overcast, fog, rain, storm or snow, in `WeatherSettings`, which F7 steps through in a race, or picked at random as each race begins (`random`). `conditions`: what each is, as plain numbers (sky colour, how bright the sun and the light from all round are, how far can be seen, what falls, the tires' grip, lightning). `sky`: `ClearColor`, the sun's (`environment::Sun`) brightness and colour, and `DistanceFog` and `AmbientLight` on the race camera, so that the showroom keeps its own light. A storm flashes with lightning every few seconds. `fall` and `fall.wgsl`: rain or snow round the camera, one mesh of squares made once and moved on the graphics card by a vertex shader (on the CPU it cost 4 to 6 ms a frame in a debug build): each drop has its place in a box that is laid over the world like tiles, so that the rain keeps to the world as the camera goes through it. Rain is streaks along the way it falls, snow round flakes that sway. `grip`: every truck's grip and handbrake grip are its dry grip (`DryGrip`) times the weather's share, so rain and snow are slippery. `WeatherSettings::time_of_day`: day, dusk (a low sun, orange under a clear sky and grey in any other weather) or night (dim blue moonlight), which F8 steps through; dusk and night light the trucks' lamps. The grip works in any app; the look only when the app can draw. The values are the game's own: how MTM2's weather looked is not measured. |
+| `src/race/` | Laps and checkpoints: `gate` (crossing test), `progress` (the rules, as a pure state machine, `position` in the race, and `standings`), `start` (the countdown: every racer is held on the grid with `truck::Held` until GO, counted in ticks of the race clock, and again on a restart), `results` (once the player has finished, every truck's place, time and best lap, kept up to date; the key for `keys::Control::RaceAgain` restarts), `systems` (progress tracking, the starting grid, C and Backspace keys, and the `BackToCheckpoint` message that C sends), `markers` (gate poles and banners), `hud` (race readout, with the player's position when there are others), `compass` (a dial at the top of the screen whose needle points to the player's next checkpoint, turned against the heading of the drawn truck). |
+| `src/opponents.rs` | The computer's drivers: one `ComputerDriver` on every truck that isn't the player's, which writes that truck's `TruckInput` as the keys write the player's. `plan` is the rule, a pure function of the course and the truck's state. A driver keeps to the road on its own line, near the middle, steering at a point of that line a little way up the course rather than cutting corners. A driver catches up mostly on the straights: the further down the order it is, and the further behind the leader, the more power its truck's engine is given (`CHASING_POWER`, written to that truck's `TruckConfig`), and a little more it asks of its tires in the bends, the later it brakes, and the more of the road it cuts corners across, never leaving it (`chasing`, `Style`), and one that comes up behind another truck swerves round it rather than slowing: it moves its line aside (`passing_line`) and follows that line closely until it is by, and only boxed in holds station a truck's length behind (`keeping_off`) and presses. A driver that gets nowhere for a few seconds, or drives past its next checkpoint, asks the race to put it back. |
+| `src/camera/` | The chase camera, and `views`: V (`keys::Control::ChangeView`) changes to the cockpit, fixed to the drawn truck near the front of its body and under its roof, with the player's truck hidden; the look keys and the right stick swing the chase camera round the truck, or turn the cockpit's eye, to the left, the right or behind. A view is laid over what the rig placed, in `CameraSystems::Place`, so that what follows the camera sees it. `CameraView` says which view. `dashboard`: in the cockpit, the player's truck's `truck::Dashboard` as UI over the 3D view, stretched over the window and not lit by the scene: the picture for the way the player looks, and looking ahead the steering wheel picture for the steering and the dials' needles; with a dashboard the cockpit's eye is tipped down so that the road is in its window. `chase`, `rig` and `spring` are the camera itself, which knows nothing of the game; `mod.rs` is the game side of it, and the only code that knows both: spawns the camera for a race, tells it each frame where the truck is drawn and how fast its body is going (after the truck has been placed for the frame), and tells it the height of the ground under where the eye wants to be. `CameraSettings` holds antialiasing (MSAA), bloom (high dynamic range, so that the trucks' lamps glow) and the rig's numbers. |
+| `src/base_game.rs` | Not a slice: the base game's archives on disk (`--base-game=FOLDER`, else the `Shared` and language folders the player chose, else `base/`), which tracks and trucks borrow files from, for `track` and `truck`. Reads each archive's directory when it opens, and a whole archive only when a file in it is first asked for. The file-system side of `pod::BaseArchives`. `main.rs` opens it and inserts it as a resource; `front_end` hands it to the loaders. |
+| `src/hd_texture.rs` | Not a slice: decodes the PNG and TGA textures of MTM2 Community Patch 3 to RGBA, for `track` and `truck`, which `pod` finds but cannot decode. |
+| `src/particles/` | Not a slice: a shared helper, for `dirt` and `water`. A pool of particles is one mesh of squares, one for each slot. The CPU writes a slot once, when a particle is thrown (where it starts, how fast it goes, when it was thrown and when it goes); `particles.wgsl` moves, turns, sizes and fades it on the graphics card, from an exact answer for gravity and drag towards the pool's air. The air (`Air`) is given when the pool is made, and gusts as a function of the shader's clock, so that nothing is sent each frame. When it comes down on the ground or water is found on the CPU as it is thrown, by following its path. As one entity each, the particles cost the CPU a transform, a cull, an extraction and a sort each, every frame. Only when the app can draw. |
+| `src/mipmaps.rs` | Not a slice: a shared helper. Makes a texture's smaller copies on the CPU, in linear light, for `track` (ground and scenery tiles) and `truck` (paintwork), and plainly averaged for a truck's normal maps. |
+| `src/frame_pacing.rs` | Not a slice: steps the game clock evenly under vsync, by the refresh interval (the mean length of the last sixty frames, from which lateness cancels out) instead of by each frame's own jittery measurement. A missed refresh is made up gently, a real stall is passed on whole. `Pacer` is the rule, as a pure function of frame lengths. Added by `main.rs`, and only with vsync; tests drive time themselves. |
+| `src/environment.rs` | Sky colour and sun of a clear day (`SKY`, `SUNLIGHT`), which `weather` changes. `EnvironmentSettings` holds how many cascades the sun's shadows have and how far they reach. |
+| `src/display.rs` | The window. `DisplaySettings` holds fullscreen, borderless or windowed, and vsync (off, on or strict). `main.rs` opens the window from it, and a change after that goes to the window and to `frame_pacing::FramePacing`, which paces the clock only while vsync is on. |
+| `src/controls_help.rs` | On-screen key reference, from `keys::KeyBindings`. `ControlsHelpSettings` hides it. |
+| `src/diagnostics.rs` | Off unless asked for. `--log-fps` prints once a second: frame rate, frame time, the shortest, median and longest frame and how many ran late, how many meshes got past culling, and how evenly the view turned from frame to frame. `--autopilot` drives the course by pressing the player's keys, so that problems that only show while driving can be reproduced and measured. It is a diagnostic, not an opponent. |
+| `src/physics_debug.rs` | F1 toggle for Rapier's collider wireframes. |
+| `src/graphics_debug.rs` | F2 toggle for a panel of the graphics settings that cost frame time (antialiasing, shadow cascades and distance, anisotropic filtering), each stepped by a key while the panel is open, with the frame time underneath. It only writes `CameraSettings`, `EnvironmentSettings` and `TrackSettings`; each slice carries a change to what it has spawned. |
+| `src/front_end.rs` | The game side of the front end, and the only code that knows both the `ui` module and the slices: lists the archives in `trucks/` and `tracks/` and the trucks and tracks in the base game's archives (`base_game`, with ids `base:<archive>#<file>`), puts the highlighted truck on the turntable (`truck::TruckDisplay`) and paints the highlighted track's map (`track::map_image`), turns the garage's dials into `truck::TruckSetup`, and on GO hands the choices to the slices and enters `GameState::Racing`. Esc in a race comes back. Remembers choices in a `store::Store`. Asks for the base game's `Shared` folder and one language's folder when nothing says where they are (`FrontEndSettings::ask_for_base_game`), in the `ui` module's folder browser, and from the options screen's two FILES lines; each folder chosen is kept in the store (`front_end::BaseGameChoice`), the two are opened as the new `BaseGame`, and the lists are made again. The options screen: `OPTIONS` lists each line and the value of which slice's settings resource it sets (`display`, `camera`, `environment`, `track`, `controls_help`, `water`, `dirt`, `backdrop`, `weather`, `truck::SpeedUnits`, `truck::TruckLooksSettings`, and `keys::KeyBindings`, whose lines wait for a key and are on a CONTROLS page of their own, in sections). A change goes to that resource and to the store at once. Added by `main.rs` only when the command line names nothing to race. |
+| `src/keys.rs` | Not a slice: which key does each thing in a race (`Control`, `KeyBindings`), which every slice asks rather than naming a key, and the keys that may be bound (`BINDABLE`). The arrow keys always drive as well; Esc is not bindable. The front end's CONTROLS page binds them. |
+| `src/sky.rs` | The sky: a picture on a dome round the camera, behind the backdrop, as large as fits inside the far plane, unlit and unfogged. The track's own sky (`TrackData::skies`, from the `.LVL`'s lines 11 and 12) in clear weather by day, the base game's cloudy one when overcast by day, its dusk one at a clear dusk, its night one at night, and none at an overcast dusk or in fog, rain, storms and snow. How MTM2 laid the picture on the sky is open: see `docs/formats/level.md`. Drawn only, and only when the app can draw. |
+| `src/collision_groups.rs` | Not a slice: the names of what may touch what. The ground is in `GROUND` and a truck's wheel colliders in `WHEELS`, which touch everything but the ground; `track` and `truck` both use it and may not use each other. |
+| `src/game_state.rs` | Not a slice: `GameState { FrontEnd, Racing }`, which every slice may use. Everything a race is made of is spawned on `OnEnter(GameState::Racing)` with `DespawnOnExit(GameState::Racing)`. |
+| `src/pod/` | Not a slice: reads Monster Truck Madness 2 archives and the files in them, one file per file format. Knows nothing of the game, uses nothing but `std`, and keeps MTM2's own units and axes. `track/pod_import.rs`, `truck/pod_import.rs` and `base_game.rs` are the only code that may use it. |
+| `src/ui/` | Not a slice: the front end's screens and showroom, which know nothing of the game and show whatever plain data they are handed. Only `front_end.rs` may use it. |
+| `src/store.rs` | Not a slice: what the game remembers between runs, by table and key, in one file on redb. No Bevy in it and no redb in its API. Only `front_end.rs` may use it. |
+
+`src/lib.rs` only declares slices, and `src/main.rs` only configures the window and
+physics and lists one plugin per slice. Neither holds game logic. `tests/` has one
+integration test file per slice, named after it, and the modules that know nothing of the
+game have theirs beside them (`store.rs`, `camera_smoothness.rs`, `pod_real_tracks.rs`,
+`pod_real_trucks.rs`). A slice whose behaviour is physics (`truck`, `race`, `opponents`,
+`camera`) has none: see "Tests" in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Everything is one crate. `pod`, `ui`, `store` and `camera/chase` were once crates of a
+workspace, which is why each keeps a hard edge: its submodules are private, its public
+names are few, and nothing in it names the game. Keep those edges. What a module may use
+is in the table above and in "Dependencies point one way" below; a module that knows
+nothing of the game must never learn about it, whatever a compiler now allows.
+
+## Slice rules
+
+- **One plugin per slice**, a `pub struct FooPlugin` in the slice's root, which
+  registers every system of the slice. `main.rs` never registers a slice's systems
+  itself.
+- A slice starts as a single file. Turn it into a folder when it grows past one
+  concern, with `mod.rs` holding the module doc, the plugin, the slice's marker
+  component and the `pub use` re-exports, and one file per concern beside it.
+- **The slice root is its public API.** Submodules are private (`mod`, not
+  `pub mod`), and whatever other slices may use is re-exported from the root. Systems
+  and helpers are `pub(super)`. Other slices write `truck::Truck`, never
+  `truck::spawn::...`.
+- Keep the public API small: mostly components and resources that other slices
+  query, plus the plugin. Prefer communicating through components, resources and
+  events over calling another slice's functions.
+- **Dependencies point one way.** `scenery` uses `track`. `backdrop` uses `track`, `camera` and `environment`, and nothing but `front_end`'s options depends on it. `water` uses `track`, `truck` and `weather` (whether the water is frozen), and nothing but `front_end`'s options depends on it. `dirt` uses `track`, `truck` and `weather` (whether the ground is dry enough for dust), and nothing but `front_end`'s options depends on it. `weather` uses `environment` (its sun), `camera`, `track` and `truck` (it turns on `truck::TruckLamps` at dusk and at night), and nothing but `dirt`, `water`, `footing`, `sky` and `front_end`'s options depends on it. `sky` uses `track`, `camera` and `weather`, and nothing depends on it. `footing` uses `track`, `truck` and `weather` (whether the water is frozen), and nothing depends on it. `race` and `camera` each use `truck` and `track`.
+  `opponents` uses `truck`, `track` and `race`, and nothing depends on it. `front_end` uses `truck`, `track` and `race`, and the
+  settings resources of `camera`, `environment`, `display`, `controls_help`, `water`,
+  `dirt`, `backdrop` and `weather`, and nothing
+  depends on it. `graphics_debug` uses `camera`, `environment` and `track`, and nothing
+  depends on it. `truck` and `track` must not depend on any other
+  slice. To move a truck from another slice, write a `truck::PlaceTruck` message from
+  a system ordered `.before(TruckSystems::Place)`. If two slices need each other, the
+  shared piece is in the wrong place: move it to the slice that owns the data.
+- Do not create a `common` or `utils` module for the sake of it. Duplicate a
+  three-line helper rather than couple two slices. Extract shared code only when a
+  third user appears, and name the module after what it is.
+- A slice must work in a headless app (see the tests), so it must not assume a
+  window, a renderer or another slice's plugin unless it declares that dependency
+  in its module doc.
+
+The same idea applies to `src/pod/`: one file per file format, each owning its
+structs, parser and tests.
+
+
+## Content pipeline
+
+```
+.POD  ──►  pod module (parse)  ──►  track/pod_import.rs (convert)  ──►  TrackData  ──►  game
+```
+
+- **`src/pod/`** reads the archive and the files in it into plain Rust structs. It uses
+  nothing but `std`, does no file system access, never panics on bad input, and keeps
+  MTM2's own units and axes so that it stays a faithful description of the files.
+- **`src/track/pod_import.rs`** is the only place that converts MTM2's conventions to
+  the game's: feet to metres, a corner origin to a centred one, a flipped Z axis, and
+  headings to yaw. Nothing downstream knows a track came from a POD.
+- Conversion happens in memory when the track loads. An on-disk content pack in the
+  project's own formats (glTF, PNG, RON) remains an option for later, for hand-made
+  content or faster loading. Do not build it until it is needed.
+- Anything a POD expresses that `TrackData` cannot hold yet is skipped for now. When
+  adding it, extend `TrackData`; do not make gameplay reach into `pod` types.
+- **`src/ui/`** is the front end's screens and showroom. It uses Bevy alone and knows
+  nothing of the game: it shows the plain data it is handed (`Catalogue`, `Dials`,
+  `Choices`, `Settings`, `TrackPreview`) and says what the player did (`TruckHighlighted`,
+  `TrackHighlighted`, `GoPressed`). Its rules are a pure state machine (`model`), its look
+  is one `Theme`. **`src/store.rs`** keeps text, numbers and blobs by key in one file, on
+  redb, with no redb type in its API and no Bevy in it. Neither may learn about the game;
+  `src/front_end.rs` translates. Always reach them by their full path (`crate::ui::`,
+  `ui::Theme`), so that no bare `use ui::` is mistaken for Bevy's.
+- **`src/camera/chase.rs`**, with `rig` and `spring` beside it, is the chase camera
+  itself. It uses Bevy alone and knows nothing of trucks, tracks, Rapier or `GameState`:
+  it is handed a `Target` (position, velocity, facing) each frame and places the camera.
+  Its rules are a pure state machine (`rig`) over an exactly solved spring (`spring`), and
+  `tests/camera_smoothness.rs` drives them along scripted paths, at even and uneven frame
+  lengths, with a budget for every figure. `src/camera/mod.rs` translates.
+- **Trucks go the same way**: `pod::Truck` to `src/truck/pod_import.rs` to `TruckData`,
+  which `truck/spawn.rs` builds the truck from. The built-in truck is one `TruckData` and a
+  POD truck another, chosen by inserting `truck::ChosenTruck` before the plugin. The truck
+  slice may not use the track slice, so the few lines that turn a model into a mesh are
+  written out in both importers.
+
+## Gameplay is built against data
+
+Tracks come from two places, the built-in generator and PODs, and gameplay must not
+be able to tell them apart:
+
+- A track is plain data, `track::TrackData` (heights, course, checkpoint gates, start
+  position), which systems turn into entities. The built-in track is one instance of
+  that data, made by `track/generator.rs`, and a POD track converted by
+  `track/pod_import.rs` is another. Keep `TrackData` free of entities, handles and
+  other engine types.
+- Nothing outside `track/generator.rs` may know that the built-in track is
+  procedural. Ask the `Track` resource, for example `track.heights.height_at(x, z)`.
+- Checkpoint and lap logic depends only on that data and on truck positions.
+- MTM2 checkpoints are gates that must be crossed in order. Model them that way
+  rather than as "reach this point" spheres.

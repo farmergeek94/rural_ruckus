@@ -1,0 +1,179 @@
+//! The chase camera, which keeps the truck in the middle of the picture, and the other
+//! views: the cockpit, and looking aside or behind (`views`), with the truck's dashboard
+//! in the cockpit (`dashboard`).
+//!
+//! This is the game's side of the camera, and the only part of it that knows the slices.
+//! `chase` (with `rig` and `spring`) is the camera by itself: fastened to nothing, it
+//! follows whatever it is told about smoothly and knows nothing of trucks, tracks, Rapier
+//! or `GameState`. Here it is told about the truck each frame, where the truck is drawn
+//! and how fast its body is going, and about the ground under where the eye wants to be,
+//! which it then keeps clear of.
+//!
+//! Uses the `truck` slice for the truck and the `track` slice for the ground.
+
+mod chase;
+mod dashboard;
+mod rig;
+mod spring;
+mod views;
+
+use bevy::camera::Hdr;
+use bevy::post_process::bloom::Bloom;
+use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
+
+use crate::game_state::GameState;
+use crate::track::Track;
+use crate::truck::{Player, TruckSystems, TruckVisual};
+
+pub use chase::{CameraRigPlugin, CameraSystems, ChaseCamera};
+pub use rig::{Pose, Rig, RigConfig, Target};
+pub use spring::{follow, follow_angle, wrap};
+pub use views::CameraView;
+
+pub struct ChaseCameraPlugin;
+
+impl Plugin for ChaseCameraPlugin {
+    fn build(&self, app: &mut App) {
+        // `TrackPlugin` and `TruckPlugin`, which this slice needs, have made sure of the state.
+        if !app.is_plugin_added::<CameraRigPlugin>() {
+            app.add_plugins(CameraRigPlugin);
+        }
+        app.init_resource::<CameraSettings>()
+            .init_resource::<CameraView>()
+            .init_resource::<views::Look>()
+            .init_resource::<crate::keys::KeyBindings>()
+            .add_systems(
+                OnEnter(GameState::Racing),
+                (spawn_camera, views::reset_view, dashboard::spawn_dashboard),
+            )
+            .add_systems(
+                Update,
+                (
+                    // After the truck has been placed for this frame, or the camera would
+                    // follow where it was drawn a frame ago.
+                    follow_truck
+                        .after(TruckSystems::PlaceVisuals)
+                        .before(CameraSystems::Want),
+                    tell_of_the_ground
+                        .after(CameraSystems::Want)
+                        .before(CameraSystems::Place),
+                    apply_settings.run_if(resource_changed::<CameraSettings>),
+                    (
+                        views::change_view.before(CameraSystems::Want),
+                        // Part of placing the camera, so that what follows it sees the view.
+                        views::place_view
+                            .in_set(CameraSystems::Place)
+                            .after(chase::place),
+                        dashboard::show_dashboard.after(CameraSystems::Place),
+                    )
+                        .run_if(in_state(GameState::Racing)),
+                ),
+            );
+    }
+}
+
+/// Choices about how the race is drawn. Insert it before adding `ChaseCameraPlugin`, or
+/// change it while racing.
+#[derive(Resource, Clone, Debug, PartialEq)]
+pub struct CameraSettings {
+    /// Smooths jagged edges by working out four samples for every pixel (MSAA). The cost
+    /// grows with the size of the screen, and is felt most on graphics built into the
+    /// processor.
+    pub antialiasing: bool,
+    /// Draws in high dynamic range, so that what is brighter than white (the trucks'
+    /// lamps) spills a glow round it (bloom). Costs a few passes over the screen a frame.
+    pub bloom: bool,
+    /// Where the camera sits and how tightly it follows. Each number says what it does.
+    pub rig: RigConfig,
+}
+
+impl Default for CameraSettings {
+    fn default() -> Self {
+        Self {
+            antialiasing: true,
+            bloom: true,
+            rig: RigConfig::default(),
+        }
+    }
+}
+
+impl CameraSettings {
+    /// Four samples or one: the two counts every graphics card supports.
+    fn msaa(&self) -> Msaa {
+        if self.antialiasing {
+            Msaa::Sample4
+        } else {
+            Msaa::Off
+        }
+    }
+}
+
+fn spawn_camera(mut commands: Commands, settings: Res<CameraSettings>) {
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            settings.msaa(),
+            DespawnOnExit(GameState::Racing),
+            // Until the truck has been seen, which is before anything is drawn.
+            Transform::from_xyz(0.0, 8.0, 14.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ChaseCamera::new(settings.rig.clone()),
+        ))
+        .id();
+    if settings.bloom {
+        commands.entity(camera).insert(glow());
+    }
+}
+
+/// The race camera's bloom: a soft glow round only what is brighter than white. Stronger
+/// makes the whole picture hazy.
+fn glow() -> Bloom {
+    Bloom {
+        intensity: 0.2,
+        ..Bloom::NATURAL
+    }
+}
+
+fn apply_settings(
+    mut commands: Commands,
+    settings: Res<CameraSettings>,
+    mut cameras: Query<(Entity, &mut Msaa, &mut ChaseCamera, Has<Bloom>)>,
+) {
+    for (entity, mut msaa, mut camera, bloom) in &mut cameras {
+        if settings.bloom && !bloom {
+            commands.entity(entity).insert(glow());
+        } else if !settings.bloom && bloom {
+            commands.entity(entity).remove::<(Bloom, Hdr)>();
+        }
+        msaa.set_if_neq(settings.msaa());
+        if camera.config != settings.rig {
+            camera.config = settings.rig.clone();
+        }
+    }
+}
+
+/// The player's truck: where it is drawn, which moves smoothly from frame to frame, and
+/// how fast its body is really going, which a difference of drawn positions wouldn't say.
+fn follow_truck(
+    player: Single<(Entity, &Velocity), Player>,
+    visuals: Query<(&TruckVisual, &Transform)>,
+    mut camera: Single<&mut ChaseCamera>,
+) {
+    let (player, velocity) = *player;
+    // A handful of trucks at most.
+    let Some((_, transform)) = visuals.iter().find(|(visual, _)| visual.truck == player) else {
+        return;
+    };
+    let velocity = velocity.linear;
+    camera.target = Some(Target {
+        position: transform.translation,
+        velocity,
+        facing: transform.forward().as_vec3(),
+    });
+}
+
+/// So that hills don't get between the camera and the truck.
+fn tell_of_the_ground(track: Res<Track>, mut camera: Single<&mut ChaseCamera>) {
+    let eye = camera.wanted_eye();
+    camera.ground = Some(track.heights.height_at(eye.x, eye.z));
+}
