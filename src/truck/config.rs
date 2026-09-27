@@ -132,6 +132,33 @@ const PLANTED_LEVER: f32 = 0.0;
 /// And at "tippy": where the tire meets the ground, where it leans the truck most.
 const TIPPY_LEVER: f32 = 1.0;
 
+/// The places a computer's truck may have each dial at: the garage's five, so that it is
+/// set up as a player could set it.
+const DIAL_PLACES: [f32; 5] = [-1.0, -0.5, 0.0, 0.5, 1.0];
+
+impl TruckSetup {
+    /// A setup that `seed` picks, each dial at one of `DIAL_PLACES`, every place as likely
+    /// as another. For the computer's trucks, so that no two race alike.
+    pub fn random(seed: u64) -> Self {
+        // Stirred (splitmix64), so that seeds close together pick different setups.
+        let mut state = seed;
+        let mut place = || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut mixed = state;
+            mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            mixed ^= mixed >> 31;
+            DIAL_PLACES[(mixed % DIAL_PLACES.len() as u64) as usize]
+        };
+        Self {
+            suspension: place(),
+            gearing: place(),
+            rear_steering: place(),
+            grip: place(),
+        }
+    }
+}
+
 /// From `centre` towards `low` as `dial` goes to -1, and towards `high` as it goes to 1.
 fn dial_between(dial: f32, low: f32, centre: f32, high: f32) -> f32 {
     let dial = dial.clamp(-1.0, 1.0);
@@ -345,5 +372,23 @@ mod tests {
             assert_eq!(set_up(dial).grip, config.grip);
             assert_eq!(set_up(dial).handbrake_grip, config.handbrake_grip);
         }
+    }
+
+    #[test]
+    fn a_random_setup_puts_every_dial_where_the_garage_can() {
+        let setups: Vec<_> = (0..200).map(TruckSetup::random).collect();
+        for setup in &setups {
+            for dial in [setup.suspension, setup.gearing, setup.rear_steering, setup.grip] {
+                assert!(DIAL_PLACES.contains(&dial));
+            }
+        }
+        // Every place turns up, on every dial, and the same seed picks the same setup.
+        for place in DIAL_PLACES {
+            assert!(setups.iter().any(|setup| setup.suspension == place));
+            assert!(setups.iter().any(|setup| setup.gearing == place));
+            assert!(setups.iter().any(|setup| setup.rear_steering == place));
+            assert!(setups.iter().any(|setup| setup.grip == place));
+        }
+        assert_eq!(TruckSetup::random(7), TruckSetup::random(7));
     }
 }

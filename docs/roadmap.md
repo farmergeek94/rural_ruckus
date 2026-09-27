@@ -237,7 +237,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Feature | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Choose truck and track, with previews | Done | | |
-| Garage: set up the truck | Done | | The dials are the game's own. |
+| Garage: set up the truck | Done | | The dials are the game's own. The computer's trucks are set up at random for each race. |
 | Laps and number of opponents | Done | | |
 | Options screen, remembered between runs | Done | | |
 | Keyboard and gamepad | Done | | |
