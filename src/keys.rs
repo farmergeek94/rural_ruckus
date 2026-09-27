@@ -18,7 +18,6 @@ pub enum Control {
     Handbrake,
     FlipUpright,
     BackToCheckpoint,
-    RestartRace,
     /// Once the player has finished: race again.
     RaceAgain,
     ChangeView,
@@ -33,7 +32,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the options screen lists them.
-    pub const ALL: [Control; 17] = [
+    pub const ALL: [Control; 16] = [
         Control::Throttle,
         Control::Reverse,
         Control::SteerLeft,
@@ -41,7 +40,6 @@ impl Control {
         Control::Handbrake,
         Control::FlipUpright,
         Control::BackToCheckpoint,
-        Control::RestartRace,
         Control::RaceAgain,
         Control::ChangeView,
         Control::LookLeft,
@@ -70,7 +68,6 @@ impl Control {
             Control::Handbrake => "Handbrake",
             Control::FlipUpright => "Flip upright",
             Control::BackToCheckpoint => "Back to checkpoint",
-            Control::RestartRace => "Restart race",
             Control::RaceAgain => "Race again (after the finish)",
             Control::ChangeView => "Change view",
             Control::LookLeft => "Look left",
@@ -93,7 +90,6 @@ impl Control {
             Control::Handbrake => KeyCode::Space,
             Control::FlipUpright => KeyCode::KeyR,
             Control::BackToCheckpoint => KeyCode::KeyC,
-            Control::RestartRace => KeyCode::Backspace,
             Control::RaceAgain => KeyCode::Enter,
             Control::ChangeView => KeyCode::KeyV,
             Control::LookLeft => KeyCode::KeyQ,

@@ -4,8 +4,8 @@
 use bevy::prelude::*;
 
 use super::pause::running;
-use super::start::count_down;
-use super::{RaceClock, RacePause, RaceProgress, RaceSettings, RaceStart, Racer};
+use super::{RaceClock, RacePause, RaceSettings, Racer};
+use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
 use crate::track::{Track, TrackData, yaw_direction};
 use crate::truck::{PlaceTruck, PlayerTruck, Truck};
@@ -136,34 +136,18 @@ pub(super) fn back_to_checkpoint(
     }
 }
 
-/// Backspace abandons the race, and every truck starts again from its place on the grid,
-/// with a new countdown. Once the player has finished, so does Enter: race again.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the keys, the clock and the whole race"
-)]
-pub(super) fn restart_race(
+/// Once the player has finished, Enter races again: the whole race is built afresh, as the
+/// pause dialog's restart does, by leaving `GameState::Racing` and entering it again.
+pub(super) fn race_again(
     keys: Res<ButtonInput<KeyCode>>,
     bindings: Res<KeyBindings>,
-    track: Res<Track>,
-    clock: Res<RaceClock>,
-    time: Res<Time<Fixed>>,
-    mut start: ResMut<RaceStart>,
-    mut racers: Query<(Entity, &mut Racer, Has<PlayerTruck>)>,
-    mut place: MessageWriter<PlaceTruck>,
+    racers: Query<&Racer, With<PlayerTruck>>,
+    mut game: ResMut<NextState<GameState>>,
 ) {
-    let finished = racers
-        .iter()
-        .any(|(_, racer, player)| player && racer.progress.finished.is_some());
-    let again = finished && bindings.just_pressed(&keys, Control::RaceAgain);
-    if !bindings.just_pressed(&keys, Control::RestartRace) && !again {
-        return;
-    }
-    count_down(&mut start, clock.tick, time.timestep().as_secs_f32());
-    for (truck, mut racer, _) in &mut racers {
-        racer.progress = RaceProgress::default();
-        racer.last_position = None;
-        place.write(on_grid(truck, racer.grid_place, &track));
+    let finished = racers.iter().any(|racer| racer.progress.finished.is_some());
+    if finished && bindings.just_pressed(&keys, Control::RaceAgain) {
+        // `set`, not `set_if_neq`: leaving and entering the same state is the point.
+        game.set(GameState::Racing);
     }
 }
 

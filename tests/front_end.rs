@@ -17,7 +17,7 @@ use monster_truck_rural_ruckus::environment::{EnvironmentPlugin, EnvironmentSett
 use monster_truck_rural_ruckus::front_end::{BaseGameChoice, FrontEndPlugin, FrontEndSettings};
 use monster_truck_rural_ruckus::game_state::GameState;
 use monster_truck_rural_ruckus::keys::{Control, KeyBindings};
-use monster_truck_rural_ruckus::race::{RaceClock, RacePause, RacePlugin, RaceSettings};
+use monster_truck_rural_ruckus::race::{RaceClock, RacePause, RacePlugin, RaceSettings, Racer};
 use monster_truck_rural_ruckus::scenery::SceneryPlugin;
 use monster_truck_rural_ruckus::store::Store;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, TrackSettings, builtin_track};
@@ -255,7 +255,7 @@ fn cancel_the_race(app: &mut App) {
 }
 
 /// Restarting from the pause dialog builds the whole race again: new trucks, a new clock,
-/// and nothing of the old race left over or doubled.
+/// and nothing of the old race left over or doubled. So does Enter after the finish.
 #[test]
 fn restarting_builds_the_whole_race_again() {
     let mut app = headless_app(nowhere(), None);
@@ -289,6 +289,25 @@ fn restarting_builds_the_whole_race_again() {
     let new_trucks = trucks(&mut app);
     assert_eq!(new_trucks.len(), old_trucks.len());
     assert!(new_trucks.iter().all(|truck| !old_trucks.contains(truck)));
+    assert_eq!(entities(&mut app), before);
+
+    // Enter does nothing until the player has finished.
+    for _ in 0..30 {
+        app.update();
+    }
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(trucks(&mut app), new_trucks);
+    app.world_mut()
+        .query_filtered::<&mut Racer, With<PlayerTruck>>()
+        .single_mut(app.world_mut())
+        .expect("the player's racer")
+        .progress
+        .finished = Some(100);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.world().resource::<RaceClock>().tick < 5);
+    let third_trucks = trucks(&mut app);
+    assert_eq!(third_trucks.len(), new_trucks.len());
+    assert!(third_trucks.iter().all(|truck| !new_trucks.contains(truck)));
     assert_eq!(entities(&mut app), before);
 }
 
