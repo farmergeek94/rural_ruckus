@@ -3,7 +3,8 @@
 //! as any truck on show is (see `display`).
 //!
 //! The player's truck comes from the `ChosenTruck` resource, and how it is set up from
-//! `TruckSetup`. The others come from `ComputerTrucks`, each with its own standard setup.
+//! `TruckSetup`. The others come from `ComputerTrucks`, each set up at random for
+//! the race (`TruckSetup::random`).
 
 use std::f32::consts::FRAC_PI_2;
 
@@ -67,9 +68,16 @@ pub(super) fn spawn_trucks(
         .entity(player)
         .insert((Name::new("Truck"), PlayerTruck));
 
+    // Only has to differ from one race to the next.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos() as u64);
     for (index, data) in computer_trucks.0.iter().enumerate() {
         let number = index + 1;
-        let truck = spawn_truck(&mut commands, data, data.config.clone(), number, &mut paint);
+        let setup = TruckSetup::random(seed.wrapping_add(number as u64 * 0x1_0000));
+        debug!("Computer truck {number}: {setup:?}");
+        let config = data.config.with_setup(&setup);
+        let truck = spawn_truck(&mut commands, data, config, number, &mut paint);
         // Only the computer's trucks are kept from tipping in a sharp turn (see `TipGuard`).
         commands.entity(truck).insert((
             Name::new(format!("Computer truck {number}")),
