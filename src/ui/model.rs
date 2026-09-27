@@ -91,6 +91,8 @@ pub enum Action {
     /// screen, the next value of the highlighted setting, round and round.
     Accept,
     Go,
+    /// Close the game.
+    Exit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,6 +114,7 @@ pub enum Happened {
     FolderChosen,
     FolderLeft,
     Go,
+    Exit,
 }
 
 /// A list the player walks up and down. `available[i]` is false for an entry that is
@@ -404,6 +407,7 @@ impl FrontEnd {
             }
             Action::StopListening => self.listening = false,
             Action::OpenSetting(setting) => self.open_setting(setting, &mut happened),
+            Action::Exit => happened.push(Happened::Exit),
             // Browsing, which is dealt with above.
             Action::PickFolder(_)
             | Action::FolderUp
@@ -754,6 +758,14 @@ mod tests {
             model.apply(Action::Up);
         }
         assert_eq!(model.dial_in_hand, 0);
+    }
+
+    #[test]
+    fn exit_needs_nothing_and_is_not_offered_while_browsing() {
+        assert_eq!(front_end(0, 0).apply(Action::Exit), [Happened::Exit]);
+        let mut model = front_end(1, 1);
+        model.browsing = Some(Browsing::default());
+        assert_eq!(model.apply(Action::Exit), []);
     }
 
     #[test]

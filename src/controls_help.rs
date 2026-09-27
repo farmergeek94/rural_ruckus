@@ -46,7 +46,7 @@ fn reference(bindings: &KeyBindings) -> String {
             .skip(4)
             .map(|control| format!("{} {}", key(control), control.name().to_lowercase())),
     );
-    parts.push("Esc front end".into());
+    parts.push("Esc pause".into());
     parts.join("   ")
 }
 

@@ -3,8 +3,9 @@
 
 use bevy::prelude::*;
 
+use super::pause::running;
 use super::start::count_down;
-use super::{RaceClock, RaceProgress, RaceSettings, RaceStart, Racer};
+use super::{RaceClock, RacePause, RaceProgress, RaceSettings, RaceStart, Racer};
 use crate::keys::{Control, KeyBindings};
 use crate::track::{Track, TrackData, yaw_direction};
 use crate::truck::{PlaceTruck, PlayerTruck, Truck};
@@ -89,9 +90,11 @@ pub(super) fn back_to_checkpoint(
     mut racers: Query<&mut Racer>,
     trucks: Query<(Entity, &Transform), With<Truck>>,
     mut place: MessageWriter<PlaceTruck>,
+    pause: Option<Res<State<RacePause>>>,
 ) {
     let mut asked: Vec<Entity> = requests.read().map(|request| request.truck).collect();
-    if bindings.just_pressed(&keys, Control::BackToCheckpoint) {
+    // Another slice's requests are kept, but the key does nothing while paused.
+    if running(pause) && bindings.just_pressed(&keys, Control::BackToCheckpoint) {
         asked.extend(&player);
     }
     asked.sort();

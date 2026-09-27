@@ -3,7 +3,7 @@
 //! each thing to any key on the front end's options screen.
 //!
 //! The arrow keys always drive as well, whatever the bindings: they are what a player
-//! reaches for first. Esc is not bindable: it leaves the race, and on the options screen it
+//! reaches for first. Esc is not bindable: it pauses the race, and on the options screen it
 //! stops waiting for a key.
 
 use bevy::prelude::*;

@@ -12,7 +12,7 @@
 //! | `TrackPreview` | in | A picture of the highlighted track. |
 //! | `Turntable` | in | On the entity the module spawns and turns. Parent to it whatever is to be shown. |
 //! | `FolderBrowser` | in and out | A folder the player is browsing, shown in place of the screens. The module writes which subfolder is highlighted. |
-//! | `TruckHighlighted`, `TrackHighlighted`, `GoPressed` | out | What the player just did. |
+//! | `TruckHighlighted`, `TrackHighlighted`, `GoPressed`, `ExitPressed` | out | What the player just did. |
 //! | `SettingOpened`, `FolderEntered`, `FolderUp`, `FolderChosen`, `FolderLeft` | out | The same, on a line that opens something and in a folder being browsed. The game changes `FolderBrowser` to suit. |
 //! | `PlayerDid` | in | An `Action`, from the module's own input or from anyone else. |
 //! | `FrontEndOpen` | in | The screens and the showroom exist while it is `Open`. |
@@ -67,6 +67,7 @@ impl Plugin for UiPlugin {
             .add_message::<TruckHighlighted>()
             .add_message::<TrackHighlighted>()
             .add_message::<GoPressed>()
+            .add_message::<ExitPressed>()
             .add_message::<SettingOpened>()
             .add_message::<FolderEntered>()
             .add_message::<FolderUp>()
@@ -264,6 +265,10 @@ pub struct TrackHighlighted(pub usize);
 #[derive(Message, Clone, Copy, Debug)]
 pub struct GoPressed;
 
+/// EXIT was pressed. The module does not close anything itself.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct ExitPressed;
+
 /// The setting at this index of `Settings`, one that `opens`, was opened.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct SettingOpened(pub usize);
@@ -412,6 +417,9 @@ fn apply_actions(
                 Happened::Go => {
                     go.write(GoPressed);
                 }
+                Happened::Exit => {
+                    browsed.exit.write(ExitPressed);
+                }
                 Happened::SettingOpened(index) => {
                     browsed.opened.write(SettingOpened(index));
                 }
@@ -438,7 +446,7 @@ fn apply_actions(
     }
 }
 
-/// What `apply_actions` says about opening a line and browsing a folder.
+/// What `apply_actions` says about opening a line, browsing a folder, and exiting.
 #[derive(bevy::ecs::system::SystemParam)]
 struct Browsed<'w> {
     opened: MessageWriter<'w, SettingOpened>,
@@ -446,6 +454,7 @@ struct Browsed<'w> {
     up: MessageWriter<'w, FolderUp>,
     chosen: MessageWriter<'w, FolderChosen>,
     left: MessageWriter<'w, FolderLeft>,
+    exit: MessageWriter<'w, ExitPressed>,
 }
 
 #[cfg(test)]

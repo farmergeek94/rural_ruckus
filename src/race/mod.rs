@@ -1,6 +1,7 @@
 //! Racing laps around the track: a countdown on the grid, checkpoint gates crossed in
 //! order, lap counting and timing, and the results once the player has finished, plus the
-//! gate markers, the race readout and a compass to the next checkpoint on screen.
+//! gate markers, the race readout and a compass to the next checkpoint on screen. Esc
+//! pauses the race (`pause`).
 //!
 //! Uses the `track` slice for the gates and start position, and the `truck` slice for
 //! the trucks. Every truck becomes a `Racer` with a place on the starting grid: the
@@ -11,12 +12,14 @@ mod compass;
 mod gate;
 mod hud;
 mod markers;
+mod pause;
 mod progress;
 mod results;
 mod start;
 mod systems;
 
 use bevy::prelude::*;
+use bevy::state::app::StatesPlugin;
 use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
@@ -24,6 +27,7 @@ use crate::track::TrackSystems;
 use crate::truck::TruckSystems;
 
 pub use gate::crossed;
+pub use pause::{RaceCancelled, RacePause};
 pub use progress::{Milestone, RaceProgress, position, standings};
 pub use start::{BLUE, RaceStart};
 pub use systems::BackToCheckpoint;
@@ -32,11 +36,40 @@ pub struct RacePlugin;
 
 impl Plugin for RacePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RaceSettings>()
+        // A slice works alone, so it makes sure of the state it is built in. A second
+        // `init_state` would log a warning.
+        if !app.is_plugin_added::<StatesPlugin>() {
+            app.add_plugins(StatesPlugin);
+        }
+        if !app.world().contains_resource::<State<GameState>>() {
+            app.init_state::<GameState>();
+        }
+        app.add_sub_state::<RacePause>()
+            .init_resource::<RaceSettings>()
             .init_resource::<crate::keys::KeyBindings>()
             .init_resource::<RaceClock>()
             .init_resource::<RaceStart>()
+            .init_resource::<pause::PauseMenu>()
             .add_message::<BackToCheckpoint>()
+            .add_message::<RaceCancelled>()
+            .add_systems(
+                OnEnter(RacePause::Paused),
+                (pause::stop_the_clock, pause::spawn_pause_dialog),
+            )
+            .add_systems(OnExit(RacePause::Paused), pause::start_the_clock)
+            .add_systems(
+                Update,
+                (
+                    pause::open_pause_dialog.run_if(in_state(RacePause::Running)),
+                    (
+                        pause::use_pause_dialog,
+                        pause::give_up_on_capture,
+                        pause::show_pause_dialog,
+                    )
+                        .chain()
+                        .run_if(in_state(RacePause::Paused)),
+                ),
+            )
             .add_systems(
                 OnEnter(GameState::Racing),
                 (
@@ -56,7 +89,7 @@ impl Plugin for RacePlugin {
                     (
                         systems::enlist_trucks,
                         systems::back_to_checkpoint.in_set(RaceSystems::BackToCheckpoint),
-                        systems::restart_race,
+                        systems::restart_race.run_if(pause::running),
                     )
                         .before(TruckSystems::Place),
                     markers::highlight_next_gate,
@@ -91,11 +124,18 @@ impl Plugin for RacePlugin {
 #[derive(Resource)]
 pub struct RaceSettings {
     pub laps: u32,
+    /// Whether a front end takes the player back when the race is cancelled from the pause
+    /// dialog: it reads `RaceCancelled`, and sets this. Without one, cancelling quits the
+    /// game.
+    pub front_end: bool,
 }
 
 impl Default for RaceSettings {
     fn default() -> Self {
-        Self { laps: 3 }
+        Self {
+            laps: 3,
+            front_end: false,
+        }
     }
 }
 

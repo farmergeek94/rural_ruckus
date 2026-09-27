@@ -9,7 +9,8 @@
 //! puts the highlighted truck on the showroom's turntable, paints the highlighted track's
 //! map, turns the garage's dials into a `truck::TruckSetup`, and on GO hands the choices to
 //! the slices, the trucks that the computer drives among them (`truck::ComputerTrucks`),
-//! and enters the race. Esc in a race comes back, with the choices kept. What
+//! and enters the race. Cancelling the race from its pause dialog (`race::RaceCancelled`)
+//! comes back, with the choices kept. EXIT closes the game. What
 //! was chosen is kept in a `store::Store` on GO and chosen again the next time.
 //!
 //! Where the base game's archives are is two folders the player chooses, `Shared` and one
@@ -58,7 +59,7 @@ use crate::display::{DisplaySettings, ScreenMode, Vsync};
 use crate::environment::EnvironmentSettings;
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
-use crate::race::RaceSettings;
+use crate::race::{RaceCancelled, RaceSettings};
 use crate::store::{self, Store};
 use crate::track::{self, ChosenTrack, TrackData, TrackSettings};
 use crate::truck::{
@@ -66,7 +67,7 @@ use crate::truck::{
     TruckSetup,
 };
 use crate::ui::{
-    self, Catalogue, Choices, Dial, Dials, Entry, Folder, FolderBrowser, FolderChosen,
+    self, Catalogue, Choices, Dial, Dials, Entry, ExitPressed, Folder, FolderBrowser, FolderChosen,
     FolderEntered, FolderLeft, FolderUp, FrontEndOpen, GoPressed, Setting, SettingOpened,
     TrackHighlighted, TrackPreview, TruckHighlighted, Turntable, UiPlugin, UiSystems,
 };
@@ -158,6 +159,10 @@ impl Plugin for FrontEndPlugin {
                 .map_or(Choices::default().laps, |race| race.laps),
             ..default()
         };
+        // The race's pause dialog comes back here rather than quitting.
+        if let Some(mut race) = app.world_mut().get_resource_mut::<RaceSettings>() {
+            race.front_end = true;
+        }
         let mut setup = app
             .world()
             .get_resource::<TruckSetup>()
@@ -238,6 +243,7 @@ impl Plugin for FrontEndPlugin {
                         set_the_truck_up,
                         apply_the_options,
                         go,
+                        exit,
                     )
                         .chain()
                         .after(UiSystems)
@@ -1710,6 +1716,14 @@ fn go(
     open.as_mut().set_if_neq(FrontEndOpen::Closed);
 }
 
+/// EXIT closes the game. What was chosen is already in the store: it is written on GO and
+/// as each option changes.
+fn exit(mut pressed: MessageReader<ExitPressed>, mut exit: MessageWriter<AppExit>) {
+    if pressed.read().count() > 0 {
+        exit.write(AppExit::Success);
+    }
+}
+
 /// The trucks that the computer drives: the ones listed after the player's, round and
 /// round the list, so that a race shows off what is in `trucks/`. One that won't load is
 /// the player's truck again, and each has its number's colour, which tells apart the ones
@@ -1761,18 +1775,13 @@ fn opponents(
         .collect()
 }
 
-/// Esc, or a gamepad's Select, leaves the race for the front end. A pause screen is for later.
+/// Cancelling the race from its pause dialog comes back to the front end.
 fn leave_the_race(
-    keys: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    mut cancelled: MessageReader<RaceCancelled>,
     mut game: ResMut<NextState<GameState>>,
     mut open: ResMut<NextState<FrontEndOpen>>,
 ) {
-    let asked = keys.just_pressed(KeyCode::Escape)
-        || gamepads
-            .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::Select));
-    if asked {
+    if cancelled.read().count() > 0 {
         game.as_mut().set_if_neq(GameState::FrontEnd);
         open.as_mut().set_if_neq(FrontEndOpen::Open);
     }

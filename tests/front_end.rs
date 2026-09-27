@@ -17,7 +17,7 @@ use monster_truck_rural_ruckus::environment::{EnvironmentPlugin, EnvironmentSett
 use monster_truck_rural_ruckus::front_end::{BaseGameChoice, FrontEndPlugin, FrontEndSettings};
 use monster_truck_rural_ruckus::game_state::GameState;
 use monster_truck_rural_ruckus::keys::{Control, KeyBindings};
-use monster_truck_rural_ruckus::race::{RacePlugin, RaceSettings};
+use monster_truck_rural_ruckus::race::{RaceClock, RacePause, RacePlugin, RaceSettings};
 use monster_truck_rural_ruckus::scenery::SceneryPlugin;
 use monster_truck_rural_ruckus::store::Store;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, TrackSettings, builtin_track};
@@ -109,6 +109,13 @@ fn state(app: &App) -> GameState {
     *app.world().resource::<State<GameState>>().get()
 }
 
+/// `None` outside a race.
+fn pause(app: &App) -> Option<RacePause> {
+    app.world()
+        .get_resource::<State<RacePause>>()
+        .map(|pause| *pause.get())
+}
+
 fn count<F: bevy::ecs::query::QueryFilter>(app: &mut App) -> usize {
     app.world_mut()
         .query_filtered::<(), F>()
@@ -131,10 +138,10 @@ fn on_show(app: &mut App) -> Vec<String> {
         .collect()
 }
 
-fn press_escape(app: &mut App) {
+fn press(app: &mut App, key: KeyCode) {
     app.world_mut()
         .resource_mut::<ButtonInput<KeyCode>>()
-        .press(KeyCode::Escape);
+        .press(key);
     app.update();
     // There is no input plugin here to forget the press.
     app.world_mut()
@@ -233,8 +240,60 @@ fn an_archive_that_will_not_load_is_greyed_out() {
     assert_eq!(state(&app), GameState::FrontEnd);
 }
 
+/// Esc, and the choice of the pause dialog that is `downs` down from the top.
+fn pause_and_choose(app: &mut App, downs: usize) {
+    press(app, KeyCode::Escape);
+    for _ in 0..downs {
+        press(app, KeyCode::ArrowDown);
+    }
+    press(app, KeyCode::Enter);
+}
+
+/// The last choice of the pause dialog.
+fn cancel_the_race(app: &mut App) {
+    pause_and_choose(app, 3);
+}
+
+/// Restarting from the pause dialog builds the whole race again: new trucks, a new clock,
+/// and nothing of the old race left over or doubled.
 #[test]
-fn go_races_what_was_chosen_and_escape_comes_back_to_it() {
+fn restarting_builds_the_whole_race_again() {
+    let mut app = headless_app(nowhere(), None);
+    run_until(&mut app, "the built-in truck", |app| {
+        !on_show(app).is_empty()
+    });
+    player_does(&mut app, Action::Go);
+    for _ in 0..30 {
+        app.update();
+    }
+    assert!(app.world().resource::<RaceClock>().tick > 0);
+    let trucks = |app: &mut App| {
+        let mut trucks: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Truck>>()
+            .iter(app.world())
+            .collect();
+        trucks.sort();
+        trucks
+    };
+    let entities = |app: &mut App| count::<Without<IsResource>>(app);
+    let old_trucks = trucks(&mut app);
+    let before = entities(&mut app);
+
+    // The second choice.
+    pause_and_choose(&mut app, 1);
+    assert_eq!(state(&app), GameState::Racing);
+    assert_eq!(pause(&app), Some(RacePause::Running));
+    assert!(!app.world().resource::<Time<Virtual>>().is_paused());
+    assert!(app.world().resource::<RaceClock>().tick < 5);
+    let new_trucks = trucks(&mut app);
+    assert_eq!(new_trucks.len(), old_trucks.len());
+    assert!(new_trucks.iter().all(|truck| !old_trucks.contains(truck)));
+    assert_eq!(entities(&mut app), before);
+}
+
+#[test]
+fn go_races_what_was_chosen_and_cancelling_comes_back_to_it() {
     let mut app = headless_app(nowhere(), None);
     run_until(&mut app, "the built-in truck", |app| {
         !on_show(app).is_empty()
@@ -285,16 +344,41 @@ fn go_races_what_was_chosen_and_escape_comes_back_to_it() {
     assert!(config.spring > TruckConfig::default().spring * 1.5);
     assert_eq!(config.rear_steer_ratio, 0.0);
 
-    press_escape(&mut app);
+    // Esc pauses, and the clock stops with it.
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(state(&app), GameState::Racing);
+    assert_eq!(pause(&app), Some(RacePause::Paused));
+    assert!(app.world().resource::<Time<Virtual>>().is_paused());
+    let tick = app.world().resource::<RaceClock>().tick;
+    app.update();
+    assert_eq!(app.world().resource::<RaceClock>().tick, tick);
+
+    // Esc again carries on.
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(pause(&app), Some(RacePause::Running));
+    assert!(!app.world().resource::<Time<Virtual>>().is_paused());
+
+    cancel_the_race(&mut app);
     run_until(&mut app, "the truck to be back on show", |app| {
         !on_show(app).is_empty()
     });
     assert_eq!(state(&app), GameState::FrontEnd);
+    assert_eq!(pause(&app), None);
+    assert!(!app.world().resource::<Time<Virtual>>().is_paused());
     assert_eq!(count::<With<Truck>>(&mut app), 0);
     assert_eq!(app.world().resource::<Choices>().laps, 5);
     assert_eq!(app.world().resource::<Dials>().0[0].step, 4);
     // Nothing of the race is left, and nothing of the front end was doubled.
     assert_eq!(entities(&mut app), before);
+}
+
+#[test]
+fn exit_closes_the_game() {
+    let mut app = headless_app(nowhere(), None);
+    app.update();
+    assert!(app.should_exit().is_none());
+    player_does(&mut app, Action::Exit);
+    assert_eq!(app.should_exit(), Some(AppExit::Success));
 }
 
 #[test]
@@ -490,7 +574,7 @@ fn a_setting_changed_elsewhere_is_shown_and_left_alone() {
         .resource_mut::<EnvironmentSettings>()
         .shadow_distance = 120.0;
 
-    press_escape(&mut app);
+    cancel_the_race(&mut app);
     assert_eq!(state(&app), GameState::FrontEnd);
     let line = option(&app, "option.shadow_distance");
     assert_eq!(

@@ -25,7 +25,7 @@ its row in [Feature status](#feature-status).
 | 6 | Scenery that moves, and the rest of the look: knock-over objects, sky, animated textures | Done, but not yet looked at in the game. Stage 11 finishes it. |
 | 7 | Base game archives: mount several PODs at once | Done |
 | 8 | Trucks: `.TRK`, body, tires, axles, wheel positions | Done, for trucks that carry their own parts |
-| 9 | Race flow: front end and garage, start sequence, finish and results, cockpit and look-round views | Done, but not yet driven. The pause screen is missing. Stage 11 finishes it. |
+| 9 | Race flow: front end and garage, start sequence, finish and results, cockpit and look-round views | Done, but not yet driven. Stage 11 finishes it. |
 | 10 | Computer trucks: a driver that follows the course | Done, first pass |
 
 ## Next: stages 11 to 16
@@ -41,11 +41,11 @@ Goal: what the game has now works, and the user has seen it work.
 
 | Item | Status |
 | --- | --- |
-| Pause screen. Today Esc leaves the race. | Missing |
+| Pause screen | Done, not yet looked at |
 | Objects of type 8 turn to face the camera. | Done, not yet looked at |
 | Look at these in the game, and record what you find: animated models, animated textures, sky, truck lights, dashboard, camera views, start sequence, results screen, frozen water, truck weight | Not yet looked at |
 
-Done when: the pause screen works, type 8 objects face the camera, and each feature in the
+Done when: the pause screen is looked at, type 8 objects face the camera, and each feature in the
 list is driven or looked at, with its row updated.
 
 ### Stage 12: the rest of the track files
@@ -211,7 +211,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Computer trucks' speed hints from the track (`cspeed`, `ctype`, `cTrackWidth`) | Open | File: [situation.md](formats/situation.md) | |
 | Start sequence (countdown) | Own | Game | 3, 2, 1, GO, with every truck held on the grid (`truck::Held`), and again on a restart. How MTM2 starts a race is not confirmed. Not yet driven. |
 | Finish and results screen | Own | Game | Once the player finishes: every truck's place, race time and best lap, kept up to date as the rest finish. Enter races again. What MTM2's results show is not confirmed. |
-| Pause screen | Missing | Game | Esc leaves the race today. |
+| Pause screen | Own | Game | Esc (or a gamepad's Start or Select) stops the game and shows four choices: continue, restart the race (built again from nothing, as GO builds it: trucks, scenery, countdown, the computer's setups and a random weather), save a screenshot (a PNG in `screenshots/`, without the dialog), and cancel the race, which goes back to the front end (or quits a race started from the command line). `src/race/pause.rs`. What MTM2's pause screen offered is not confirmed. Not yet looked at in the game. |
 | Race types other than circuit (rally, Summit Rumble, others) | Missing | File: [situation.md](formats/situation.md) | `Track Race Type` is **open**. Which types MTM2 has must be confirmed. The base game's three Summit Rumble arenas load, with 2 gates each, and are raced as circuits. |
 | Extra courses on one track (`Extended Course Definitions`) | Open | File: [situation.md](formats/situation.md) | |
 | Championship or season across several tracks | Missing | Game | Confirm what MTM2 has. |
@@ -240,6 +240,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Garage: set up the truck | Done | | The dials are the game's own. The computer's trucks are set up at random for each race. |
 | Laps and number of opponents | Done | | |
 | Options screen, remembered between runs | Done | | |
+| Exit the game | Done | | EXIT, at the right of the tabs, closes the game. |
 | Keyboard and gamepad | Done | | |
 | Every key can be bound again | Own | | The front end's CONTROLS page, in sections: driving, race, camera and game (`src/keys.rs`). The arrow keys always drive as well. Gamepad buttons are fixed. |
 | Force feedback | Missing | Game | |
