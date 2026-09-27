@@ -8,12 +8,15 @@
 //! copy placed between its last two physics poses (see `interpolate`).
 //!
 //! Some animate in place, as drawn only: textures that step through frames, and models
-//! that move by keyframes (see `animation`).
+//! that move by keyframes (see `animation`). Flat pictures of trees turn to face the
+//! camera (see `facing`).
 //!
 //! Uses the `track` slice for what there is and where (`TrackData::scenery`), for the
-//! ground to stand it on, and for the tile material it is drawn with.
+//! ground to stand it on, and for the tile material it is drawn with, and the `camera`
+//! slice for the camera that pictures turn to face.
 
 mod animation;
+mod facing;
 mod interpolate;
 mod motion;
 
@@ -25,6 +28,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::camera::CameraSystems;
 use crate::game_state::GameState;
 use crate::track::{
     SceneryModel, SceneryMotion, TileMaterial, TileTextures, Track, TrackSettings, TrackSystems,
@@ -54,6 +58,7 @@ impl Plugin for SceneryPlugin {
                 interpolate::place_visuals,
                 animation::cycle_textures,
                 animation::move_keyframes,
+                facing::face_the_camera.after(CameraSystems::Place),
             )
                 .run_if(in_state(GameState::Racing)),
         );
@@ -209,6 +214,10 @@ fn spawn_scenery(
                 }
                 if let Some(morph) = morph {
                     entity.insert(morph);
+                }
+                // A solid one keeps its yaw, so that its collider stays where it was put.
+                if object.faces_camera && collider.is_none() {
+                    entity.insert(facing::FacesCamera);
                 }
                 if let Some(collider) = collider {
                     entity.insert((RigidBody::Fixed, collider.clone(), bouncy()));

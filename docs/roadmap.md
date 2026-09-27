@@ -42,7 +42,7 @@ Goal: what the game has now works, and the user has seen it work.
 | Item | Status |
 | --- | --- |
 | Pause screen. Today Esc leaves the race. | Missing |
-| Objects of type 8 turn to face the camera. | Partial |
+| Objects of type 8 turn to face the camera. | Done, not yet looked at |
 | Look at these in the game, and record what you find: animated models, animated textures, sky, truck lights, dashboard, camera views, start sequence, results screen, frozen water, truck weight | Not yet looked at |
 
 Done when: the pause screen works, type 8 objects face the camera, and each feature in the
@@ -170,7 +170,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Objects with a mass that can be knocked over | Done | File: [model.md](formats/model.md) | 91 of Alpine's 323 objects have a mass. Moving objects are done too. See `src/scenery/motion.rs`. |
 | Animated models (Order and Jump records, animation control files) | Own | File: [model.md](formats/model.md) | Stage 6. Order and Jump are stepped over (Alpine's helicopter reads every face). Animation control files (`REX.BIN` in Crazy '98, `PUMPJACK.BIN` in Tinhorn Junction, `OP88ANIM.BIN` in Critic) are read as **reference** and **measured**; how they move is the game's own: in a straight line from frame to frame, round and round, in `src/scenery/animation.rs`. How MTM2 moved them, and what their rate means, is **open**. Solid as the first frame. Not yet looked at in the game. |
 | Animated textures | Own | File: [model.md](formats/model.md) | Stage 6. The frames are read (**reference** and **measured**); how they are stepped through is the game's own, with the rate read as 16.16 seconds per frame, which no file shows (**open**). Scenery steps through a cycle's tiles (`track/tiles.wgsl`), trucks switch their material's texture (`truck/looks.rs`). The backdrop shows the first frame. Not yet looked at in the game. |
-| Objects that always face the camera (type 8) | Partial | File: reference | Not solid; not yet turned to the camera. |
+| Objects that always face the camera (type 8) | Done | File: [situation.md](formats/situation.md) | Not solid. Turned about the vertical to the camera every frame (`src/scenery/facing.rs`). Which side MTM2 shows, and about which point it turns, are **open**. Type 9 (a facing tree with a solid trunk) does not turn yet. Not yet looked at in the game. |
 | Pitch and roll of placed objects | Open | File: [model.md](formats/model.md) | No object examined has them. |
 | Backdrop round the horizon | Done | File: [situation.md](formats/situation.md) | `backdropType` is **open** (0 on every track). |
 | Sky | Done | File: [level.md](formats/level.md) | `src/sky.rs`. The track's own picture in clear weather by day, the base game's cloudy one when overcast by day, its dusk one at a clear dusk, its night one at night; none at an overcast dusk or in fog, rain, a storm or snow. How MTM2 laid the picture on the sky is **open**: the dome is the game's own. Not yet looked at in the game. |

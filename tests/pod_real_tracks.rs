@@ -1034,6 +1034,52 @@ fn every_animated_texture_has_its_frames() {
 }
 
 /// Critic's animated billboard: eight frames of 48 vertices, 1.25 s apart.
+/// Every model of a box that always faces the camera (type 8) is a flat picture, upright
+/// in the model's X and Y and drawn on both sides: half its faces are wound to be seen
+/// from +Z and half from -Z. So it can be turned about Y alone, either side to the camera.
+#[test]
+fn what_faces_the_camera_is_a_flat_picture_drawn_on_both_sides() {
+    for (path, archive) in real_archives() {
+        let Ok(track) = Track::from_archive(&archive) else {
+            continue;
+        };
+        for situation_box in &track.situation.boxes {
+            let BoxShape::Model(name) = &situation_box.shape else {
+                continue;
+            };
+            if situation_box.kind != 8 {
+                continue;
+            }
+            let Some(model) = track.models.get(&name.to_ascii_uppercase()) else {
+                continue;
+            };
+            let depth = model.vertices.iter().map(|v| v[2].abs()).fold(0.0, f32::max);
+            let height = model.vertices.iter().map(|v| v[1].abs()).fold(0.0, f32::max);
+            assert!(depth < 0.2 && height > 10.0, "{path} {name}");
+            let (mut towards_plus_z, mut towards_minus_z) = (0, 0);
+            for face in &model.faces {
+                let corners: Vec<[f32; 3]> = face
+                    .corners
+                    .iter()
+                    .map(|corner| model.vertices[corner.vertex])
+                    .collect();
+                // The Z of the face's normal by its winding (Newell's method).
+                let mut z = 0.0;
+                for (i, a) in corners.iter().enumerate() {
+                    let b = corners[(i + 1) % corners.len()];
+                    z += (a[0] - b[0]) * (a[1] + b[1]);
+                }
+                if z > 0.0 {
+                    towards_plus_z += 1;
+                } else {
+                    towards_minus_z += 1;
+                }
+            }
+            assert_eq!(towards_plus_z, towards_minus_z, "{path} {name}");
+        }
+    }
+}
+
 #[test]
 fn critic_has_a_billboard_that_moves_by_keyframes() {
     let Some((_, archive)) = real_archives()

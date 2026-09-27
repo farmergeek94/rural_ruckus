@@ -280,6 +280,7 @@ The models that the track file's Backdrop section names (situation.md).
 
 - Which box types are solid. The game makes everything solid except types 6
   (checkpoint), 7 and 8 (**reference**: "drive through" and "always face the camera").
+  Type 8 turns to the camera: see situation.md.
 - Objects with a mass (91 of Alpine's 323, mostly signs) can presumably be knocked over.
   The game fixes everything in place.
 - How MTM2 shows an animated texture and moves a keyframed model, and what their rates

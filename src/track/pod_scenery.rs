@@ -31,7 +31,10 @@ const KILOGRAMS_PER_SLUG: f32 = 14.593_903;
 
 /// Box types that trucks drive straight through: checkpoints, and two that MTM2's
 /// editors call "drive through" and "always face the camera".
-const NOT_SOLID: [i32; 3] = [box_type::CHECKPOINT, 7, 8];
+const NOT_SOLID: [i32; 3] = [box_type::CHECKPOINT, 7, FACES_CAMERA];
+
+/// The box type that "always faces the camera" (see `docs/formats/situation.md`).
+const FACES_CAMERA: i32 = 8;
 
 /// Checkpoints whose model is the editor's arrow-covered trigger box are invisible in the
 /// game. Other checkpoint models, such as banners over the road, are there to be seen.
@@ -88,6 +91,7 @@ pub(super) fn scenery_from_pod(
             yaw: -situation_box.angles[2],
             solid,
             motion: motion(situation_box, solid),
+            faces_camera: situation_box.kind == FACES_CAMERA,
         });
     }
 

@@ -68,8 +68,30 @@ not normalised: checkpoints in the same file have `psi` of 15.7 and 18.9.
 | 1 | Four objects in Alpine | **Open** |
 | 6 | Checkpoint. Not solid. Checkpoints count in file order. | **Reference**, quoting the Traxx editor's notes; consistent with both files. The model varies: `CKBOXN.BIN` in one, `PEPBAN1.BIN` to `PEPBAN9.BIN` (banners) and `CKBOX.BIN` in the other |
 | 7 | "Drive through": scenery with no collision, such as checkpoint banners | **Reference** |
+| 8 | "Always face" (the camera). Not solid. See "Objects that face the camera" below | **Reference** and **measured** |
+| 9 | "Collide (facing)": faces the camera as type 8 does, with a solid trunk. 2 boxes in `landsbetween.pod`. The game treats it as ordinary solid scenery | **Reference** (JSTrackViewer `src/scene.js`, quoting Traxx's `TrackPODBox.h`) |
 | 10 | Moves along its `bvel`: trains in Monte Carlo, traffic in Route 756. Not moved by anything | **Reference** ("moving - use bvel", the Traxx editor's notes, quoted by JSTrackViewer `src/drive/colliders.js`). Every type 10 box seen has mass 0 |
 | 11 | Seen only on boxes with `length,width,height`, standing at the feet of a checkpoint banner | **Measured** that they occur together; the meaning is a guess |
+
+## Objects that face the camera
+
+- **Reference** (JSTrackViewer: `src/scene.js` names type 8 `BOXTYPE_NO_COLLIDE_FACING`
+  after Traxx's `TrackPODBox.h`; `src/drive/colliders.js` quotes Traxx's `Model Types.txt`:
+  8 is "always face"). The viewer quotes Traxx's `TrackPOD.cpp` on types 8 and 9:
+  "Facing object? Allow all directions." Type 8 has no collision.
+- **Reference**: JSTrackViewer turns such an object about the vertical only, towards the
+  camera, and replaces the box's own `psi`. The Traxx editor itself draws it at its `psi`.
+  The engine of 4x4 Evolution, by the same makers, turns its "facing" objects about the
+  vertical only (JSTrackViewer `src/evo-track-loader.js`).
+- **Measured** on 887 type 8 boxes in `ROUTE77.POD`, `landsbetween.pod`, `rute756jam.pod`
+  and `tightcorners.pod` (`tests/pod_real_tracks.rs`): every model is a flat picture of a
+  tree, palm or smoke, upright in the model's X and Y (Z within 0.11 ft of 0), with faces
+  of type 51 (cutout). Half its faces are wound to be seen from +Z and half from -Z, so it
+  is drawn on both sides. Some boxes have a `psi` that is not 0.
+- The game turns it about the vertical through the model's origin so that the side seen
+  at `psi` = 0 from the track's -z faces the camera. This is JSTrackViewer's choice; which
+  side MTM2 shows is **open**, and so is whether the picture is mirrored. The pivot MTM2
+  uses is **open**: JSTrackViewer turns it about the middle of the model's bounding box.
 
 ## Mass
 
