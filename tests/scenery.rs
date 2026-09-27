@@ -60,6 +60,7 @@ fn app() -> App {
         yaw: 0.0,
         solid: true,
         motion,
+        faces_camera: false,
     };
     track.scenery = Scenery {
         tile_size: 8,

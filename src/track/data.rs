@@ -270,6 +270,9 @@ pub struct SceneryObject {
     /// Whether trucks collide with it.
     pub solid: bool,
     pub motion: SceneryMotion,
+    /// Whether it turns about Y to face the camera, whatever its `yaw`. Such a model is a
+    /// flat picture of a tree or a palm, drawn on both sides, which faces +Z.
+    pub faces_camera: bool,
 }
 
 /// Whether a scenery object stays where it is put.
