@@ -243,11 +243,15 @@ fn next_time(mut settings: ResMut<WeatherSettings>) {
     info!("Time of day: {}", settings.time_of_day.name());
 }
 
-/// The trucks' lamps shine when it is dark, and in rain and storms.
+/// The trucks' lamps shine when it is dark, and in rain and storms. The cones of their
+/// beams are seen only at night; otherwise a beam is only the light it casts.
 fn light_the_lamps(settings: Res<WeatherSettings>, mut lamps: ResMut<TruckLamps>) {
-    let lit = lamps_on(&settings);
-    if lamps.lit != lit {
-        lamps.lit = lit;
+    let wanted = TruckLamps {
+        lit: lamps_on(&settings),
+        cones: settings.time_of_day == TimeOfDay::Night,
+    };
+    if *lamps != wanted {
+        *lamps = wanted;
     }
 }
 

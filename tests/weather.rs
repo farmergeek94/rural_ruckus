@@ -112,8 +112,10 @@ fn the_lamps_shine_at_dusk_and_at_night_only() {
             time_of_day: time,
             ..default()
         });
-        let lit = app.world().resource::<TruckLamps>().lit;
-        assert_eq!(lit, time != TimeOfDay::Day, "{time:?}");
+        let lamps = *app.world().resource::<TruckLamps>();
+        assert_eq!(lamps.lit, time != TimeOfDay::Day, "{time:?}");
+        // The cones of the beams are seen only at night.
+        assert_eq!(lamps.cones, time == TimeOfDay::Night, "{time:?}");
         // And every lamp of every truck with them.
         let shown: Vec<bool> = app
             .world_mut()
@@ -123,6 +125,6 @@ fn the_lamps_shine_at_dusk_and_at_night_only() {
             .map(|(_, visibility)| *visibility != Visibility::Hidden)
             .collect();
         assert!(!shown.is_empty());
-        assert!(shown.iter().all(|&on| on == lit), "{time:?}");
+        assert!(shown.iter().all(|&on| on == lamps.lit), "{time:?}");
     }
 }
