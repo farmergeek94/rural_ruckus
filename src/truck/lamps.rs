@@ -12,8 +12,9 @@
 //! stands on it, and the cone, drawn added onto what is behind it and fading to nothing at
 //! its far end, so that the beam is seen in the air.
 //!
-//! Whether they shine is `TruckLamps::lit`, which this slice leaves off: whoever knows how
-//! dark it is turns them on. A beacon turns round the truck's up, and a blinking lamp goes
+//! Whether they shine is `TruckLamps::lit`, and whether the cones are seen is
+//! `TruckLamps::cones`. This slice leaves both off: whoever knows how dark it is turns them
+//! on. A beacon turns round the truck's up, and a blinking lamp goes
 //! on and off, by the game's clock.
 
 use bevy::asset::RenderAssetUsages;
@@ -30,7 +31,7 @@ use super::{Beam, SeenFromInside, TruckLamp, TruckTexture, TruckVisual};
 const BEAM_POWER: f32 = 6_000_000.0;
 /// How bright the cone of a beam is at the lamp, added onto what is behind it, from 0
 /// (not seen) up. Higher is a thicker, mistier beam.
-const CONE_BRIGHTNESS: f32 = 0.01;
+const CONE_BRIGHTNESS: f32 = 0.001;
 /// How bright a lamp's glow is, as a multiple of its picture. The race camera draws in high
 /// dynamic range with bloom, so above 1 the glow spills light round it; higher shines more.
 const GLOW_BRIGHTNESS: f32 = 12.0;
@@ -46,12 +47,15 @@ const AHEAD_OF_LAMP: f32 = 0.3;
 const CONE_SIDES: u32 = 16;
 /// How much of a beam's spread is at full brightness, from 0 to 1, before it fades to
 /// nothing at its edge. Lower is a softer edge.
-const BEAM_CORE: f32 = 0.01;
+const BEAM_CORE: f32 = 0.001;
 
 /// Whether the trucks' lamps shine. Off unless someone turns them on.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct TruckLamps {
     pub lit: bool,
+    /// Whether the cones of lit beams are drawn. Without them, a beam is only the light it
+    /// casts. The cones are for the dark: in daylight a hazy beam in the air looks wrong.
+    pub cones: bool,
 }
 
 /// On each of a truck's lamps, a child of the drawn truck.
@@ -229,8 +233,10 @@ pub(super) struct BeamCone;
 
 /// Hides the body and wheels of a truck seen from inside (`SeenFromInside`), and the cones
 /// of its beams, which would haze the view from the cab, and keeps its lamps lit. Shows
-/// them again when the camera comes out.
+/// them again when the camera comes out. The cones also stay hidden unless
+/// `TruckLamps::cones` is on.
 pub(super) fn show_from_inside(
+    settings: Res<TruckLamps>,
     visuals: Query<(&Children, Has<SeenFromInside>), With<TruckVisual>>,
     lamps: Query<&Children, With<Lamp>>,
     mut parts: Query<&mut Visibility, (Without<Lamp>, Without<BeamCone>)>,
@@ -242,11 +248,16 @@ pub(super) fn show_from_inside(
         } else {
             Visibility::Inherited
         };
+        let cone_shown = if settings.cones {
+            shown
+        } else {
+            Visibility::Hidden
+        };
         for &child in children {
             if let Ok(lamp_parts) = lamps.get(child) {
                 for &part in lamp_parts {
                     if let Ok(mut cone) = cones.get_mut(part) {
-                        cone.set_if_neq(shown);
+                        cone.set_if_neq(cone_shown);
                     }
                 }
             } else if let Ok(mut part) = parts.get_mut(child) {
