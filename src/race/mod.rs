@@ -89,9 +89,9 @@ impl Plugin for RacePlugin {
                     (
                         systems::enlist_trucks,
                         systems::back_to_checkpoint.in_set(RaceSystems::BackToCheckpoint),
-                        systems::restart_race.run_if(pause::running),
                     )
                         .before(TruckSystems::Place),
+                    systems::race_again.run_if(pause::running),
                     markers::highlight_next_gate,
                     hud::update_race_hud,
                     start::show_count,

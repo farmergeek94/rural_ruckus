@@ -10,8 +10,7 @@
 //! Restarting from the dialog builds the whole race again, as GO on the front end does:
 //! `GameState::Racing` is left and entered again, so that everything of the race is
 //! despawned and spawned afresh (trucks, knocked-over scenery, the countdown, the computer's
-//! setups and a random weather). The restart key (`keys::Control::RestartRace`) is the quick
-//! one, which only puts the trucks back on the grid.
+//! setups and a random weather).
 //!
 //! A screenshot is of the race as it stands, without the dialog: the dialog is hidden in
 //! the frame that is captured, and shown again, saying where the picture went, once it is
