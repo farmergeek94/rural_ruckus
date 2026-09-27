@@ -1,7 +1,7 @@
 //! The results: once the player's truck has finished, a table of every truck in the race,
 //! in its order, with its race time and its best lap. The trucks still racing are listed
 //! with the lap they are on, and the table keeps up with them as they finish. Enter races
-//! again; Esc goes back to the front end, as it does in the race.
+//! again; Esc pauses, as it does in the race, and the pause dialog can leave it.
 //!
 //! What MTM2's results screen showed is not measured. This one is the game's own.
 
@@ -73,7 +73,7 @@ pub(super) fn spawn_results(mut commands: Commands) {
                             }
                         });
                     panel.spawn((
-                        Text::new("Enter  race again        Esc  front end"),
+                        Text::new("Enter  race again        Esc  pause"),
                         TextFont::from_font_size(16.0),
                     ));
                 });

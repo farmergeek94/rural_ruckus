@@ -1,4 +1,4 @@
-//! What is drawn: the frame (title, tabs, summary line and GO) and, inside it, the screen
+//! What is drawn: the frame (title, tabs, EXIT, summary line and GO) and, inside it, the screen
 //! that is up. Reads the model and never changes it: a widget only says what activating it
 //! does (`Does`), and `input` passes that on.
 //!
@@ -160,6 +160,24 @@ impl Drawing<'_> {
                             },
                         );
                     }
+                });
+                // At the far right, away from the tabs.
+                top.spawn(layout(Node {
+                    margin: UiRect::left(Val::Auto),
+                    ..default()
+                }))
+                .with_children(|right| {
+                    self.button(
+                        right,
+                        "EXIT",
+                        theme.heading_size,
+                        Action::Exit,
+                        false,
+                        Node {
+                            padding: UiRect::axes(px(28), px(12)),
+                            ..default()
+                        },
+                    );
                 });
             });
     }

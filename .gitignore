@@ -10,4 +10,7 @@
 
 # What the player chose last time (see `crates/store`).
 /saves/
+
+# Screenshots taken from the pause dialog.
+/screenshots/
 /venv/

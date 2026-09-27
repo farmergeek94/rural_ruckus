@@ -88,7 +88,7 @@ dependencies, thus the game is playable.
 | R | Flip the truck upright |
 | C | Go back to the last checkpoint |
 | Backspace | Restart the race |
-| Esc | Go back to the front end |
+| Esc | Pause: continue, restart the whole race, save a screenshot (in `screenshots/`), or cancel the race |
 | F2 | Graphics panel (F3 to F6 change its settings) |
 | F7 | Next weather |
 

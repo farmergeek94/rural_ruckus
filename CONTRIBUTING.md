@@ -68,7 +68,7 @@ built-in shapes and grey in its place.
 | R | Flip the truck upright |
 | C | Back to the last checkpoint |
 | Backspace | Restart the race |
-| Esc | Back to the front end |
+| Esc | Pause: continue, restart the whole race, save a screenshot (in `screenshots/`), or cancel the race |
 | F1 | Rapier's collider wireframes |
 | F2 | Graphics panel; F3 to F6 step its settings |
 | F7 | Next weather |
