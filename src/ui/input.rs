@@ -10,6 +10,11 @@
 //! | GO | Enter | Start |
 //! | Bind a key (on a key binding) | Enter, then the key; Esc to stop | South |
 //! | Turn the truck | drag it | right stick (see `showroom`) |
+//! | Search a long list of trucks or tracks | /, or click the search field | |
+//!
+//! While the search field takes the keys, what is typed goes into it, Backspace takes
+//! the last character off, the up and down arrows walk what it finds, Enter keeps the
+//! search and gives the keys back, and Esc empties it and gives them back.
 //!
 //! While a folder is browsed, the arrows move and go in (right) and up (left), and:
 //!
@@ -20,6 +25,7 @@
 //! | Choose this folder | Space | North |
 //! | Stop browsing | Esc | East |
 
+use bevy::input::keyboard::Key;
 use bevy::input::mouse::AccumulatedMouseScroll;
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
@@ -83,6 +89,8 @@ pub(super) fn read_input(
     settings: Res<Settings>,
     // Absent in a headless app, which drives the front end with `PlayerDid` itself.
     keys: Option<Res<ButtonInput<KeyCode>>>,
+    // What the keys mean in the player's layout, for what is typed.
+    typed: Option<Res<ButtonInput<Key>>>,
     wheel: Option<Res<AccumulatedMouseScroll>>,
     gamepads: Query<&Gamepad>,
     mut held: Local<Held>,
@@ -105,6 +113,60 @@ pub(super) fn read_input(
                 .find_map(|pressed| setting.keys.iter().position(|key| key == pressed))
         {
             did.write(PlayerDid(Action::SetSetting(in_hand, value)));
+        }
+        return;
+    }
+
+    // The wheel moves whatever list is up, a row for each notch.
+    if let Some(wheel) = wheel {
+        if wheel.delta.y > 0.0 {
+            did.write(PlayerDid(Action::Up));
+        } else if wheel.delta.y < 0.0 {
+            did.write(PlayerDid(Action::Down));
+        }
+    }
+
+    // A search field taking the keys takes all of them but the arrows up and down. The
+    // gamepad goes on as ever: it has nothing to type with.
+    if let Some(model) = &model
+        && model.0.typing
+        && let Some(keys) = &keys
+    {
+        if let Some(typed) = &typed {
+            for key in typed.get_just_pressed() {
+                match key {
+                    Key::Character(text) => {
+                        for character in text.chars().filter(|character| !character.is_control()) {
+                            did.write(PlayerDid(Action::Type(character)));
+                        }
+                    }
+                    Key::Space => {
+                        did.write(PlayerDid(Action::Type(' ')));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if keys.just_pressed(KeyCode::Backspace) {
+            did.write(PlayerDid(Action::Erase));
+        }
+        if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+            did.write(PlayerDid(Action::StopTyping));
+        }
+        if keys.just_pressed(KeyCode::Escape) {
+            did.write(PlayerDid(Action::ClearSearch));
+        }
+        let direction = if keys.pressed(KeyCode::ArrowUp) {
+            Some(Action::Up)
+        } else if keys.pressed(KeyCode::ArrowDown) {
+            Some(Action::Down)
+        } else {
+            None
+        };
+        if held.acts(direction, time.delta_secs())
+            && let Some(direction) = direction
+        {
+            did.write(PlayerDid(direction));
         }
         return;
     }
@@ -153,6 +215,9 @@ pub(super) fn read_input(
         }
         if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
             did.write(PlayerDid(Action::Go));
+        }
+        if keys.any_just_pressed([KeyCode::Slash, KeyCode::NumpadDivide]) && !browsing {
+            did.write(PlayerDid(Action::Search));
         }
         if browsing {
             for (key, action) in [
@@ -210,15 +275,6 @@ pub(super) fn read_input(
         && let Some(direction) = direction
     {
         did.write(PlayerDid(direction));
-    }
-
-    // The wheel moves whatever list is up, a row for each notch.
-    if let Some(wheel) = wheel {
-        if wheel.delta.y > 0.0 {
-            did.write(PlayerDid(Action::Up));
-        } else if wheel.delta.y < 0.0 {
-            did.write(PlayerDid(Action::Down));
-        }
     }
 }
 

@@ -87,6 +87,15 @@ pub enum Action {
     ChooseFolder,
     /// Stop browsing, and choose nothing.
     LeaveFolder,
+    /// The search field of the list on screen takes the keys.
+    Search,
+    /// Into the search field that takes the keys: one more character, and one fewer.
+    Type(char),
+    Erase,
+    /// The search field stops taking keys, and keeps what is in it.
+    StopTyping,
+    /// The search field of the list on screen is emptied, and stops taking keys.
+    ClearSearch,
     /// A gamepad's "yes": on to the next screen, and GO from the last one. On the options
     /// screen, the next value of the highlighted setting, round and round.
     Accept,
@@ -113,6 +122,8 @@ pub enum Happened {
     FolderUp,
     FolderChosen,
     FolderLeft,
+    /// What is searched for, or whether the search field takes the keys, changed.
+    SearchChanged,
     Go,
     Exit,
 }
@@ -123,6 +134,12 @@ pub enum Happened {
 pub struct List {
     pub highlighted: usize,
     pub available: Vec<bool>,
+    /// What each entry is searched by, in lower case. Empty for a list with no names.
+    names: Vec<String>,
+    /// Whether the list has a search field: it is longer than the rows in view.
+    pub searchable: bool,
+    /// What is searched for. Only the entries with it in their names are shown and walked.
+    pub search: String,
 }
 
 impl List {
@@ -135,7 +152,29 @@ impl List {
         Self {
             highlighted,
             available,
+            ..Self::default()
         }
+    }
+
+    /// The same list, searched by `names`, with a search field when `searchable`.
+    pub fn searched_by(mut self, names: &[String], searchable: bool) -> Self {
+        self.names = names.iter().map(|name| name.to_lowercase()).collect();
+        self.searchable = searchable;
+        self
+    }
+
+    /// The entries that the search finds, in order: all of them while it is empty.
+    pub fn shown(&self) -> Vec<usize> {
+        let search = self.search.to_lowercase();
+        (0..self.len())
+            .filter(|&index| {
+                search.is_empty()
+                    || self
+                        .names
+                        .get(index)
+                        .is_some_and(|name| name.contains(&search))
+            })
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -151,14 +190,34 @@ impl List {
         self.available.get(self.highlighted) == Some(&true)
     }
 
-    /// Moves by one, wrapping round at either end. Says whether anything moved.
+    /// Moves by one among the entries shown, wrapping round at either end. Says whether
+    /// anything moved.
     fn step(&mut self, down: bool) -> bool {
-        let len = self.len();
-        if len < 2 {
-            return false;
+        let shown = self.shown();
+        let next = match shown.iter().position(|&index| index == self.highlighted) {
+            Some(at) => shown[(at + if down { 1 } else { shown.len() - 1 }) % shown.len()],
+            // The highlight is on one the search hides: onto the first or the last found.
+            None => match if down { shown.first() } else { shown.last() } {
+                Some(&index) => index,
+                None => return false,
+            },
+        };
+        let moved = next != self.highlighted;
+        self.highlighted = next;
+        moved
+    }
+
+    /// Onto the first entry found, when the search hides the one highlighted. Says whether
+    /// anything moved.
+    fn keep_in_view(&mut self) -> bool {
+        let shown = self.shown();
+        match shown.first() {
+            Some(&first) if !shown.contains(&self.highlighted) => {
+                self.highlighted = first;
+                true
+            }
+            _ => false,
         }
-        self.highlighted = (self.highlighted + if down { 1 } else { len - 1 }) % len;
-        true
     }
 
     fn pick(&mut self, index: usize) -> bool {
@@ -246,6 +305,8 @@ pub struct FrontEnd {
     pub setting_in_hand: usize,
     /// Whether the key binding in hand is waiting for a key.
     pub listening: bool,
+    /// Whether the search field of the list on screen takes the keys.
+    pub typing: bool,
     /// A folder being browsed, shown in place of the screen that is up. `None` for none.
     pub browsing: Option<Browsing>,
 }
@@ -288,6 +349,7 @@ impl FrontEnd {
                 .collect(),
             setting_in_hand: 0,
             listening: false,
+            typing: false,
             browsing: None,
         }
     }
@@ -407,6 +469,11 @@ impl FrontEnd {
             }
             Action::StopListening => self.listening = false,
             Action::OpenSetting(setting) => self.open_setting(setting, &mut happened),
+            Action::Search
+            | Action::Type(_)
+            | Action::Erase
+            | Action::StopTyping
+            | Action::ClearSearch => self.search(action, &mut happened),
             Action::Exit => happened.push(Happened::Exit),
             // Browsing, which is dealt with above.
             Action::PickFolder(_)
@@ -467,6 +534,7 @@ impl FrontEnd {
         if screen != self.screen {
             self.screen = screen;
             self.listening = false;
+            self.typing = false;
             // The line in hand is one on the screen, if it has any.
             if screen.shows_settings()
                 && !self.on_screen(self.setting_in_hand)
@@ -498,6 +566,44 @@ impl FrontEnd {
         } else {
             (0..at).rev().find(|&index| self.on_screen(index))
         }
+    }
+
+    /// What the search field of the list on screen does. The highlight stays on something
+    /// that is shown, where anything is.
+    fn search(&mut self, action: Action, happened: &mut Vec<Happened>) {
+        let typing = self.typing;
+        // The list on screen, and what it says when its highlight moves.
+        let (list, highlighted): (&mut List, fn(usize) -> Happened) = match self.screen {
+            Screen::Truck => (&mut self.trucks, Happened::TruckHighlighted),
+            Screen::Race => (&mut self.tracks, Happened::TrackHighlighted),
+            _ => return,
+        };
+        if !list.searchable {
+            return;
+        }
+        let before = list.search.clone();
+        let typing_now = match action {
+            Action::Search => true,
+            Action::Type(character) if typing => {
+                list.search.push(character);
+                true
+            }
+            Action::Erase if typing => {
+                list.search.pop();
+                true
+            }
+            Action::ClearSearch => {
+                list.search.clear();
+                false
+            }
+            _ => false,
+        };
+        let moved = list.keep_in_view().then_some(highlighted(list.highlighted));
+        if list.search != before || typing_now != typing {
+            happened.push(Happened::SearchChanged);
+        }
+        happened.extend(moved);
+        self.typing = typing_now;
     }
 
     fn open_setting(&mut self, index: usize, happened: &mut Vec<Happened>) {
@@ -978,5 +1084,68 @@ mod tests {
         model.browsing = Some(Browsing::default());
         assert_eq!(model.apply(Action::FolderUp), []);
         assert_eq!(model.apply(Action::Accept), []);
+    }
+
+    fn searchable(names: &[&str]) -> List {
+        let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        List::new(vec![true; names.len()], 0).searched_by(&names, true)
+    }
+
+    #[test]
+    fn a_search_shows_and_walks_only_what_it_finds() {
+        let mut model = front_end(1, 1);
+        model.trucks = searchable(&["Bigfoot", "Grave Digger", "Blue Thunder", "Bulldozer"]);
+
+        // Typing needs the field to take the keys first.
+        assert_eq!(model.apply(Action::Type('b')), []);
+        assert_eq!(model.apply(Action::Search), [Happened::SearchChanged]);
+        assert!(model.typing);
+        // Whatever the case, anywhere in the name.
+        assert_eq!(model.apply(Action::Type('B')), [Happened::SearchChanged]);
+        assert_eq!(model.trucks.shown(), [0, 2, 3]);
+        // The highlight was on one the search hides, and goes to the first it finds.
+        assert_eq!(
+            model.apply(Action::Type('u')),
+            [Happened::SearchChanged, Happened::TruckHighlighted(3)]
+        );
+        assert_eq!(model.trucks.shown(), [3]);
+        model.apply(Action::Erase);
+        assert_eq!(model.trucks.search, "B");
+        // Walking wraps round among what was found.
+        assert_eq!(model.apply(Action::Down), [Happened::TruckHighlighted(0)]);
+        assert_eq!(model.apply(Action::Down), [Happened::TruckHighlighted(2)]);
+
+        // Nothing found: the highlight stays where it was, and there is nothing to walk.
+        model.apply(Action::Type('x'));
+        assert!(model.trucks.shown().is_empty());
+        assert_eq!(model.trucks.highlighted, 2);
+        assert_eq!(model.apply(Action::Down), []);
+
+        // Enter keeps what was typed; clearing it shows everything again.
+        assert_eq!(model.apply(Action::StopTyping), [Happened::SearchChanged]);
+        assert!(!model.typing);
+        assert_eq!(model.apply(Action::Type('z')), []);
+        assert_eq!(model.apply(Action::ClearSearch), [Happened::SearchChanged]);
+        assert_eq!(model.trucks.shown(), [0, 1, 2, 3]);
+        assert_eq!(model.trucks.highlighted, 2);
+    }
+
+    #[test]
+    fn each_list_has_its_own_search_and_a_short_one_has_none() {
+        let mut model = front_end(3, 1);
+        model.tracks = searchable(&["Canyon", "Quarry"]);
+        // The trucks fit in view.
+        assert_eq!(model.apply(Action::Search), []);
+        assert!(!model.typing);
+
+        model.apply(Action::Show(Screen::Race));
+        model.apply(Action::Search);
+        model.apply(Action::Type('q'));
+        assert_eq!(model.tracks.highlighted, 1);
+        // Another screen stops the typing, and the search stays with its list.
+        model.apply(Action::Show(Screen::Truck));
+        assert!(!model.typing);
+        assert_eq!(model.trucks.shown(), [0, 1, 2]);
+        assert_eq!(model.tracks.search, "q");
     }
 }

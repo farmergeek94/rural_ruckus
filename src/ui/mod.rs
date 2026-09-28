@@ -308,6 +308,7 @@ fn read_what_to_show(
     dials: Res<Dials>,
     settings: Res<Settings>,
     browser: Res<FolderBrowser>,
+    theme: Res<Theme>,
     model: Option<Res<Model>>,
     mut trucks: MessageWriter<TruckHighlighted>,
     mut tracks: MessageWriter<TrackHighlighted>,
@@ -321,9 +322,14 @@ fn read_what_to_show(
             chosen,
         )
     };
+    // A list that doesn't fit in view can be searched by name.
+    let searched = |entries: &[Entry], chosen: usize| {
+        let names: Vec<String> = entries.iter().map(|entry| entry.name.clone()).collect();
+        list(entries, chosen).searched_by(&names, entries.len() > theme.list_rows)
+    };
     let mut front_end = FrontEnd::new(
-        list(&catalogue.trucks, choices.truck),
-        list(&catalogue.tracks, choices.track),
+        searched(&catalogue.trucks, choices.truck),
+        searched(&catalogue.tracks, choices.track),
         choices.laps,
         choices.opponents,
         dials
@@ -354,6 +360,15 @@ fn read_what_to_show(
     if let Some(model) = model {
         front_end.screen = model.0.screen;
         front_end.setting_in_hand = model.0.setting_in_hand;
+        // What was searched for, while the list still has a search field.
+        for (list, old) in [
+            (&mut front_end.trucks, &model.0.trucks),
+            (&mut front_end.tracks, &model.0.tracks),
+        ] {
+            if list.searchable {
+                list.search = old.search.clone();
+            }
+        }
     }
     // Whoever shows the truck and the track wants to know which, from the start.
     if !front_end.trucks.is_empty() {
@@ -393,7 +408,7 @@ fn apply_actions(
         }
         for happened in happened {
             match happened {
-                Happened::ScreenChanged(_) => {}
+                Happened::ScreenChanged(_) | Happened::SearchChanged => {}
                 Happened::TruckHighlighted(index) => {
                     choices.truck = index;
                     trucks.write(TruckHighlighted(index));
