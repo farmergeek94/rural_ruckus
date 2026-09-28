@@ -15,7 +15,10 @@
 //!
 //! Once the player's truck is on `truck::Autopilot`, as after the finish, the keys choose no
 //! more: a new view is picked at random every `SHOW_EACH_VIEW` seconds (`direct_views`), as
-//! a television picture of the race would change shots.
+//! a television picture of the race would change shots. It does not cut to it. The chase
+//! camera swings round the truck to look another way, on a spring, so that it eases off and
+//! eases in. Between the chase camera and the cockpit the picture fades to black and back
+//! (`Fade`): a swing from one to the other would go through the truck's body.
 //!
 //! MTM2 has an in-cab view whose dashboard the truck's `Instrument Cluster` names, which
 //! `dashboard` lays over this view. Where the eye sits here is the game's own: near the
@@ -27,6 +30,8 @@ use bevy_rapier3d::prelude::*;
 
 use super::ChaseCamera;
 use super::dashboard::eye_pitch;
+use super::spring::follow_angle;
+use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
 use crate::track::Track;
 use crate::truck::{Autopilot, ChosenTruck, Player, SeenFromInside, TruckVisual};
@@ -45,6 +50,16 @@ const COCKPIT_FORWARD: f32 = 0.35;
 /// On autopilot, how long each view is shown before another is picked, in seconds. Lower
 /// changes shots more often.
 const SHOW_EACH_VIEW: f32 = 7.0;
+/// On autopilot, how quickly the chase camera swings round to look another way, per
+/// second: it is most of the way round after `4 / SWING_STIFFNESS` seconds. Higher swings
+/// faster.
+const SWING_STIFFNESS: f32 = 2.5;
+/// On autopilot, how long the picture takes to fade to black, and again to come back, in
+/// seconds, between the chase camera and the cockpit.
+const FADE_TIME: f32 = 0.4;
+/// Over the 3D view and the dashboard (`dashboard::UNDER_THE_REST`), and under the rest of
+/// the race's UI, which is at -1 and above.
+const FADE_LAYER: i32 = -2;
 
 /// The views picked from on autopilot: the chase camera looking each way, and the cockpit
 /// looking ahead. From the cockpit, a look aside shows little but the inside of the cab.
@@ -103,15 +118,26 @@ impl Look {
     }
 }
 
-/// On autopilot, which way the camera looks, and how long until another view is picked.
+/// On autopilot: the view picked, how far the camera has got to it, and how long until
+/// another is picked.
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub(super) struct Director {
-    look: Look,
+    /// The view picked, which the camera swings or fades to. `None` until the first pick.
+    shot: Option<(CameraView, Look)>,
+    /// How far round from ahead the chase camera has swung, in radians (left is positive),
+    /// and how fast it is swinging, in radians per second.
+    swung: (f32, f32),
+    /// How dark the picture is, from 0 (clear) to 1 (black).
+    dark: f32,
     /// In seconds. At 0 or below, a view is picked at once.
     next_shot_in: f32,
     /// Stirred at every pick, for the next one.
     seed: u64,
 }
+
+/// Over the whole window: black, as dark as `Director::dark` says.
+#[derive(Component)]
+pub(super) struct Fade;
 
 /// Its key, or the gamepad's top button, changes the view. Not on autopilot, where
 /// `direct_views` chooses.
@@ -157,8 +183,9 @@ pub(super) fn reset_view(
     };
 }
 
-/// On autopilot, picks another view at random when the one shown has had its time: the
-/// first at once.
+/// On autopilot, picks another view at random when the one shown has had its time (the
+/// first at once), and takes the camera there: a swing round the truck, or to and from the
+/// cockpit a fade through black, changing over while the picture is black.
 pub(super) fn direct_views(
     time: Res<Time>,
     player: Single<Has<Autopilot>, Player>,
@@ -169,19 +196,56 @@ pub(super) fn direct_views(
     if !*player {
         return;
     }
-    director.next_shot_in -= time.delta_secs();
-    if director.next_shot_in > 0.0 {
+    let dt = time.delta_secs();
+    director.next_shot_in -= dt;
+    if director.next_shot_in <= 0.0 {
+        director.next_shot_in = SHOW_EACH_VIEW;
+        director.seed = stir(director.seed);
+        let current = director.shot.unwrap_or((*view, Look::Ahead));
+        director.shot = Some(next_shot(current, director.seed));
+    }
+    let Some((wanted, look)) = director.shot else {
         return;
+    };
+    if *view != wanted {
+        director.dark = (director.dark + dt / FADE_TIME).min(1.0);
+        if director.dark >= 1.0 {
+            *view = wanted;
+            // Unseen in the dark, it is already looking the new way.
+            director.swung = (look.angle(), 0.0);
+            if wanted == CameraView::Chase {
+                // Back to the chase camera, it starts again settled behind the truck.
+                camera.snap();
+            }
+        }
+    } else {
+        director.dark = (director.dark - dt / FADE_TIME).max(0.0);
+        director.swung = follow_angle(director.swung, look.angle(), SWING_STIFFNESS, dt);
     }
-    director.next_shot_in = SHOW_EACH_VIEW;
-    director.seed = stir(director.seed);
-    let (next, look) = next_shot((*view, director.look), director.seed);
-    if next == CameraView::Chase && *view != CameraView::Chase {
-        // Back to the chase camera, it starts again settled behind the truck.
-        camera.snap();
-    }
-    *view = next;
-    director.look = look;
+}
+
+pub(super) fn spawn_fade(mut commands: Commands) {
+    commands.spawn((
+        Fade,
+        DespawnOnExit(GameState::Racing),
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+        GlobalZIndex(FADE_LAYER),
+    ));
+}
+
+/// After `direct_views`.
+pub(super) fn show_fade(
+    director: Res<Director>,
+    mut fade: Single<&mut BackgroundColor, With<Fade>>,
+) {
+    let colour = BackgroundColor(Color::BLACK.with_alpha(director.dark));
+    fade.set_if_neq(colour);
 }
 
 /// One of `SHOTS` other than `current`, which `roll` picks.
@@ -200,8 +264,9 @@ fn stir(state: u64) -> u64 {
 }
 
 /// Lays the view and the look over where the chase camera has put the eye (on autopilot,
-/// the look `direct_views` chose), and in the cockpit tells the truck slice that the player's truck is seen from inside, which hides
-/// its body and keeps its lamps lit (`truck::SeenFromInside`).
+/// as far round as `direct_views` has swung it), and in the cockpit tells the truck slice
+/// that the player's truck is seen from inside, which hides its body and keeps its lamps
+/// lit (`truck::SeenFromInside`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn place_view(
     mut commands: Commands,
@@ -237,8 +302,9 @@ pub(super) fn place_view(
             gamepad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
         )
     });
+    // On autopilot the cockpit only looks ahead, and the chase camera goes by `swung`.
     let look = if autopilot {
-        director.look
+        Look::Ahead
     } else {
         Look::asked(
             bindings.pressed(&keys, Control::LookLeft),
@@ -248,6 +314,11 @@ pub(super) fn place_view(
         )
     };
     looking.set_if_neq(look);
+    let angle = if autopilot {
+        director.swung.0
+    } else {
+        look.angle()
+    };
 
     let (chase, mut transform, projection) = camera.into_inner();
     if cockpit {
@@ -260,9 +331,9 @@ pub(super) fn place_view(
             _ => 0.0,
         };
         *transform = cockpit_pose(truck, eye, look, pitch);
-    } else if look != Look::Ahead {
+    } else if angle != 0.0 {
         let aim = truck.translation + Vec3::Y * chase.config.look_above;
-        let eye = swing(transform.translation, aim, look);
+        let eye = swing(transform.translation, aim, angle);
         let ground = track.heights.height_at(eye.x, eye.z);
         let eye = eye.with_y(eye.y.max(ground + chase.config.clearance));
         *transform = Transform::from_translation(eye).looking_at(aim, Vec3::Y);
@@ -292,10 +363,11 @@ fn cockpit_pose(truck: &Transform, eye: Vec3, look: Look, pitch: f32) -> Transfo
     }
 }
 
-/// The chase camera's eye at `eye`, swung round `aim` to look `look`: behind the truck to
-/// look ahead, beside it on the right to look left, and in front of it to look back.
-fn swing(eye: Vec3, aim: Vec3, look: Look) -> Vec3 {
-    aim + Quat::from_rotation_y(look.angle()) * (eye - aim)
+/// The chase camera's eye at `eye`, swung `angle` radians round `aim` (left is positive,
+/// as `Look::angle`): behind the truck to look ahead, beside it on the right to look left,
+/// and in front of it to look back.
+fn swing(eye: Vec3, aim: Vec3, angle: f32) -> Vec3 {
+    aim + Quat::from_rotation_y(angle) * (eye - aim)
 }
 
 #[cfg(test)]
@@ -333,11 +405,11 @@ mod tests {
         // A truck facing -Z, with the camera behind it.
         let aim = Vec3::ZERO;
         let eye = Vec3::new(0.0, 3.0, 10.0);
-        let left = swing(eye, aim, Look::Left);
+        let left = swing(eye, aim, Look::Left.angle());
         assert!(left.abs_diff_eq(Vec3::new(10.0, 3.0, 0.0), 1e-4), "{left}");
-        let back = swing(eye, aim, Look::Back);
+        let back = swing(eye, aim, Look::Back.angle());
         assert!(back.z < -9.9, "{back}");
-        assert_eq!(swing(eye, aim, Look::Ahead), eye);
+        assert_eq!(swing(eye, aim, Look::Ahead.angle()), eye);
     }
 
     #[test]
