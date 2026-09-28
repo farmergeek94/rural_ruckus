@@ -4,7 +4,7 @@
 //!
 //! The player's truck comes from the `ChosenTruck` resource, and how it is set up from
 //! `TruckSetup`. The others come from `ComputerTrucks`, each set up at random for
-//! the race (`TruckSetup::random`).
+//! the race (`TruckSetup::random`), except for the grip dial.
 
 use std::f32::consts::FRAC_PI_2;
 

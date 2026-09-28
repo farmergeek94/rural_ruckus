@@ -7,8 +7,9 @@
 //!   metres, with the world centred on the origin.
 //! - MTM2's Z axis runs the other way. Flipping it turns a heading of `psi`, measured
 //!   from +Z, into a yaw of `-psi` about Y.
-//! - A texture's type (.TTY) says what kind of surface it is. Only ice is known, and it
-//!   is the types from 800 to 999.
+//! - A texture's type (.TTY) says what kind of surface it is, by its hundreds: ice is 8
+//!   and 9, and dirt, mud, sand, grass and rocky ground (`Footing::Loose`) are 2 and 4
+//!   to 7. A texture with no type is `Footing::Unnamed`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,11 @@ const METRES_PER_FOOT: f32 = 0.3048;
 /// the archives seen (`docs/formats/texture_types.md`): all ice, and no ice of any other
 /// type.
 const ICE_TYPES: std::ops::RangeInclusive<u32> = 800..=999;
+/// The texture types that are loose ground, which tires throw up: dirt (2), mud (4), sand
+/// (5), grass (6) and rocky ground (7). Measured by looking at the textures of every type on
+/// the ground of the base game's tracks (`docs/formats/texture_types.md`). The others are
+/// road (1), water (3), metal (10), rock (12) and railway track (14).
+const LOOSE_HUNDREDS: [u32; 5] = [2, 4, 5, 6, 7];
 
 /// Half the width of a checkpoint whose model isn't in the archive, in feet. Roads are
 /// two terrain cells wide, so one cell either side of the middle spans the road.
@@ -311,7 +317,9 @@ fn footing(track: &pod::Track) -> Vec<Footing> {
         .iter()
         .map(|name| match types.class_of(name) {
             Some(class) if ICE_TYPES.contains(&class) => Footing::Ice,
-            _ => Footing::Firm,
+            Some(class) if LOOSE_HUNDREDS.contains(&(class / 100)) => Footing::Loose,
+            Some(_) => Footing::Firm,
+            None => Footing::Unnamed,
         })
         .collect();
     let cells_per_side = map.size();

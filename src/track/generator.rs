@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 
 use super::data::direction_yaw;
-use super::{Course, Gate, HeightGrid, Scenery, StartPosition, TrackData};
+use super::{Course, Footing, Gate, HeightGrid, Scenery, StartPosition, TrackData};
 
 /// Side length of the (square) terrain, in metres.
 const SIZE: f32 = 512.0;
@@ -103,7 +103,8 @@ pub fn builtin_track() -> TrackData {
         heights,
         surface,
         ground: None,
-        footing: Vec::new(),
+        // One cell for the whole track: it is all dirt.
+        footing: vec![Footing::Loose],
         scenery: Scenery::default(),
         backdrop: None,
         skies: Default::default(),

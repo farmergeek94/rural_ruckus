@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 
-use super::PlayerTruck;
+use super::{Autopilot, PlayerTruck};
 use crate::keys::{Control, KeyBindings};
 
 /// How fast a held key winds the steering on, in locks per second: 1.5 reaches full
@@ -57,7 +57,7 @@ pub(super) fn read_input(
     keys: Res<ButtonInput<KeyCode>>,
     bindings: Res<KeyBindings>,
     gamepads: Query<&Gamepad>,
-    mut inputs: Query<&mut TruckInput, With<PlayerTruck>>,
+    mut inputs: Query<&mut TruckInput, (With<PlayerTruck>, Without<Autopilot>)>,
     // Where the keyboard's steering has got to, -1 (right) to 1 (left).
     mut key_steer: Local<f32>,
 ) {

@@ -138,7 +138,8 @@ const DIAL_PLACES: [f32; 5] = [-1.0, -0.5, 0.0, 0.5, 1.0];
 
 impl TruckSetup {
     /// A setup that `seed` picks, each dial at one of `DIAL_PLACES`, every place as likely
-    /// as another. For the computer's trucks, so that no two race alike.
+    /// as another. For the computer's trucks, so that no two race alike. The grip dial
+    /// stays centred: the truck grips as it was tuned.
     pub fn random(seed: u64) -> Self {
         // Stirred (splitmix64), so that seeds close together pick different setups.
         let mut state = seed;
@@ -154,7 +155,7 @@ impl TruckSetup {
             suspension: place(),
             gearing: place(),
             rear_steering: place(),
-            grip: place(),
+            grip: 0.0,
         }
     }
 }
@@ -378,21 +379,16 @@ mod tests {
     fn a_random_setup_puts_every_dial_where_the_garage_can() {
         let setups: Vec<_> = (0..200).map(TruckSetup::random).collect();
         for setup in &setups {
-            for dial in [
-                setup.suspension,
-                setup.gearing,
-                setup.rear_steering,
-                setup.grip,
-            ] {
+            for dial in [setup.suspension, setup.gearing, setup.rear_steering] {
                 assert!(DIAL_PLACES.contains(&dial));
             }
+            assert_eq!(setup.grip, 0.0);
         }
         // Every place turns up, on every dial, and the same seed picks the same setup.
         for place in DIAL_PLACES {
             assert!(setups.iter().any(|setup| setup.suspension == place));
             assert!(setups.iter().any(|setup| setup.gearing == place));
             assert!(setups.iter().any(|setup| setup.rear_steering == place));
-            assert!(setups.iter().any(|setup| setup.grip == place));
         }
         assert_eq!(TruckSetup::random(7), TruckSetup::random(7));
     }

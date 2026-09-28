@@ -661,12 +661,111 @@ fn alpine_ice_is_where_its_ice_textures_are() {
 #[test]
 fn my_track_has_no_ice() {
     let Some(track) = my_track() else { return };
+    assert!(track.footing.iter().all(|&footing| footing != Footing::Ice));
+}
+
+fn track_named(name: &str) -> Option<TrackData> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tracks")
+        .join(name);
+    path.exists()
+        .then(|| load_pod(&path, &BaseGame::none()).unwrap())
+}
+
+/// The share of the middles of a track's ground cells where tires throw the ground up.
+fn loose_share(track: &TrackData) -> f32 {
+    let cells = track.footing.len().isqrt();
+    let cell_size = track.heights.size() / cells as f32;
+    let at = |i: usize| (i as f32 + 0.5) * cell_size - track.heights.size() / 2.0;
+    let loose = (0..cells * cells)
+        .filter(|index| track.loose_at(at(index % cells), at(index / cells)))
+        .count();
+    loose as f32 / (cells * cells) as f32
+}
+
+/// Whether tires throw up the ground at each place of a track's starting grid.
+fn grid_is_loose(track: &TrackData) -> Vec<bool> {
+    (0..8)
+        .map(|place| {
+            let at = track.grid_place(place).position;
+            track.loose_at(at.x, at.y)
+        })
+        .collect()
+}
+
+/// Baja Beach names none of its ground. Its sand is loose by its colour: all of it.
+#[test]
+fn baja_beachs_unnamed_sand_is_loose() {
+    let Some(track) = track_named("BAJBEACH_MTM2_HD.POD") else {
+        return;
+    };
     assert!(
         track
             .footing
             .iter()
-            .all(|&footing| footing == Footing::Firm)
+            .all(|&footing| footing == Footing::Unnamed)
     );
+    assert_eq!(grid_is_loose(&track), [true; 8]);
+    let share = loose_share(&track);
+    assert!(share > 0.99, "{share}");
+}
+
+/// Tight Corners names none of its ground either. Its grass is loose by its colour, and
+/// its black asphalt, where the starting grid is, is not.
+#[test]
+fn tight_corners_grass_is_loose_and_its_asphalt_is_not() {
+    let Some(track) = track_named("tightcorners.pod") else {
+        return;
+    };
+    assert_eq!(grid_is_loose(&track), [false; 8]);
+    let share = loose_share(&track);
+    assert!(share > 0.99, "{share}");
+}
+
+/// rute756jam's streets are road (type 101) and throw nothing up; its sand (501) and grass
+/// (601) are loose. ÑCALLE2, a street texture its list leaves out, is not named.
+#[test]
+fn rute756jams_streets_are_firm_and_its_sand_is_loose() {
+    let Some(track) = track_named("rute756jam.pod") else {
+        return;
+    };
+    let count = |footing: Footing| {
+        track
+            .footing
+            .iter()
+            .filter(|&&each| each == footing)
+            .count()
+    };
+    assert_eq!(count(Footing::Firm), 250 + 250 + 246 + 16);
+    assert_eq!(count(Footing::Unnamed), 250);
+    assert_eq!(count(Footing::Loose), 256 * 256 - 762 - 250);
+}
+
+/// Route 77 names only its dirt and grass (type 201), which is loose. Its streets, where
+/// the starting grid is, and most of its grass are not named: 94.5 % of its ground is
+/// loose, by type or by colour.
+#[test]
+fn route_77s_named_dirt_is_loose_and_its_streets_are_not() {
+    let Some(track) = track_named("ROUTE77.POD") else {
+        return;
+    };
+    let loose = track
+        .footing
+        .iter()
+        .filter(|&&footing| footing == Footing::Loose);
+    assert_eq!(loose.count(), 23_635);
+    for place in 0..8 {
+        let at = track.grid_place(place).position;
+        assert_eq!(
+            track.footing_at(at.x, at.y),
+            Footing::Unnamed,
+            "grid place {place}"
+        );
+    }
+    // Its warm grey asphalt doesn't look loose; its unnamed grass does.
+    assert_eq!(grid_is_loose(&track), [false; 8]);
+    let share = loose_share(&track);
+    assert!(share > 0.93 && share < 0.96, "{share}");
 }
 
 /// Lands Between's ground textures each have a palette of their own. Through the track's,

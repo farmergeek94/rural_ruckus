@@ -28,7 +28,8 @@ pub struct TrackData {
     /// What the ground is underfoot in each ground cell: a square of cells covering the
     /// track, row by row like the height grid's vertices, and as many as there are
     /// `GroundTextures::cells`. Empty for a track that doesn't say, where all of the
-    /// ground is `Footing::Firm`. Ask `footing_at`.
+    /// ground is `Footing::Unnamed`; one cell for a track whose ground is all one. Ask
+    /// `footing_at`.
     pub footing: Vec<Footing>,
     /// Solid blocks on the ground's grid: bridges, the roofs of tunnels, walls. Part of
     /// the ground, and like it they don't move when the ground is rounded off. Empty for
@@ -73,7 +74,7 @@ impl TrackData {
     pub fn footing_at(&self, x: f32, z: f32) -> Footing {
         let cells = self.footing.len().isqrt();
         if cells == 0 {
-            return Footing::Firm;
+            return Footing::Unnamed;
         }
         let cell = |world: f32| {
             let across = (world / self.heights.size() + 0.5).clamp(0.0, 1.0);
@@ -81,16 +82,57 @@ impl TrackData {
         };
         self.footing[cell(z) * cells + cell(x)]
     }
+
+    /// Whether tires throw up the ground at `x`, `z` (world X and Z, in metres): loose
+    /// ground, as the track's texture types say. Where the track doesn't name its ground,
+    /// whatever looks loose (`looks_loose`), judged at that point of its texture, so that
+    /// a texture that is half grass and half road is loose only on its grass half.
+    pub fn loose_at(&self, x: f32, z: f32) -> bool {
+        match self.footing_at(x, z) {
+            Footing::Loose => true,
+            Footing::Firm | Footing::Ice => false,
+            Footing::Unnamed => self
+                .ground
+                .as_ref()
+                .and_then(|ground| ground.color_at(x, z, self.heights.size()))
+                .is_some_and(looks_loose),
+        }
+    }
 }
 
-/// What the ground is underfoot, for how well tires grip it.
+/// The least that a loose texel's red, green and blue differ, from 0 to 255: dirt, sand and
+/// grass are coloured, and road, rock and snow grey. Measured on the ground that the
+/// tracks' texture types don't name (`docs/formats/texture_types.md`): at 12, 97 to 100 %
+/// of Baja Beach's sand, Snake River's gravel and every track's grass is loose, and 1 to
+/// 10 % of the asphalt. Lower takes more asphalt for loose; higher, less of Lands
+/// Between's grey-green ground (38 % at 12).
+const LOOSE_COLORFULNESS: u8 = 12;
+
+/// Whether a texel of ground of `color` (sRGB, 0 to 255, as on screen) looks loose: it is
+/// coloured, and not blue, as water and ice are. The game's own rule: MTM2 says nothing of
+/// ground its texture types don't name.
+fn looks_loose([red, green, blue]: [u8; 3]) -> bool {
+    let brightest = red.max(green).max(blue);
+    let darkest = red.min(green).min(blue);
+    brightest - darkest >= LOOSE_COLORFULNESS && blue < red.max(green)
+}
+
+/// What the ground is underfoot, as the track's texture types say: for how well tires grip
+/// it, and whether they throw it up (`docs/formats/texture_types.md`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Footing {
-    /// Anything a tire grips as well as it can.
-    #[default]
+    /// Dirt, mud, sand, grass and rocky ground. Tires grip it as well as they can, and
+    /// throw it up.
+    Loose,
+    /// Road, water, rock, metal and railway track. Tires grip it as well as they can, and
+    /// throw nothing up.
     Firm,
     /// Ice: tires slip on it.
     Ice,
+    /// Ground the track doesn't name. Tires grip it as well as they can; whether they
+    /// throw it up is judged by its colour (`TrackData::loose_at`).
+    #[default]
+    Unnamed,
 }
 
 /// Square textures painted on the ground, one per ground cell.
@@ -109,6 +151,34 @@ pub struct GroundTextures {
 impl GroundTextures {
     pub fn cells_per_side(&self) -> usize {
         self.cells.len().isqrt()
+    }
+
+    /// The colour of the texel drawn at `x`, `z` (world X and Z, in metres) on a track
+    /// `size` metres across, in sRGB from 0 to 255. Found as the terrain's mesh finds it:
+    /// the cell's corners give the texture coordinates, spread across the cell. `None`
+    /// where there is no texture.
+    pub fn color_at(&self, x: f32, z: f32, size: f32) -> Option<[u8; 3]> {
+        let cells = self.cells_per_side();
+        if cells == 0 {
+            return None;
+        }
+        // Which cell, and how far across it.
+        let place = |world: f32| {
+            let across = (world / size + 0.5).clamp(0.0, 1.0) * cells as f32;
+            let cell = (across as usize).min(cells - 1);
+            (cell, (across - cell as f32).clamp(0.0, 1.0))
+        };
+        let ((col, u), (row, v)) = (place(x), place(z));
+        let cell = self.cells.get(row * cells + col)?;
+        let [lowest, plus_x, plus_z, far] = cell.corners.map(Vec2::from);
+        let coords = lowest.lerp(plus_x, u).lerp(plus_z.lerp(far, u), v);
+        let last = self.tile_size as f32 - 1.0;
+        let texel = (coords * self.tile_size as f32)
+            .floor()
+            .clamp(Vec2::ZERO, Vec2::splat(last));
+        let index = (texel.y as usize * self.tile_size + texel.x as usize) * 4;
+        let rgba = self.tiles.get(cell.tile)?.get(index..index + 4)?;
+        Some([rgba[0], rgba[1], rgba[2]])
     }
 }
 
@@ -360,6 +430,50 @@ mod tests {
             track.grid_place(4).position,
             Vec2::new(0.0, 6.0 + 3.0 * EXTRA_PLACE_SPACING)
         );
+    }
+
+    /// Colours read off real tracks' ground textures (`docs/formats/texture_types.md`).
+    #[test]
+    fn sand_dirt_and_grass_look_loose_and_road_snow_and_water_do_not() {
+        // Baja Beach's sand, Snake River's gravel, and grass.
+        assert!(looks_loose([213, 209, 184]));
+        assert!(looks_loose([149, 133, 127]));
+        assert!(looks_loose([70, 80, 30]));
+        // Tight Corners' and Route 77's asphalt, snow, and water.
+        assert!(!looks_loose([27, 29, 26]));
+        assert!(!looks_loose([85, 79, 74]));
+        assert!(!looks_loose([186, 186, 186]));
+        assert!(!looks_loose([40, 120, 160]));
+    }
+
+    #[test]
+    fn unnamed_ground_is_loose_where_its_texture_looks_it() {
+        // One cell with a tile of two texels: grey on its -X half, sand on its +X half.
+        let grey_and_sand = vec![40, 40, 40, 255, 213, 209, 184, 255];
+        let track = |footing: Vec<Footing>| {
+            let mut track = crate::track::builtin_track();
+            track.ground = Some(GroundTextures {
+                tile_size: 2,
+                tiles: vec![[grey_and_sand.clone(), grey_and_sand.clone()].concat()],
+                cells: vec![GroundCell {
+                    tile: 0,
+                    corners: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+                }],
+            });
+            track.footing = footing;
+            track
+        };
+        let quarter = crate::track::builtin_track().heights.size() / 4.0;
+        let (grey, sand) = (-quarter, quarter);
+
+        let unnamed = track(vec![Footing::Unnamed]);
+        assert!(!unnamed.loose_at(grey, 0.0));
+        assert!(unnamed.loose_at(sand, 0.0));
+        // A track that names its ground is taken at its word.
+        assert!(!track(vec![Footing::Firm]).loose_at(sand, 0.0));
+        assert!(track(vec![Footing::Loose]).loose_at(grey, 0.0));
+        // The built-in track is dirt.
+        assert!(crate::track::builtin_track().loose_at(grey, 0.0));
     }
 
     #[test]

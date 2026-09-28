@@ -9,7 +9,10 @@
 //!
 //! A tire touches the ground when the bottom of it is within `TOUCHING` of the ground's
 //! height. On a bridge, on another truck or in the air it throws nothing, nor in water,
-//! which throws its own spray (see the `water` slice).
+//! which throws its own spray (see the `water` slice). It throws up only loose ground
+//! (`track::TrackData::loose_at`): dirt, mud, sand, grass and rocky ground, as the track's
+//! texture types say, or, where they say nothing, as the ground's colour does. Road, rock,
+//! water, ice and snow throw nothing.
 //!
 //! Each piece is a flat square turned to the camera, drawn only, which touches nothing.
 //! Clods and dust are two pools of particles (`crate::particles`), which the graphics card
@@ -301,7 +304,8 @@ fn throw_dirt(
             let bottom = hub - up * config.wheel_radius;
             let height = track.heights.height_at(bottom.x, bottom.z);
             let under_water = track.water_level.is_some_and(|level| level > height);
-            if !touching(bottom.y - height, up) || under_water {
+            let loose = track.loose_at(bottom.x, bottom.z);
+            if !touching(bottom.y - height, up) || under_water || !loose {
                 owed.0[index] = 0.0;
                 continue;
             }

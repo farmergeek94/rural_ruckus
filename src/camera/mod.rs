@@ -1,6 +1,7 @@
 //! The chase camera, which keeps the truck in the middle of the picture, and the other
 //! views: the cockpit, and looking aside or behind (`views`), with the truck's dashboard
-//! in the cockpit (`dashboard`).
+//! in the cockpit (`dashboard`). On `truck::Autopilot`, as after the finish, the view
+//! changes by itself (`views`).
 //!
 //! This is the game's side of the camera, and the only part of it that knows the slices.
 //! `chase` (with `rig` and `spring`) is the camera by itself: fastened to nothing, it
@@ -42,6 +43,7 @@ impl Plugin for ChaseCameraPlugin {
         app.init_resource::<CameraSettings>()
             .init_resource::<CameraView>()
             .init_resource::<views::Look>()
+            .init_resource::<views::Director>()
             .init_resource::<crate::keys::KeyBindings>()
             .add_systems(
                 OnEnter(GameState::Racing),
@@ -61,6 +63,7 @@ impl Plugin for ChaseCameraPlugin {
                     apply_settings.run_if(resource_changed::<CameraSettings>),
                     (
                         views::change_view.before(CameraSystems::Want),
+                        views::direct_views.before(CameraSystems::Want),
                         // Part of placing the camera, so that what follows it sees the view.
                         views::place_view
                             .in_set(CameraSystems::Place)
