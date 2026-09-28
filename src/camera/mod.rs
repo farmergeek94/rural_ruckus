@@ -18,7 +18,7 @@ mod spring;
 mod views;
 
 use bevy::camera::Hdr;
-use bevy::post_process::bloom::Bloom;
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
@@ -125,11 +125,28 @@ fn spawn_camera(mut commands: Commands, settings: Res<CameraSettings>) {
     }
 }
 
-/// The race camera's bloom: a soft glow round only what is brighter than white. Stronger
-/// makes the whole picture hazy.
+/// Only what is brighter than this, in linear colour after exposure, spills a glow. The
+/// sun (`environment::SUNLIGHT`) at Bevy's default exposure lights a white surface to
+/// about 1.3, and the lamps are drawn at 12 times their picture, so this keeps the lit
+/// scene sharp and lets the lamps glow. Lower makes sunlit ground hazy; higher dims the
+/// lamps' glow.
+const GLOW_THRESHOLD: f32 = 2.0;
+
+/// The race camera's bloom: a soft glow round only what is brighter than
+/// `GLOW_THRESHOLD`. `Bloom::NATURAL` alone has no threshold, so it spreads a share of
+/// every pixel over the picture and makes it all hazy. Stronger makes the glows bigger.
 fn glow() -> Bloom {
     Bloom {
         intensity: 0.2,
+        prefilter: BloomPrefilter {
+            threshold: GLOW_THRESHOLD,
+            // Eases pixels in over the top 20 % below the threshold, so that a glow has no
+            // hard edge.
+            threshold_softness: 0.2,
+        },
+        // Bevy's advice with a threshold: add the glow on, rather than blend the picture
+        // with its blurred copy.
+        composite_mode: BloomCompositeMode::Additive,
         ..Bloom::NATURAL
     }
 }

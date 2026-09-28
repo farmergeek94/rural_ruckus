@@ -1053,8 +1053,16 @@ fn what_faces_the_camera_is_a_flat_picture_drawn_on_both_sides() {
             let Some(model) = track.models.get(&name.to_ascii_uppercase()) else {
                 continue;
             };
-            let depth = model.vertices.iter().map(|v| v[2].abs()).fold(0.0, f32::max);
-            let height = model.vertices.iter().map(|v| v[1].abs()).fold(0.0, f32::max);
+            let depth = model
+                .vertices
+                .iter()
+                .map(|v| v[2].abs())
+                .fold(0.0, f32::max);
+            let height = model
+                .vertices
+                .iter()
+                .map(|v| v[1].abs())
+                .fold(0.0, f32::max);
             assert!(depth < 0.2 && height > 10.0, "{path} {name}");
             let (mut towards_plus_z, mut towards_minus_z) = (0, 0);
             for face in &model.faces {

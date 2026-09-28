@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::Button;
 
 use super::input::Does;
-use super::model::{Action, FrontEnd, Screen, split_in_two, visible_rows};
+use super::model::{Action, FrontEnd, List, Screen, split_in_two, visible_rows};
 use super::theme::Look;
 use super::{
     Catalogue, Dial, Dials, Entry, Folder, FolderBrowser, FrontEndOpen, Model, Setting, Settings,
@@ -29,6 +29,8 @@ const TITLE: &str = "RURAL RUCKUS";
 const BROWSER_WIDTH: f32 = 1.6;
 const HINTS: &str = "Q / E screens    arrows move and change    - / + opponents    Enter GO    drag or right stick turns the truck";
 const BROWSING_HINTS: &str = "arrows move    Enter or right goes in    Backspace or left goes up    Space chooses    Esc leaves";
+const SEARCH_HINT: &str = "    / searches";
+const TYPING_HINTS: &str = "type to search    up / down move    Backspace erases    Enter keeps the search    Esc clears it";
 
 #[expect(
     clippy::too_many_arguments,
@@ -206,7 +208,7 @@ impl Drawing<'_> {
                         middle,
                         "SELECT TRUCK",
                         &self.catalogue.trucks,
-                        self.model.trucks.highlighted,
+                        &self.model.trucks,
                         Action::PickTruck,
                     );
                 }
@@ -215,7 +217,7 @@ impl Drawing<'_> {
                         middle,
                         "SELECT TRACK",
                         &self.catalogue.tracks,
-                        self.model.tracks.highlighted,
+                        &self.model.tracks,
                         Action::PickTrack,
                     );
                     self.race(middle);
@@ -250,12 +252,14 @@ impl Drawing<'_> {
         ));
     }
 
+    /// A list under its heading, with a search field over it when it is too long to see
+    /// all at once. Only what the search finds is shown.
     fn list(
         &self,
         parent: Parent,
         heading: &str,
         entries: &[Entry],
-        highlighted: usize,
+        list: &List,
         pick: fn(usize) -> Action,
     ) {
         let theme = self.theme;
@@ -263,28 +267,125 @@ impl Drawing<'_> {
             .spawn(self.panel(theme.panel_width))
             .with_children(|panel| {
                 self.heading(panel, heading);
-                let rows = visible_rows(highlighted, entries.len(), theme.list_rows);
-                for index in rows.clone() {
-                    self.row(panel, &entries[index], index == highlighted, pick(index));
+                if list.searchable {
+                    self.search_field(panel, list);
                 }
-                if rows.len() < entries.len() {
+                let shown = list.shown();
+                // Where the highlight is among what is shown: at the top when it is hidden.
+                let at = shown
+                    .iter()
+                    .position(|&index| index == list.highlighted)
+                    .unwrap_or(0);
+                let rows = visible_rows(at, shown.len(), theme.list_rows);
+                for &index in &shown[rows.clone()] {
+                    self.row(
+                        panel,
+                        &entries[index],
+                        index == list.highlighted,
+                        pick(index),
+                    );
+                }
+                let found = if list.search.is_empty() { "" } else { " found" };
+                let count = if rows.len() < shown.len() {
+                    format!(
+                        "{} to {} of {}{found}",
+                        rows.start + 1,
+                        rows.end,
+                        shown.len()
+                    )
+                } else if !list.search.is_empty() && !shown.is_empty() {
+                    format!("{} of {}", shown.len(), entries.len())
+                } else {
+                    String::new()
+                };
+                if !count.is_empty() {
                     panel.spawn((
-                        Text::new(format!(
-                            "{} to {} of {}",
-                            rows.start + 1,
-                            rows.end,
-                            entries.len()
-                        )),
+                        Text::new(count),
                         theme.body(theme.small_size),
                         TextColor(theme.text_dim),
                     ));
                 }
-                if entries.is_empty() {
+                let empty = if entries.is_empty() {
+                    "Nothing to choose from"
+                } else if shown.is_empty() {
+                    "Nothing found"
+                } else {
+                    ""
+                };
+                if !empty.is_empty() {
                     panel.spawn((
-                        Text::new("Nothing to choose from"),
+                        Text::new(empty),
                         theme.body(theme.text_size),
                         TextColor(theme.text_dim),
                     ));
+                }
+            });
+    }
+
+    /// What the list is searched for, which takes the keys when it is clicked, and a button
+    /// that empties it.
+    fn search_field(&self, panel: Parent, list: &List) {
+        let theme = self.theme;
+        let typing = self.model.typing;
+        let (text, color) = match (list.search.is_empty(), typing) {
+            // A bar where the next character goes.
+            (_, true) => (format!("{}|", list.search), theme.text),
+            (true, false) => ("Search  ( / )".to_string(), theme.text_dim),
+            (false, false) => (list.search.clone(), theme.text),
+        };
+        panel
+            .spawn(Node {
+                column_gap: px(8),
+                margin: UiRect::bottom(px(6)),
+                ..default()
+            })
+            .with_children(|line| {
+                line.spawn((
+                    Button,
+                    Does(Action::Search),
+                    Look {
+                        normal: theme.row,
+                        hovered: theme.row_hovered,
+                    },
+                    BackgroundColor(theme.row),
+                    theme.pill(
+                        Node {
+                            flex_grow: 1.0,
+                            min_width: px(0),
+                            height: px(theme.row_height),
+                            padding: UiRect::horizontal(px(24)),
+                            align_items: AlignItems::Center,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        typing,
+                    ),
+                ))
+                .with_children(|field| {
+                    field.spawn((
+                        Text::new(text),
+                        theme.body(theme.text_size),
+                        TextColor(color),
+                        TextLayout::no_wrap(),
+                        Pickable::IGNORE,
+                    ));
+                });
+                if !list.search.is_empty() {
+                    self.button(
+                        line,
+                        "X",
+                        theme.text_size,
+                        Action::ClearSearch,
+                        false,
+                        Node {
+                            width: px(theme.row_height),
+                            height: px(theme.row_height),
+                            flex_shrink: 0.0,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                    );
                 }
             });
     }
@@ -958,7 +1059,7 @@ impl Drawing<'_> {
                         }
                         lines.spawn(line(self.detail(), theme.small_size, theme.text_dim));
                         lines.spawn(line(self.summary(), theme.text_size, theme.text));
-                        lines.spawn(line(HINTS.into(), theme.small_size, theme.text_dim));
+                        lines.spawn(line(self.hints(), theme.small_size, theme.text_dim));
                     });
                 // Nothing is raced from a folder.
                 if self.folder.is_some() {
@@ -997,6 +1098,23 @@ impl Drawing<'_> {
                         ));
                     });
             });
+    }
+
+    /// Which keys do what, with the search's own while it takes the keys.
+    fn hints(&self) -> String {
+        if self.model.typing {
+            return TYPING_HINTS.into();
+        }
+        let searchable = match self.model.screen {
+            Screen::Truck => self.model.trucks.searchable,
+            Screen::Race => self.model.tracks.searchable,
+            _ => false,
+        };
+        if searchable {
+            format!("{HINTS}{SEARCH_HINT}")
+        } else {
+            HINTS.into()
+        }
     }
 
     /// What is highlighted on the screen that is up, and where it came from.

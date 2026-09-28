@@ -378,7 +378,12 @@ mod tests {
     fn a_random_setup_puts_every_dial_where_the_garage_can() {
         let setups: Vec<_> = (0..200).map(TruckSetup::random).collect();
         for setup in &setups {
-            for dial in [setup.suspension, setup.gearing, setup.rear_steering, setup.grip] {
+            for dial in [
+                setup.suspension,
+                setup.gearing,
+                setup.rear_steering,
+                setup.grip,
+            ] {
                 assert!(DIAL_PLACES.contains(&dial));
             }
         }
