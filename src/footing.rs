@@ -85,7 +85,7 @@ fn footing_under(track: &TrackData, bottom: Vec3, frozen: bool) -> Footing {
 /// How much of a tire's grip the ground leaves it.
 fn grip_of(footing: Footing) -> f32 {
     match footing {
-        Footing::Firm => 1.0,
+        Footing::Loose | Footing::Firm | Footing::Unnamed => 1.0,
         Footing::Ice => ICE_GRIP,
     }
 }
@@ -96,7 +96,9 @@ mod tests {
 
     #[test]
     fn ice_grips_less_than_firm_ground_but_not_nothing() {
+        assert_eq!(grip_of(Footing::Loose), 1.0);
         assert_eq!(grip_of(Footing::Firm), 1.0);
+        assert_eq!(grip_of(Footing::Unnamed), 1.0);
         assert!(grip_of(Footing::Ice) > 0.0 && grip_of(Footing::Ice) < 1.0);
     }
 
@@ -109,13 +111,14 @@ mod tests {
         track.water_level = Some(level);
         let on_it = Vec3::new(x, level, z);
         assert_eq!(footing_under(&track, on_it, true), Footing::Ice);
-        assert_eq!(footing_under(&track, on_it, false), Footing::Firm);
+        // The built-in track's ground is dirt.
+        assert_eq!(footing_under(&track, on_it, false), Footing::Loose);
         // On a bridge over it.
         let over_it = on_it + Vec3::Y * (ON_THE_ICE + 1.0);
-        assert_eq!(footing_under(&track, over_it, true), Footing::Firm);
+        assert_eq!(footing_under(&track, over_it, true), Footing::Loose);
         // Where the ground is above the water, the ground's own.
         track.water_level = Some(ground - 2.0);
         let on_land = Vec3::new(x, ground, z);
-        assert_eq!(footing_under(&track, on_land, true), Footing::Firm);
+        assert_eq!(footing_under(&track, on_land, true), Footing::Loose);
     }
 }

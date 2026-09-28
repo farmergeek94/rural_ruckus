@@ -13,6 +13,10 @@
 //!   pitches with the truck. The player's own truck is hidden in it: from inside, its body
 //!   would fill the picture.
 //!
+//! Once the player's truck is on `truck::Autopilot`, as after the finish, the keys choose no
+//! more: a new view is picked at random every `SHOW_EACH_VIEW` seconds (`direct_views`), as
+//! a television picture of the race would change shots.
+//!
 //! MTM2 has an in-cab view whose dashboard the truck's `Instrument Cluster` names, which
 //! `dashboard` lays over this view. Where the eye sits here is the game's own: near the
 //! front of the body and just under its roof. With a dashboard, it is tipped down a little,
@@ -25,7 +29,7 @@ use super::ChaseCamera;
 use super::dashboard::eye_pitch;
 use crate::keys::{Control, KeyBindings};
 use crate::track::Track;
-use crate::truck::{ChosenTruck, Player, SeenFromInside, TruckVisual};
+use crate::truck::{Autopilot, ChosenTruck, Player, SeenFromInside, TruckVisual};
 
 /// Changes between the chase camera and the cockpit, as `Control::ChangeView`'s key does.
 const VIEW_BUTTON: GamepadButton = GamepadButton::North;
@@ -37,6 +41,20 @@ const STICK_LOOK: f32 = 0.5;
 /// more of the course over the bumps; further forward sees less of the bonnet.
 const COCKPIT_BELOW_ROOF: f32 = 0.35;
 const COCKPIT_FORWARD: f32 = 0.35;
+
+/// On autopilot, how long each view is shown before another is picked, in seconds. Lower
+/// changes shots more often.
+const SHOW_EACH_VIEW: f32 = 7.0;
+
+/// The views picked from on autopilot: the chase camera looking each way, and the cockpit
+/// looking ahead. From the cockpit, a look aside shows little but the inside of the cab.
+const SHOTS: [(CameraView, Look); 5] = [
+    (CameraView::Chase, Look::Ahead),
+    (CameraView::Chase, Look::Left),
+    (CameraView::Chase, Look::Right),
+    (CameraView::Chase, Look::Back),
+    (CameraView::Cockpit, Look::Ahead),
+];
 
 /// Which view the player's camera shows. Not remembered between races.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -85,14 +103,29 @@ impl Look {
     }
 }
 
-/// Its key, or the gamepad's top button, changes the view.
+/// On autopilot, which way the camera looks, and how long until another view is picked.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub(super) struct Director {
+    look: Look,
+    /// In seconds. At 0 or below, a view is picked at once.
+    next_shot_in: f32,
+    /// Stirred at every pick, for the next one.
+    seed: u64,
+}
+
+/// Its key, or the gamepad's top button, changes the view. Not on autopilot, where
+/// `direct_views` chooses.
 pub(super) fn change_view(
     keys: Res<ButtonInput<KeyCode>>,
     bindings: Res<KeyBindings>,
     gamepads: Query<&Gamepad>,
     mut view: ResMut<CameraView>,
     mut camera: Single<&mut ChaseCamera>,
+    player: Single<Has<Autopilot>, Player>,
 ) {
+    if *player {
+        return;
+    }
     let asked = bindings.just_pressed(&keys, Control::ChangeView)
         || gamepads
             .iter()
@@ -109,13 +142,65 @@ pub(super) fn change_view(
 }
 
 /// A new race starts with the chase camera, looking ahead.
-pub(super) fn reset_view(mut view: ResMut<CameraView>, mut looking: ResMut<Look>) {
+pub(super) fn reset_view(
+    time: Res<Time<bevy::time::Real>>,
+    mut view: ResMut<CameraView>,
+    mut looking: ResMut<Look>,
+    mut director: ResMut<Director>,
+) {
     *view = CameraView::Chase;
     *looking = Look::Ahead;
+    // From the clock, so that each race shows its own order of views.
+    *director = Director {
+        seed: time.elapsed().as_nanos() as u64,
+        ..default()
+    };
 }
 
-/// Lays the view and the look over where the chase camera has put the eye, and in the
-/// cockpit tells the truck slice that the player's truck is seen from inside, which hides
+/// On autopilot, picks another view at random when the one shown has had its time: the
+/// first at once.
+pub(super) fn direct_views(
+    time: Res<Time>,
+    player: Single<Has<Autopilot>, Player>,
+    mut view: ResMut<CameraView>,
+    mut director: ResMut<Director>,
+    mut camera: Single<&mut ChaseCamera>,
+) {
+    if !*player {
+        return;
+    }
+    director.next_shot_in -= time.delta_secs();
+    if director.next_shot_in > 0.0 {
+        return;
+    }
+    director.next_shot_in = SHOW_EACH_VIEW;
+    director.seed = stir(director.seed);
+    let (next, look) = next_shot((*view, director.look), director.seed);
+    if next == CameraView::Chase && *view != CameraView::Chase {
+        // Back to the chase camera, it starts again settled behind the truck.
+        camera.snap();
+    }
+    *view = next;
+    director.look = look;
+}
+
+/// One of `SHOTS` other than `current`, which `roll` picks.
+fn next_shot(current: (CameraView, Look), roll: u64) -> (CameraView, Look) {
+    let others: Vec<_> = SHOTS.into_iter().filter(|shot| *shot != current).collect();
+    others[(roll % others.len() as u64) as usize]
+}
+
+/// A number that looks random, from `state` (splitmix64), so that seeds close together
+/// give numbers far apart.
+fn stir(state: u64) -> u64 {
+    let mut mixed = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    mixed ^ (mixed >> 31)
+}
+
+/// Lays the view and the look over where the chase camera has put the eye (on autopilot,
+/// the look `direct_views` chose), and in the cockpit tells the truck slice that the player's truck is seen from inside, which hides
 /// its body and keeps its lamps lit (`truck::SeenFromInside`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn place_view(
@@ -125,13 +210,14 @@ pub(super) fn place_view(
     gamepads: Query<&Gamepad>,
     view: Res<CameraView>,
     mut looking: ResMut<Look>,
+    director: Res<Director>,
     track: Res<Track>,
     chosen: Res<ChosenTruck>,
-    player: Single<(Entity, &Collider), Player>,
+    player: Single<(Entity, &Collider, Has<Autopilot>), Player>,
     visuals: Query<(Entity, &TruckVisual, &Transform, Has<SeenFromInside>), Without<ChaseCamera>>,
     camera: Single<(&ChaseCamera, &mut Transform, Option<&Projection>)>,
 ) {
-    let (player, collider) = *player;
+    let (player, collider, autopilot) = *player;
     let Some((drawn, _, truck, inside)) = visuals
         .iter()
         .find(|(_, visual, _, _)| visual.truck == player)
@@ -151,12 +237,16 @@ pub(super) fn place_view(
             gamepad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
         )
     });
-    let look = Look::asked(
-        bindings.pressed(&keys, Control::LookLeft),
-        bindings.pressed(&keys, Control::LookRight),
-        bindings.pressed(&keys, Control::LookBack),
-        stick,
-    );
+    let look = if autopilot {
+        director.look
+    } else {
+        Look::asked(
+            bindings.pressed(&keys, Control::LookLeft),
+            bindings.pressed(&keys, Control::LookRight),
+            bindings.pressed(&keys, Control::LookBack),
+            stick,
+        )
+    };
     looking.set_if_neq(look);
 
     let (chase, mut transform, projection) = camera.into_inner();
@@ -223,6 +313,19 @@ mod tests {
         assert_eq!(Look::asked(false, false, false, Vec2::X), Look::Right);
         assert_eq!(Look::asked(false, false, false, -Vec2::Y), Look::Back);
         assert_eq!(Look::asked(false, false, false, Vec2::X * 0.2), Look::Ahead);
+    }
+
+    #[test]
+    fn each_view_picked_on_autopilot_is_another_and_any_other_can_come() {
+        for current in SHOTS {
+            let picked: Vec<_> = (0..200)
+                .map(|seed| next_shot(current, stir(seed)))
+                .collect();
+            assert!(!picked.contains(&current));
+            for shot in SHOTS.into_iter().filter(|shot| *shot != current) {
+                assert!(picked.contains(&shot), "{shot:?} after {current:?}");
+            }
+        }
     }
 
     #[test]

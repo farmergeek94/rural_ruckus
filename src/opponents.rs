@@ -31,6 +31,10 @@
 //! checkpoint without driving through it. A track with no course has nothing to follow,
 //! and its computer trucks stand still.
 //!
+//! Once the player's truck has finished, a driver takes its wheel as well
+//! (`take_the_players_wheel`), and it drives on round the course with the others. It gets
+//! `truck::Autopilot`, so that the keys leave it alone.
+//!
 //! Uses the `track` slice for the course, the `truck` slice for the trucks and the `race`
 //! slice for the checkpoints. Needs `RacePlugin`.
 
@@ -40,7 +44,7 @@ use bevy_rapier3d::prelude::*;
 use crate::game_state::GameState;
 use crate::race::{BackToCheckpoint, RaceSystems, Racer};
 use crate::track::{Course, Track};
-use crate::truck::{Held, PlayerTruck, Truck, TruckConfig, TruckInput};
+use crate::truck::{Autopilot, Held, PlayerTruck, Truck, TruckConfig, TruckInput};
 
 /// The speed the quickest driver keeps to where the course is straight, in m/s. The truck
 /// can do 38. Bumps throw a truck off a mountain road now and then at this, and the race
@@ -194,6 +198,7 @@ impl Plugin for OpponentsPlugin {
             Update,
             (
                 take_the_wheel,
+                take_the_players_wheel,
                 // So that the race sees the request in the same frame.
                 ask_to_be_put_back.before(RaceSystems::BackToCheckpoint),
             )
@@ -268,6 +273,24 @@ fn take_the_wheel(
         commands
             .entity(truck)
             .insert(ComputerDriver::new(taken + index));
+    }
+}
+
+/// The player's truck while the player still drives it.
+type PlayersHands = (With<PlayerTruck>, Without<ComputerDriver>);
+
+/// Once the player's truck has finished, drives it on as another driver, the slowest.
+fn take_the_players_wheel(
+    mut commands: Commands,
+    player: Query<(Entity, &Racer), PlayersHands>,
+    drivers: Query<(), With<ComputerDriver>>,
+) {
+    for (truck, racer) in &player {
+        if racer.progress.finished.is_some() {
+            commands
+                .entity(truck)
+                .insert((Autopilot, ComputerDriver::new(drivers.iter().count())));
+        }
     }
 }
 

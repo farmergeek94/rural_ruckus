@@ -60,6 +60,33 @@ seen through the track's palette or through the texture's own palette where it h
 Type 1 is on textures named `TRAC*`, `88RD*` and `BSTART*`, which look like road names.
 `TRAC2` and `88RD1` are not in Alpine's archive: they are in the base game's archives.
 
+### In the base game
+
+The base game's own tracks have the best evidence: their lists were written by the
+people who made the game. The 16 archives in `Shared` have 15 track files with a type
+list, of 211 to 669 lines. We looked at the textures on the ground of each, grouped by
+type (**measured**). The hundreds give the kind of surface:
+
+| Hundreds | What the textures on the ground show (base game) | Largest |
+| --- | --- | --- |
+| 1 | Road: grey asphalt (Junk, Thunder Park), Crazy 98's dark oval | `8BASDS00`, 223 cells |
+| 2 | Dirt: dirt with grass, cracked mud, gravel, dirt tracks, soil | `SN4DRC00`, 60,186 cells |
+| 3 | Water; 302 is wet stony dirt (Junk, 2 cells) | |
+| 4 | Mud: brown, some with stones (Junk) | `JK8DW00`, 21 cells |
+| 5 | Sand: pale, orange and red (Outback, Baja) | `8GBSD00`, 57,554 cells |
+| 6 | Grass, some with patches of dirt | `CR4GRS00`, 64,880 cells |
+| 7 | Rocky ground: orange rock and dirt (Rock Quarry), red sand with bushes (Baja), grey gravel (Junk) | `RQ8TRN00`, 58,879 cells |
+| 10 | Metal plates (Summit 2) | 1 cell each |
+| 12 | Rock and stone: rocky brown ground, grey rock, stone blocks | `IS8RRK07`, 3,943 cells |
+| 14 | Railway track | `TP8TK00`, 256 cells |
+
+Type 0 is on 3 cells only (rock, brick, dirt). No base game track has ice (8 or 9).
+Crazy 98's dark oval (`C2RD*`) is type 100: the game's makers called it road. MyTrack has the
+same textures. Community tracks do not always agree: Alpine gives its snow 600 and 601, the grass
+types; Monte Carlo gives Junk's `JK8GR00` 601 where Junk gives 604, and `JK8DW00` 501
+where Junk gives 402. 413,789 ground cells of the 25 track files have a texture that is
+not in their list, 65,202 of them in the base game's Snake (`AREA65`).
+
 We also looked at every texture that is on the ground of the 12 tracks, grouped by type
 (**measured**, with the base game's archives):
 
@@ -85,16 +112,53 @@ another type is ice. `tests/pod_real_tracks.rs` checks this: it fails if a new t
 these types that nobody looked at. The game takes 800 to 999 as ice
 (`track/pod_import.rs`). Alpine has 1,408 cells of ice.
 
+## What the game does with the types
+
+Tires throw up dirt and dust only on loose ground (`TrackData::loose_at`). Where the list
+names a texture, its type says: the types whose hundreds are 2 (dirt), 4 (mud), 5 (sand),
+6 (grass) and 7 (rocky ground), from the base game's own lists above, are loose
+(`Footing::Loose`). Types 800 to 999 are ice. Every other type (road, water, metal, rock,
+railway track, and 0) is firm ground, which throws nothing up. All of them grip as well
+as they can, except ice. `track/pod_import.rs` sorts the types. Alpine's snow is types
+600 and 601, the grass types, so it is loose.
+
+A texture that is not in the list (`Footing::Unnamed`) is loose where its texel under the
+tire is coloured and not blue: its red, green and blue differ by 12 or more (from 0 to
+255), and blue is not the largest. This is the game's own rule, not MTM2's. Many tracks
+need it: Baja Beach, Snake River Canyon and Tight Corners have no list, and most of the
+ground of Lands Between (64,871 of 65,536 cells), Route 77 (41,901, its streets and most
+of its grass) and tground (30,912, its sand) is not in the list. We measured the share of
+each texture's texels that the rule takes as loose (**measured**):
+
+| Texture | What it shows | Loose at 8 | Loose at 12 | Loose at 16 |
+| --- | --- | --- | --- | --- |
+| `SKTRN028`, `SKTK086` (Baja Beach) | Sand | 100 % | 100 % | 100 % |
+| `DVTK128` (Snake River Canyon) | Pale gravel | 100 % | 99 % | 97 % |
+| `SAND04` (tground) | Sand | 100 % | 100 % | 100 % |
+| `5X5_00` (Tight Corners), `SEG1009` (Route 77) | Grass | 100 % | 97 to 100 % | 94 to 100 % |
+| `C6COB00` (Critic) | Mud | 92 % | 91 % | 90 % |
+| `GRKDK11` (Lands Between) | Dark grey-green ground | 70 % | 38 % | 13 % |
+| `KCOT1` (Route 77) | Warm grey asphalt | 47 % | 10 % | 7 % |
+| `8BASD492` (Route 77) | Grey asphalt | 10 % | 1 % | 0 % |
+| `4X425` (Tight Corners), `RSTA4` (Critic) | Black asphalt | 4 % | 2 to 4 % | 1 to 3 % |
+| `DRSNW11` (Lands Between) | Snow | 0 % | 0 % | 0 % |
+
+Colour cannot tell Route 77's warm grey asphalt (red, green and blue about 85, 79 and 74)
+from Lands Between's grey-green ground (about 76, 74 and 65) completely: at 12, a third
+of that ground throws dirt, and a tenth of that asphalt. Yellow lines on road are
+coloured, and throw dirt. With the rule, Baja Beach's ground is all loose, and the whole
+starting grids of Tight Corners and Route 77, on asphalt, are not (`tests/pod_track.rs`).
+
 ## Open
 
 - What the other hundreds do in MTM2 (sounds, spray, speed). Only their look is known.
-- Whether MyTrack's dark oval (types 100 and 101) is asphalt or packed dirt.
 - What the last two digits mean.
 - Why Alpine's ice has type 800 in one texture and 901 or 902 in others.
 - What a texture that is not in the list gets. Alpine's `11EI6`, an ice edge on 104
   cells, is not in its list. Lands Between lists `SNWICE11`, the middle of a set of nine
   snow and ice textures, and none of the eight edges. The game takes a texture that is
-  not in the list as firm ground.
+  not in the list as ground that grips fully, and that throws dirt up where it is
+  coloured (see above).
 - How much MTM2's trucks grip on ice. The game's value (`ICE_GRIP` in `src/footing.rs`)
   is its own.
 - Which type the game uses for a texture in the list two times.

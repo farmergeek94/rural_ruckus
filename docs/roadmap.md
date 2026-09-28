@@ -87,7 +87,7 @@ Goal: the ground acts as it looks. Mud, sand and water change how a truck drives
 
 | Item | Status |
 | --- | --- |
-| Ground types other than ice: speed and grip | **Open**. Only their look is known. |
+| Ground types other than ice: speed and grip | **Open**. What each shows is known. |
 
 ### Stage 15: the rest of the game
 
@@ -179,7 +179,8 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Water | Own | File: [level.md](formats/level.md) | The height is measured. How MTM2 drew water and moved trucks in it is not. |
 | Frozen water in snow | Own | | In snow the water is a solid sheet of ice at its level, and tires on it grip as on ice. F7 freezes and thaws it in a race. MTM2 has no frozen water that is known. Not yet driven. |
 | Ground types (`.TTY`): ice | Own | File: [texture_types.md](formats/texture_types.md) | Only ice is used. `ICE_GRIP` is the game's own. |
-| Ground types: the other hundreds (sounds, spray, speed: mud, sand, water) | Open | File: [texture_types.md](formats/texture_types.md) | Only their look is known. |
+| Ground types (`.TTY`): loose ground | Own | File: [texture_types.md](formats/texture_types.md) | The hundreds of the base game's types are measured: 1 road, 2 dirt, 3 water, 4 mud, 5 sand, 6 grass, 7 rocky ground, 10 metal, 12 rock, 14 railway track. Tires throw up dirt only on 2 and 4 to 7, and, on ground the list doesn't name, where it is coloured and not blue (the game's own rule). Not yet driven. |
+| Ground types: the other hundreds (sounds, spray, speed: mud, sand, water) | Open | File: [texture_types.md](formats/texture_types.md) | What each shows is known; what MTM2 did with it is not. |
 | Ramps, cylinders and the stadium in the track file | Open | File: [situation.md](formats/situation.md) | |
 | Track music | Out of scope | File: [level.md](formats/level.md) | The `.LVL` names it. See Audio. |
 
@@ -210,7 +211,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Computer trucks, up to seven | Done | | First pass. Not tuned to be fast. |
 | Computer trucks' speed hints from the track (`cspeed`, `ctype`, `cTrackWidth`) | Open | File: [situation.md](formats/situation.md) | |
 | Start sequence (countdown) | Own | Game | 3, 2, 1, GO, with every truck held on the grid (`truck::Held`), and again on a restart. How MTM2 starts a race is not confirmed. Not yet driven. |
-| Finish and results screen | Own | Game | Once the player finishes: every truck's place, race time and best lap, kept up to date as the rest finish. Enter races again. What MTM2's results show is not confirmed. |
+| Finish and results screen | Own | Game | Once the player finishes: every truck's place, race time and best lap, kept up to date as the rest finish. The computer then drives the player's truck on, and the camera changes to a random view every 7 seconds. Enter races again. What MTM2's results show is not confirmed. |
 | Pause screen | Own | Game | Esc (or a gamepad's Start or Select) stops the game and shows four choices: continue, restart the race (built again from nothing, as GO builds it: trucks, scenery, countdown, the computer's setups and a random weather), save a screenshot (a PNG in `screenshots/`, without the dialog), and cancel the race, which goes back to the front end (or quits a race started from the command line). `src/race/pause.rs`. What MTM2's pause screen offered is not confirmed. Not yet looked at in the game. |
 | Race types other than circuit (rally, Summit Rumble, others) | Missing | File: [situation.md](formats/situation.md) | `Track Race Type` is **open**. Which types MTM2 has must be confirmed. The base game's three Summit Rumble arenas load, with 2 gates each, and are raced as circuits. |
 | Extra courses on one track (`Extended Course Definitions`) | Open | File: [situation.md](formats/situation.md) | |
@@ -227,7 +228,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Map of the track in the race | Missing | Game | The front end paints a track map already. |
 | Weather | Own | | Clear is the default, as MTM2 was. The rest is the game's own. Snow freezes the water. |
 | Time of day: day, dusk, night | Own | File: [level.md](formats/level.md) | An option, and F8 in a race. MTM2 had dusk and night skies (**reference**); how it lit the ground under them is not measured. |
-| Dirt and dust | Own | | |
+| Dirt and dust | Own | | Only on loose ground (`track::TrackData::loose_at`). |
 | Audio: engine, tires, impacts | Out of scope | File: [truck.md](formats/truck.md) | Needs an audio dependency. Sound file formats are **open**. |
 | Audio: music | Out of scope | File: [level.md](formats/level.md) | |
 | Audio: commentator | Out of scope | Game | Confirm that MTM2 has one. |
@@ -237,7 +238,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Feature | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Choose truck and track, with previews | Done | | |
-| Garage: set up the truck | Done | | The dials are the game's own. The computer's trucks are set up at random for each race. |
+| Garage: set up the truck | Done | | The dials are the game's own. The computer's trucks are set up at random for each race, except for grip, which stays centred. |
 | Laps and number of opponents | Done | | |
 | Options screen, remembered between runs | Done | | |
 | Exit the game | Done | | EXIT, at the right of the tabs, closes the game. |

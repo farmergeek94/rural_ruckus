@@ -152,6 +152,12 @@ pub struct PlayerTruck;
 /// Query filter for the player's truck.
 pub type Player = (With<Truck>, With<PlayerTruck>);
 
+/// On the player's truck when the keyboard and the gamepad no longer drive it, as after the
+/// finish: whoever put it there writes its `TruckInput`. It is still the player's truck, and
+/// the camera and the readouts still follow it.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Autopilot;
+
 /// On a truck that is held where it stands, as on the starting grid before the start: its
 /// throttle does nothing and its brakes are on. It can still be steered. Whoever holds it
 /// takes it off to let it go.
