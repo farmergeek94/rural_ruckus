@@ -40,8 +40,9 @@ const TOP_RPM: f32 = 7000.0;
 /// Where the horizon is put in the dashboard's 3D window, as a share of the way down it,
 /// when the truck stands level: higher shows more of the road in front. The game's own.
 const HORIZON_IN_WINDOW: f32 = 0.4;
-/// Under the rest of the race's UI, which is at -1 and above.
-const UNDER_THE_REST: i32 = -2;
+/// Under the rest of the race's UI, which is at -1 and above, and under the fade between
+/// views (`views::FADE_LAYER`), which darkens the dashboard with the 3D view.
+const UNDER_THE_REST: i32 = -3;
 
 /// The dashboard's parts, and what they are drawn from.
 #[derive(Component)]
