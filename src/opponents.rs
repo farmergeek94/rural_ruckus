@@ -16,6 +16,10 @@
 //! bends instead: the further down the order it is, and the further behind the leader, the
 //! more it asks of its tires, the later it brakes, and the more of the road it cuts corners
 //! across, never leaving it (`chasing`, `Style::cutting`), until it is back in range.
+//! No corner is cut past the checkpoint it has to drive through next, and near one it
+//! leaves the course and its line and steers straight through the gate, inside its edges
+//! (`NextGate`): the course is only near the gates, and a line, a pass or a cut corner can
+//! take a truck round one.
 //! One that comes up behind another truck swerves round it instead of slowing down: it pulls
 //! out to one side (`passing_line`) and follows that line until it is by. Only boxed in, with
 //! no side clear, does it hold station a truck's length behind (`keeping_off`) and press. It
@@ -101,6 +105,10 @@ const SHARP_BEND_CARE: f32 = 0.5;
 const THROTTLE_BAND: f32 = 3.0;
 /// The lines that drivers take are this far apart across the course, in metres.
 const LANE_SPACING: f32 = 2.5;
+/// How far inside the edge of a checkpoint gate a driver keeps its outer wheels, in metres,
+/// as it drives through. Larger keeps trucks nearer the middle of a gate, and bunches them
+/// up there; at 0 a truck knocked a little sideways at the last moment misses the gate.
+const GATE_MARGIN: f32 = 1.0;
 
 /// A driver no further behind the truck leading the race than this, in metres, is in range of
 /// it. The player counts as a truck to catch like any other.
@@ -401,6 +409,37 @@ struct Style {
     /// (all of it, its outer wheels at the edge). A driver that is behind cuts them as it is
     /// desperate (`chasing`), and none while it is passing or has a truck beside it.
     cutting: f32,
+    /// The checkpoint it has to drive through next, if it has one: it cuts no corner past
+    /// it, and near it steers through it (`Ahead::aim`).
+    gate: Option<NextGate>,
+}
+
+/// The checkpoint gate a driver has to drive through next, as `Ahead::aim` steers for it.
+#[derive(Clone, Copy, Debug)]
+struct NextGate {
+    /// How far up the course from the truck it is, in metres, as near as the course
+    /// passes to its middle. Negative once the truck is past that.
+    ahead: f32,
+    /// Its middle on the ground plane, in metres.
+    center: Vec2,
+    /// The way through it, a unit vector on the ground plane.
+    direction: Vec2,
+    /// Half its width, in metres.
+    half_width: f32,
+}
+
+impl NextGate {
+    /// Where a driver on a line `lane` metres to the left of the centreline, that reaches
+    /// `reach_across` metres sideways, steers at when it is nearer the gate than it steers
+    /// ahead (`reach`): a point on a line straight through the gate, the rest of `reach`
+    /// beyond it. Its line is kept inside the gate, its outer wheels `GATE_MARGIN` from the
+    /// edge. So it lines up with the gate and drives through it square, whatever the course
+    /// does here and wherever the gate stands on it.
+    fn aim(&self, lane: f32, reach: f32, reach_across: f32) -> Vec2 {
+        let room = (self.half_width - reach_across - GATE_MARGIN).max(0.0);
+        let beyond = (reach - self.ahead).max(0.0);
+        self.center - self.direction.perp() * lane.clamp(-room, room) + self.direction * beyond
+    }
 }
 
 /// What to do with the controls of a truck that is `along` metres round the `course`, at
@@ -817,8 +856,17 @@ impl Ahead {
     /// as a straight line from the truck reaches without leaving its share of the road, which
     /// through a bend is a chord across the inside of it. That share is never more than the
     /// road: its outer wheels at the edge, and not over it.
+    ///
+    /// Its next checkpoint (`Style::gate`) comes first: nearer than `reach`, it steers
+    /// through the gate (`NextGate::aim`), and further, it cuts no corner beyond the gate. A
+    /// chord across the inside of a bend with a gate in it goes round the gate.
     fn aim(&self, course: &Course, position: Vec2, reach: f32, style: Style) -> Vec2 {
         let lane = style.lane.clamp(-self.passing_room, self.passing_room);
+        if let Some(gate) = style.gate
+            && gate.ahead <= reach
+        {
+            return gate.aim(lane, reach, style.reach_across);
+        }
         let (point, direction) = course.point_at(self.along + reach);
         let mut aim = point - direction.perp() * lane;
         if style.cutting <= 0.0 {
@@ -830,6 +878,9 @@ impl Ahead {
             let distance = self.distance(i);
             if distance <= reach {
                 continue;
+            }
+            if style.gate.is_some_and(|gate| distance > gate.ahead) {
+                break;
             }
             let (point, direction) = self.samples[i];
             let target = point - direction.perp() * lane;
@@ -909,6 +960,12 @@ fn drive(
     };
     // A truck is enlisted in the race a frame after it is spawned.
     let lap_number = |racer: Option<&Racer>| racer.map_or(0, |racer| racer.progress.lap);
+    // How far along the course each checkpoint is, as `ask_to_be_put_back` measures it.
+    let gates_along: Vec<f32> = track
+        .gates
+        .iter()
+        .map(|gate| course.distance_along(&course.nearest(gate.center)))
+        .collect();
 
     // Where every truck is, before any of them is driven: what a driver has to catch, and
     // what is in its way. Taken here so that no driver answers to half-moved trucks.
@@ -946,7 +1003,9 @@ fn drive(
         .fold(f32::MIN, f32::max);
 
     let mut others: Vec<Neighbour> = Vec::new();
-    for (entity, transform, velocity, mut config, mut input, mut driver, _, held) in &mut drivers {
+    for (entity, transform, velocity, mut config, mut input, mut driver, racer, held) in
+        &mut drivers
+    {
         let Some(me) = trucks.iter().find(|truck| truck.entity == entity) else {
             continue;
         };
@@ -1013,12 +1072,24 @@ fn drive(
         // Cutting a corner across a truck it is passing, or one beside it, is running into it.
         let passing = (steering_line - driver.home.clamp(-room, room)).abs() > 1e-3
             || others.iter().any(|other| other.side_by_side(me.across));
+        // Once it has finished, no checkpoint counts for it any more.
+        let gate = racer
+            .filter(|racer| racer.progress.finished.is_none())
+            .map(|racer| racer.progress.next_gate)
+            .and_then(|next| Some((track.gates.get(next)?, gates_along[next])))
+            .map(|(gate, along)| NextGate {
+                ahead: gap(along - me.along, lap),
+                center: gate.center,
+                direction: gate.direction(),
+                half_width: gate.half_width,
+            });
         let style = Style {
             pace: driver.pace,
             lane: steering_line,
             chasing,
             reach_across: me.reach.x,
             cutting: if passing { 0.0 } else { chasing },
+            gate,
         };
         let controls = plan(course, me.along, position, forward, speed, style);
         // Whichever asks for less: the bends ahead, or the truck in front.
@@ -1194,6 +1265,7 @@ mod tests {
             chasing: 0.0,
             reach_across: built_in().x,
             cutting: 0.0,
+            gate: None,
         }
     }
 
@@ -1346,6 +1418,83 @@ mod tests {
         );
         // A little behind, a little room: not enough to cut this corner at all.
         assert_eq!(behind(296.0, 0.3), own_race);
+    }
+
+    /// A gate on the square course `along` metres round it, `off_to_the_left` of the
+    /// centreline, facing the way the course goes there.
+    fn gate_at(along: f32, off_to_the_left: f32, half_width: f32) -> (f32, NextGate) {
+        let (point, direction) = course().point_at(along);
+        let gate = NextGate {
+            ahead: 0.0,
+            center: point - direction.perp() * off_to_the_left,
+            direction,
+            half_width,
+        };
+        (along, gate)
+    }
+
+    /// Where a driver of this `style` at `along` on the first side, on its line, steers at,
+    /// with the `gate` next.
+    fn aim_for_the_gate(along: f32, (gate_along, gate): (f32, NextGate), style: Style) -> Vec2 {
+        let gate = NextGate {
+            ahead: gate_along - along,
+            ..gate
+        };
+        aim_cutting(
+            along,
+            Style {
+                gate: Some(gate),
+                ..style
+            },
+        )
+    }
+
+    #[test]
+    fn it_cuts_no_corner_past_its_next_checkpoint() {
+        let cutting = Style {
+            cutting: 1.0,
+            ..steady()
+        };
+        // 4 m before the corner at (300, 0), a truck far behind cuts across the inside of it
+        // and far up the next side (see above). A gate 30 m up the course, 26 m up that side,
+        // is as far as it cuts.
+        let gate = gate_at(326.0, 0.0, 7.0);
+        let cut = aim_for_the_gate(296.0, gate, cutting);
+        assert!(cut.y <= 26.0 + 1e-3, "{cut}");
+        assert!(cut.y > aim_cutting(296.0, steady()).y, "{cut}");
+        // Nearer than it steers ahead, it steers straight through the gate: 14 m up the course
+        // and 15 m ahead, the point 1 m beyond the gate on the line through it.
+        let through = aim_for_the_gate(296.0, gate_at(310.0, 0.0, 7.0), cutting);
+        assert!(
+            (through - Vec2::new(300.0, 11.0)).length() < 1e-3,
+            "{through}"
+        );
+    }
+
+    #[test]
+    fn it_steers_through_a_gate_that_stands_off_its_line() {
+        // A gate 4 m to the left of the centreline, 8 m wide, 10 m ahead of a driver on the
+        // line to the right: its outer wheels are to stay a `GATE_MARGIN` inside the gate.
+        let half_width = 4.0;
+        let (along, gate) = gate_at(280.0, 4.0, half_width);
+        let style = Style {
+            lane: -LANE_SPACING,
+            ..steady()
+        };
+        let aim = aim_for_the_gate(270.0, (along, gate), style);
+        let room = half_width - built_in().x - GATE_MARGIN;
+        // 5 m beyond the gate, and as far to the right in it as it may go (left is -Z).
+        assert!(
+            (aim - Vec2::new(285.0, gate.center.y + room)).length() < 1e-3,
+            "{aim}"
+        );
+        // A gate too narrow to keep to a side of: through the middle of it.
+        let (along, narrow) = gate_at(280.0, 4.0, built_in().x);
+        let aim = aim_for_the_gate(270.0, (along, narrow), style);
+        assert!(
+            (aim - Vec2::new(285.0, narrow.center.y)).length() < 1e-3,
+            "{aim}"
+        );
     }
 
     #[test]

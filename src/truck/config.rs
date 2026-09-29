@@ -292,7 +292,7 @@ impl Default for TruckConfig {
             lateral_stiffness: 0.5,
             max_steer: 0.5,
             rear_steer_ratio: 0.35,
-            cornering_lever: 0.75,
+            cornering_lever: 0.6,
         }
     }
 }
