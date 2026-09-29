@@ -199,6 +199,39 @@ fn every_track_and_truck_converts_with_what_it_borrows() {
     }
 }
 
+/// Several of the base game's tracks place checkpoints and scenery off the map, up to half a
+/// map beyond its edges: Sidewinder Canyon's first checkpoint is at x = -621 ft, and 202 of
+/// its 243 objects are off the map; Voodoo Island's fourth and fifth are at z = -2636 and
+/// -3881 ft. Taken as they are, those checkpoints stood 1.6 to 3 km from the course. The
+/// world repeats, and a map's width over, every checkpoint of every base track is within
+/// 21 m of the course, and the objects stand on the ground there as well as those on the
+/// map do (situation.md).
+#[test]
+fn every_base_checkpoint_and_object_is_on_the_map_and_its_checkpoints_on_the_course() {
+    let Some(base) = base() else {
+        return;
+    };
+    for found in track::peek_base(&base) {
+        let loaded = track::load_base(&base, &found.archive, &found.file).unwrap();
+        let edge = loaded.heights.size() / 2.0;
+        let on_the_map = |at: bevy::math::Vec2| at.x.abs() <= edge && at.y.abs() <= edge;
+        for (index, gate) in loaded.gates.iter().enumerate() {
+            assert!(on_the_map(gate.center), "{}: gate {index}", found.file);
+            if let Some(course) = &loaded.course {
+                let off = course.nearest(gate.center).distance;
+                assert!(off < 25.0, "{}: gate {index} is {off} m off", found.file);
+            }
+        }
+        let off_the_map = loaded
+            .scenery
+            .objects
+            .iter()
+            .filter(|object| !on_the_map(object.position))
+            .count();
+        assert_eq!(off_the_map, 0, "{}", found.file);
+    }
+}
+
 /// `cargo test --test base_game -- --ignored --nocapture` prints each of the base game's
 /// tracks and trucks, and whether it loads.
 #[test]

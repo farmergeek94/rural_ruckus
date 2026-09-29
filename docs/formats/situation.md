@@ -127,6 +127,27 @@ not normalised: checkpoints in the same file have `psi` of 15.7 and 18.9.
   across the whole map, and the map repeats, so the game brings the box back on at the
   other side. JSTrackViewer does the same, and also says that it does not know.
 
+## Positions off the map
+
+A box's `ipos` can be off the map: below 0, or beyond the map's width (256 cells of 32
+ft, 8192 ft, on every base track). Such a box is where it would be a map's width over,
+because the world repeats. **Measured** on the base game's 15 tracks
+(`tests/base_game.rs` holds this):
+
+- 5 tracks have boxes off the map, from -4066 to -448 ft: Sidewinder Canyon (202 of 243
+  boxes), Tumbleweed Flats (99 of 126), Voodoo Island (146 of 419), The Excavation (81 of
+  278) and Torture Pit (48 of 50). Farm Road 29 and Tinhorn Junction have 1 and 2. No
+  track has a course point or a grid place off the map.
+- Checkpoints: taken as written, 23 checkpoints on those 5 tracks were 1.5 to 3.2 km
+  from the course. A map's width over, each one is 0.1 to 18 m from it, and the course
+  goes through each in lap order. Clamped to the edge of the map, none of them is.
+- Scenery: a map's width over, the median box off the map is 4 to 13 ft above the ground
+  there, as the boxes on the same map are (6 to 15 ft). Clamped to the edge of the map, it
+  is 32 to 167 ft.
+
+The game moves each such position by whole map widths onto the map. A position on the
+map, its far edge included, is not changed.
+
 ## Checkpoints
 
 - The last checkpoint in the file is the finish line. **Measured** on both tracks: in

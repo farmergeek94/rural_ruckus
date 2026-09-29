@@ -85,7 +85,8 @@ fn footing_under(track: &TrackData, bottom: Vec3, frozen: bool) -> Footing {
 /// How much of a tire's grip the ground leaves it.
 fn grip_of(footing: Footing) -> f32 {
     match footing {
-        Footing::Loose | Footing::Firm | Footing::Unnamed => 1.0,
+        Footing::Loose => 1.0,
+        Footing::Firm | Footing::Unnamed => 1.1,
         Footing::Ice => ICE_GRIP,
     }
 }

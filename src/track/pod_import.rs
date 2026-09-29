@@ -4,7 +4,8 @@
 //! reasons for each rule are in `docs/formats/`:
 //!
 //! - MTM2 works in feet, with the world's corner at the origin. The game works in
-//!   metres, with the world centred on the origin.
+//!   metres, with the world centred on the origin. The world repeats, and a position
+//!   off the map is where it would be a map's width over.
 //! - MTM2's Z axis runs the other way. Flipping it turns a heading of `psi`, measured
 //!   from +Z, into a yaw of `-psi` about Y.
 //! - A texture's type (.TTY) says what kind of surface it is, by its hundreds: ice is 8
@@ -116,8 +117,19 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         return Err(format!("a heightmap {cells} cells wide is not supported"));
     }
     let world_feet = cells as f32 * FEET_PER_CELL;
+    // The world repeats, and MTM2's own tracks place checkpoints and scenery up to half a
+    // map beyond its edges: each is where it would be a map's width over (situation.md).
+    // Whatever is on the map, its far edge included, stays where it is.
+    let on_the_map = |feet: f32| {
+        if (0.0..=world_feet).contains(&feet) {
+            feet
+        } else {
+            feet.rem_euclid(world_feet)
+        }
+    };
     let to_ground = |feet: [f32; 3]| {
-        Vec2::new(feet[0] - world_feet / 2.0, world_feet / 2.0 - feet[2]) * METRES_PER_FOOT
+        let (x, z) = (on_the_map(feet[0]), on_the_map(feet[2]));
+        Vec2::new(x - world_feet / 2.0, world_feet / 2.0 - z) * METRES_PER_FOOT
     };
 
     // The world repeats, so one extra row and column of vertices closes the far edges
