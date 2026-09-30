@@ -11,7 +11,7 @@ Status: **done**, on the branch `avian`. Measured headless against Rapier (secti
 ## 1. Summary
 
 - Avian 0.7.0 is the release for Bevy 0.19. `src/physics.rs` sets it up, with
-  `truck::TireContacts` as its contact hook and 6 substeps, for the game and for every
+  `truck::decide_tire_contacts` deciding the tires' contacts (3.11) and 6 substeps, for the game and for every
   test app.
 - The truck is the same model as before (decision 1): a body that the game pushes, with a
   swept tire, springs on a beam axle, wheel colliders and a hook.
@@ -46,7 +46,7 @@ Avian features used: `3d`, `f32`, `parry-f32`, `parallel`, `debug-plugin`, with
 
 | Rapier | Avian | Mark |
 | --- | --- | --- |
-| `RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule()` | `PhysicsPlugins::default().with_collision_hooks::<TireContacts>()` | read |
+| `RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule()` | `PhysicsPlugins::default()`, and `decide_tire_contacts` in `NarrowPhaseSystems::Last` (3.11) | read |
 | Physics runs in `FixedUpdate` | Physics runs in `FixedPostUpdate` by default | read |
 | `TimestepMode::Fixed { dt, substeps: 1 }` | `Time<Fixed>` at 120 Hz, and the `SubstepCount` resource | read. The default is 6 substeps. |
 | `.before(PhysicsSet::SyncBackend)` | A system in `FixedUpdate` already runs before the step. No order is necessary. | read |
@@ -284,6 +284,21 @@ either sweep mode.
 Open: a truck driven head on at 20 to 30 m/s into a loose object of 100 to 450 kg, knee to
 waist high, is often turned over. The sweep lands on the object's steep front face, and the
 bump stop pushes the truck along that face's normal, which is nearly level.
+
+### 3.11 The tires' contacts are decided by a system, not a hook
+
+Avian's collision hooks are a type parameter of its broad and narrow phase, so with
+`TireContacts` as the hook both were compiled in this crate, unoptimised in a development
+build, and the hook itself was called for each pair in turn. `decide_tire_contacts` runs
+instead in `NarrowPhaseSystems::Last`, after the narrow phase and before the solver builds
+its constraints from the contact graph, and decides the pairs that Avian marks from
+`ActiveCollisionHooks::MODIFY_CONTACTS`, in parallel. A manifold it drops is emptied of its
+points rather than removed: by then the solver has counted each pair's manifolds, and a
+manifold with no points gives it nothing to solve. Measured on Scrapyard Run with eight
+trucks, unoptimised: the narrow phase took 0.31 ms a step where it took 0.85 to 0.97, the
+broad phase 0.07 where it took 0.17, and the whole physics step 2.2 ms where it took 2.7
+to 2.9. The trucks' figures are the same, but for the last decimal of a few hard hits,
+and three races on Alpine gave figures within those of section 5.
 
 ## 4. Decisions
 
