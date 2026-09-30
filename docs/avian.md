@@ -162,7 +162,7 @@ a test that is not kept.
 | Does a child collider moved in `FixedUpdate` move in the same step? | Yes. The body does not move, and with the `NoAuto` markers its mass does not change. | measured |
 | A step with eight trucks' colliders on Alpine's ground, sliding at 15 m/s | Rapier: 1.22, 1.64, 2.62, 3.30 ms for 1, 2, 4, 6 substeps. Avian: 1.42, 1.63, 1.73, 1.92 ms. | measured |
 | Headless test apps | Avian makes some of its resources in `Plugin::finish`. `App::update` does not call it, so each test app must call `app.finish()` and `app.cleanup()` after its plugins are added. | measured |
-| How hard and how fast does Avian push two shapes apart? | At most 4 m/s (`SolverConfig::max_overlap_solve_speed`), softly. | read |
+| How hard and how fast does Avian push two shapes apart? | At most 4 m/s (`SolverConfig::max_overlap_solve_speed`), softly. The game sets it to 0 (`physics.rs`): see 3.9. | read |
 | Below which speed does Avian ignore restitution? | 1 m/s (`SolverConfig::restitution_threshold`). A truck dropped from 3 m bounces as it did on Rapier. | read, and measured |
 | Is `Settling` still necessary for loose scenery? | Yes, for a new reason: see 3.5. | measured |
 
@@ -254,11 +254,36 @@ truck put down 200 m away for two seconds.
 
 ### 3.8 A rule the hook never applied under Rapier
 
-`truck/contacts.rs` drops a push of the ground on a truck's body from underneath, so that
-a body that has got under the ground comes back up. Rapier calls a hook only for a pair in
-which one collider asks for it, and neither the body nor the ground did, so the rule was
-never applied. The body now asks (`ActiveCollisionHooks::MODIFY_CONTACTS`), and the rule is
-applied.
+`truck/contacts.rs` dropped a push of the ground on a truck's body from underneath, so
+that a body that had got under the ground came back up. Rapier calls a hook only for a pair
+in which one collider asks for it, and neither the body nor the ground did, so the rule was
+never applied. On Avian the body asked (`ActiveCollisionHooks::MODIFY_CONTACTS`), and the
+rule was applied: a truck put 1.65 m into the ground was thrown out. The user asked for
+the rule to be removed. The body does not ask for the hook, as under Rapier.
+
+### 3.9 Bodies that overlap are not pushed apart
+
+Avian pushes two bodies that overlap apart at up to 4 m/s
+(`SolverConfig::max_overlap_solve_speed`). Two gate leaves on The Graveyard (JUNK.POD) that
+overlap pushed each other 2.6 m apart when they were free. The user asked for this to be
+removed: `physics.rs` sets the speed to 0. A contact now only stops two bodies from going
+further into each other. How this changes the figures of section 5 is open.
+
+### 3.10 A tire pushed light scenery with its whole load
+
+`truck/drive.rs` pushes back on a body that a tire stands on. It pushed with the whole of
+the tire's load and grip, as an impulse outside the solver, whatever the body's mass.
+Measured, driving into each loose object of the base game's tracks: a 1.4 kg cone under a
+wheel at 20 m/s threw the truck 51 m/s into the air, and a 45 kg crate met at 10 m/s was
+fired off at 1 194 m/s and threw the truck at 52 m/s. The push now changes the body's speed
+by no more than the hub closes on it along the push, and a step of gravity
+(`pushed_back`): the same cone threw the truck at 8 m/s, and the crate left at 6 m/s and
+threw it at 2 m/s. Swept CCD on the loose objects changed none of these figures, with
+either sweep mode.
+
+Open: a truck driven head on at 20 to 30 m/s into a loose object of 100 to 450 kg, knee to
+waist high, is often turned over. The sweep lands on the object's steep front face, and the
+bump stop pushes the truck along that face's normal, which is nearly level.
 
 ## 4. Decisions
 
@@ -279,7 +304,7 @@ The user asked the agent to take, in each case, the decision that is best for Av
 4. **Use Avian's default of 6 substeps.** Its solver is built round them, and they cost
    little (section 2.7).
 5. **No speculative contacts for trucks** (3.6). Loose scenery keeps them, and `SweptCcd`.
-6. **Apply the ground rule of 3.8**, which the code already described.
+6. **Do not apply the ground rule of 3.8.** The user asked for it to be removed.
 7. **Leave Parry's `FIX_INTERNAL_EDGES` off** on the ground, as it was under Rapier. It
    would change how a wheel's core rides. Try it only if driving shows cores catching on
    the ground.
@@ -304,7 +329,7 @@ made from the built-in one, except in the race on Alpine. "Bigfoot" is
 | Step 0.9 m | Built-in over at 4, 8, 14 m/s. Bigfoot stopped at 4 and 8, over at 14 | Both over at 4, 8, 14 |
 | Step 1.1 m | Built-in stopped at 4, over at 8 and 14. Bigfoot stopped at 4 and 8, over at 14 | Both over at 4, 8, 14 |
 | Into another truck's rear tire, 8.7 m/s | Built-in: lost 2.16 m/s in a step, rose 1.18 m. Bigfoot: lost 3.64, rose 0.05 m | Built-in: lost 2.16, rose 1.21 m. Bigfoot: lost 3.18, rose 0.07 m |
-| Put 1.65 m into level ground | Built-in fell on through the ground. Bigfoot stayed in it | Built-in thrown out, ended 1.18 m high on its side (65°). Bigfoot stayed in it |
+| Put 1.65 m into level ground | Built-in fell on through the ground. Bigfoot stayed in it | Built-in thrown out, ended 1.18 m high on its side (65°). Bigfoot stayed in it. Measured with the rule of 3.8, which is removed |
 | Top speed in water after 15 s (m/s) | Built-in: under 6.9, hub-deep 15.7, tires wet 25.3. Bigfoot: 6.9, 16.9, 25.6 | The same |
 
 Alpine, Bigfoot and seven copies driven by the computer, 120 s after GO. The computer's
@@ -335,6 +360,8 @@ else: Rapier 1.22, 1.64, 2.62, 3.30 ms for 1, 2, 4, 6 substeps; Avian 1.42, 1.63
   figures that were measured on Rapier. Those that section 5 measured again agree. The
   others (for example the Alpine counts in `contacts.rs`) are not measured again; the
   module document of `truck/contacts.rs` says so.
-- A truck put deep into the ground (3.8) is thrown out hard on Avian, where on Rapier it
-  fell through. Neither happens in a race: no hub went below the ground in any race above.
+- What a truck put deep into the ground does, with the rule of 3.8 removed, is not
+  measured again. No hub went below the ground in any race above.
+- Every figure of section 5 was measured with bodies pushed apart (3.9). They are not
+  measured again with the speed at 0.
 - Steps with a jolt over 5 g are 5% more on Avian, within the spread between races.

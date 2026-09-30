@@ -208,7 +208,7 @@ pub(super) fn drive_truck(
     mut wheel_cores: Query<&mut Transform, OnlyWheelCores>,
     truck_parts: Query<(), TruckParts>,
     // Whatever a tire stands on that is a body, and the body a collider is part of.
-    mut surfaces: Query<Forces, Without<Truck>>,
+    mut surfaces: Query<(Forces, &ComputedMass), Without<Truck>>,
     bodies: Query<&ColliderOf>,
 ) {
     let dt = time.delta_secs();
@@ -316,7 +316,7 @@ pub(super) fn drive_truck(
             // Against what it stands on, which is only the ground's own when that is still.
             let surface_velocity = touch
                 .and_then(|touch| surfaces.get(touch.surface).ok())
-                .map_or(Vec3::ZERO, |surface| surface.velocity_at_point(hub));
+                .map_or(Vec3::ZERO, |(surface, _)| surface.velocity_at_point(hub));
             let hub_velocity = forces.velocity_at_point(hub) - surface_velocity;
             sweeps.push(Sweep {
                 index,
@@ -468,11 +468,10 @@ pub(super) fn drive_truck(
                 let sideways = side * tire.dot(side);
                 forces.apply_force_at_point(normal * load + tire - sideways, hub);
                 // And what it stands on takes the same back, where the tire meets it.
-                if let Ok(mut surface) = surfaces.get_mut(touch.surface) {
-                    surface.apply_linear_impulse_at_point(
-                        -(normal * load + tire) * dt,
-                        hub - normal * config.wheel_radius,
-                    );
+                if let Ok((mut surface, mass)) = surfaces.get_mut(touch.surface) {
+                    let push =
+                        pushed_back(-(normal * load + tire) * dt, mass.value(), hub_velocity, dt);
+                    surface.apply_linear_impulse_at_point(push, hub - normal * config.wheel_radius);
                 }
                 forces.apply_force_at_point(
                     sideways,
@@ -510,6 +509,24 @@ pub(super) fn drive_truck(
             }
         }
     }
+}
+
+/// The impulse with which a tire pushes back on a body it stands on, in N·s, from the
+/// `impulse` that would take the whole of the tire's load and grip, for a body of `mass`
+/// kilograms under a hub going at `hub_velocity` against it, over a step of `dt` seconds.
+///
+/// A tire cannot drive what it stands on away faster than it is itself going that way, and
+/// what holds a light object up is the ground under it, not the tire. Given the whole of
+/// the tire's load, a 1.4 kg cone under a wheel of a truck doing 20 m/s was pushed into the
+/// ground at 77 m/s in a step, came back out of it as fast, and threw the truck into the air
+/// at 51 m/s; a 45 kg crate met at 10 m/s was fired off at 1 194 m/s; and a 227 kg rock was
+/// pressed down through the ground, stood there as a kerb, and flipped the truck. So the push
+/// changes the body's speed by no more than the hub closes on it along the push, and what
+/// gravity adds in the step. A tire rolling over the top of a body hardly closes on it at
+/// all, and presses it down with about its own weight; a heavy body takes the whole push.
+fn pushed_back(impulse: Vec3, mass: f32, hub_velocity: Vec3, dt: f32) -> Vec3 {
+    let closing = hub_velocity.dot(impulse.normalize_or_zero()).max(0.0);
+    impulse.clamp_length_max(mass * (closing + GRAVITY * dt))
 }
 
 /// Whether a truck is in a sharp turn with an inside wheel off the ground and an outside one
@@ -696,6 +713,23 @@ mod tests {
         let after_a_second = spin_for(1.0, 20.0, 0.0, false);
         assert!(after_a_second > 10.0 && after_a_second < 20.0);
         assert!(spin_for(10.0, 20.0, 0.0, false).abs() < 0.2);
+    }
+
+    #[test]
+    fn a_tire_pushes_a_light_body_no_faster_than_it_closes_on_it() {
+        let dt = 1.0 / 120.0;
+        let load = Vec3::NEG_Y * 13_000.0 * dt;
+        // Rolling over a cone at 20 m/s, and coming down onto it at 2 m/s: the cone is
+        // pressed down at 2 m/s and a step of gravity, not 77 m/s.
+        let cone = pushed_back(load, 1.4, Vec3::new(0.0, -2.0, -20.0), dt);
+        assert!((cone.length() / 1.4 - (2.0 + GRAVITY * dt)).abs() < 1e-3);
+        assert_eq!(cone.normalize(), Vec3::NEG_Y);
+        // Going away from it, with gravity's step alone.
+        let cone = pushed_back(load, 1.4, Vec3::new(0.0, 1.0, -20.0), dt);
+        assert!((cone.length() / 1.4 - GRAVITY * dt).abs() < 1e-3);
+        // A heavy body takes the whole of it.
+        let heavy = Vec3::new(0.0, -2.0, -20.0);
+        assert_eq!(pushed_back(load, 20_000.0, heavy, dt), load);
     }
 
     #[test]
