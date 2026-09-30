@@ -209,13 +209,24 @@ Avian panics ("Neither body … nor … is in an island"): measured with two tou
 a real track. So loose scenery is made awake and put to sleep with `SleepBody` later
 (`scenery/motion.rs`, `settle`), as it was for another reason under Rapier.
 
-Not three steps later, as under Rapier: a sleeping body is woken by any contact that
-starts, and objects are put down a little apart. After 3 steps, the tires stacked on
-Scrapyard Run (JUNK.POD) had yet to meet each other; they woke as they met, and rocked on
-their stacks for the whole race, above the speed at which Avian lets a body sleep. 40 of
-53 loose objects stayed awake, a step took 11.7 ms unoptimised, where 120 steps a second
-leave 8.3, and the game fell further behind each frame: 3 frames a second. After 30 steps,
-every loose object on every base and community track sleeps until a truck touches it.
+The body is held where it was put (`LockedAxes::ALL_LOCKED`) until it is put to sleep,
+and is then let go. A free body moves in those steps and sleeps where it has got to, and
+a sleeping body is woken by any contact that starts:
+
+- After 3 free steps, the tires stacked on Scrapyard Run (JUNK.POD), put down a little
+  apart, had yet to meet each other. They woke as they met, and rocked on their stacks for
+  the whole race, above the speed at which Avian lets a body sleep. 40 of 53 loose objects
+  stayed awake, a step took 11.7 ms unoptimised, where 120 steps a second leave 8.3, and
+  the game fell further behind each frame: 3 frames a second.
+- After 30 free steps, those tires slept, but the fences and gates of The Graveyard
+  (JUNK.POD) fell over first. They are panels 1 cm thick and 5.5 to 7.3 m high, standing
+  on edge on uneven ground: two gates lay at 80°, and fences leaned at up to 47°. Held
+  rotation only, they stood, but rose up to 0.97 m where the ground under them rises, and
+  two gate leaves that overlap pushed each other 2.6 m apart.
+
+Held in place for 3 steps, every loose object on every base and community track (1,471)
+sleeps until a truck touches it, upright and where it was put.
+
 Loose objects are no longer swept (`SweptCcd`) either: Avian's speculative contacts
 already keep them from passing through the ground, and the sweep cost 4 to 5 ms a step
 with them awake.
