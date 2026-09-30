@@ -12,6 +12,10 @@
 //! The ground's material may also carry a map of which way a smooth surface through its
 //! heights faces (`track/shading.rs`), and then lights the ground by that instead of by
 //! its flat triangles. Scenery and backdrops leave it out.
+//!
+//! In the shadow maps, and in any prepass, a material with an alpha mask runs
+//! `tiles_prepass.wgsl`, which cuts the tiles' holes out of its shadows. An opaque one is
+//! drawn there by its depth alone, which is cheaper: see `docs/smoothness.md`.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -98,10 +102,17 @@ impl MaterialExtension for TileTextures {
     fn deferred_fragment_shader() -> ShaderRef {
         SHADER_PATH.into()
     }
+
+    /// Bevy only runs it for a material that may leave pixels out (see the shader).
+    fn prepass_fragment_shader() -> ShaderRef {
+        PREPASS_SHADER_PATH.into()
+    }
 }
 
-/// Where `embedded_asset!` puts `tiles.wgsl`: the crate's name, then the path below `src`.
+/// Where `embedded_asset!` puts `tiles.wgsl` and `tiles_prepass.wgsl`: the crate's name,
+/// then the path below `src`.
 const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/track/tiles.wgsl";
+const PREPASS_SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/track/tiles_prepass.wgsl";
 
 /// The most anisotropic filtering a sampler can ask for.
 const MOST_ANISOTROPY: u16 = 16;
@@ -274,6 +285,23 @@ mod tests {
         cycles.set(MAX_TEXTURE_CYCLES, 7);
         assert_eq!((cycles.frame(1), cycles.frame(MAX_TEXTURE_CYCLES)), (3, 7));
         assert_eq!((cycles.frame(0), cycles.frame(2)), (0, 0));
+    }
+
+    /// Or a shadow would be cut out by the wrong tile.
+    #[test]
+    fn the_prepass_shader_finds_the_tile_as_the_main_shader_does() {
+        let main = include_str!("tiles.wgsl");
+        let prepass = include_str!("tiles_prepass.wgsl");
+        for line in [
+            "    let cycle = min(u32(round(in.uv_b.y)), 31u);",
+            "    let tile = i32(round(in.uv_b.x)) + i32(cycles.offsets[cycle / 4u][cycle % 4u]);",
+            "@group(#{MATERIAL_BIND_GROUP}) @binding(100) var tiles: texture_2d_array<f32>;",
+            "@group(#{MATERIAL_BIND_GROUP}) @binding(101) var tiles_sampler: sampler;",
+            "@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<uniform> cycles: TileCycles;",
+        ] {
+            assert!(main.contains(line), "tiles.wgsl lacks {line}");
+            assert!(prepass.contains(line), "tiles_prepass.wgsl lacks {line}");
+        }
     }
 
     #[test]

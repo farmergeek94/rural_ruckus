@@ -154,6 +154,19 @@ shadow cascade. To make the ground look smoother, change how it is lit, not its 
 a finer height grid for the physics as well cost a debug build half its frame rate with
 eight trucks, most of it in the wheels' casts onto the ground (`track/shading.rs`).
 
+## Only what has holes is alpha-masked
+
+A material with an alpha mask (`AlphaMode::Mask`) may leave pixels out, so the GPU cannot
+reject a pixel that is hidden before it shades it, and each of the sun's shadow cascades
+draws the mesh with a fragment shader instead of by its depth alone. So the scenery has
+two materials on the one texture array (`scenery/mod.rs`): an opaque one for the models
+whose tiles have no texel under the mask's cutoff, which draws exactly as the mask did,
+since filtering and mipmaps only mix texels, and a masked one for the rest. The masked
+one's shadows are cut out by `track/tiles_prepass.wgsl`: Bevy's own prepass shader reads
+the standard material's texture, which the tile material has not got, so a cut-out tile
+cast the shadow of its whole square. **Not yet measured on screen**: the F2 panel with
+`--no-vsync`, on a track with much scenery, with the shadow cascades at 4 and at 0.
+
 ## Mipmaps
 
 Generate mipmaps on the CPU, averaging in linear light, for textures known at load
