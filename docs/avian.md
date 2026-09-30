@@ -206,8 +206,19 @@ where it rose 1.18 m on Rapier.
 Avian puts a body in with the bodies it touches (its island) in the step after it is
 made, and a body spawned with `Sleeping` is never put in. When two such bodies touch,
 Avian panics ("Neither body … nor … is in an island"): measured with two touching rocks of
-a real track. So loose scenery is made awake and put to sleep with `SleepBody` three steps
-later (`scenery/motion.rs`, `settle`), as it was for another reason under Rapier.
+a real track. So loose scenery is made awake and put to sleep with `SleepBody` later
+(`scenery/motion.rs`, `settle`), as it was for another reason under Rapier.
+
+Not three steps later, as under Rapier: a sleeping body is woken by any contact that
+starts, and objects are put down a little apart. After 3 steps, the tires stacked on
+Scrapyard Run (JUNK.POD) had yet to meet each other; they woke as they met, and rocked on
+their stacks for the whole race, above the speed at which Avian lets a body sleep. 40 of
+53 loose objects stayed awake, a step took 11.7 ms unoptimised, where 120 steps a second
+leave 8.3, and the game fell further behind each frame: 3 frames a second. After 30 steps,
+every loose object on every base and community track sleeps until a truck touches it.
+Loose objects are no longer swept (`SweptCcd`) either: Avian's speculative contacts
+already keep them from passing through the ground, and the sweep cost 4 to 5 ms a step
+with them awake.
 
 ### 3.6 Speculative contacts stop a tire at a kerb's face
 

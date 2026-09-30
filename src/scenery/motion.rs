@@ -6,11 +6,16 @@
 //! touching it. Not at once: the physics puts a body in with the others it touches (its
 //! island) in its first step, and one made asleep is never put in; two such that touch
 //! each other stop the game (measured: two of a track's rocks, in Avian 0.7). So it is put
-//! to sleep a few steps after it is made (`settle`). Its collider is the hull round its model, since it must meet fixed scenery
-//! as well as the ground and the trucks, and no contacts are found between two triangle
-//! meshes. It can be moved fast by a heavy truck, so it is swept (CCD) to keep it from
-//! going through the ground in one step. A tire that stands on it pushes it back (see
-//! `truck/drive.rs`).
+//! to sleep a while after it is made (`settle`), once it has come to rest on what it stands
+//! on. Its collider is the hull round its model, since it must meet fixed scenery as well
+//! as the ground and the trucks, and no contacts are found between two triangle meshes. A
+//! tire that stands on it pushes it back (see `truck/drive.rs`).
+//!
+//! Every loose object that is awake costs its contacts in every step, so one must never be
+//! left awake by mistake. It is not swept (CCD) either: the physics already makes a contact
+//! with whatever a body will reach in the coming step, which keeps one knocked fast from
+//! going through the ground, and a sweep on every awake object each step cost 4 to 5 ms a
+//! step on Scrapyard Run, unoptimised.
 //!
 //! A moving object is kinematic: nothing pushes it, and what is in its way is pushed. It
 //! keeps its height, because every one found goes along a level line of ground and bridges
@@ -38,9 +43,14 @@ pub(super) struct Moving;
 #[derive(Component)]
 pub(super) struct Loose;
 
-/// How many physics steps a loose object is left before it is put to sleep: past the
-/// first, in which the physics puts it in with what it touches.
-const SETTLE_STEPS: u8 = 3;
+/// How many physics steps a loose object is left before it is put to sleep: long enough to
+/// come to rest on what it stands on. A sleeping body is woken by any contact that starts,
+/// and objects are put down a little apart: after 3 steps the tires stacked on Scrapyard
+/// Run had yet to meet each other, woke as they did, and rocked on their stacks for the
+/// whole race, above the speed at which the physics lets a body sleep. 40 of its 53 loose
+/// objects were awake, and a step took 11.7 ms where the game has 8.3: the game ran
+/// further behind each frame, at 3 frames a second. After 30, all 53 sleep.
+const SETTLE_STEPS: u8 = 30;
 
 /// A loose object that is still to be put to sleep, in so many more physics steps.
 #[derive(Component)]
@@ -66,7 +76,6 @@ pub(super) fn loose(
             hull,
             bouncy(),
             Settling(SETTLE_STEPS),
-            SweptCcd::default(),
         ))
         .id()
 }
