@@ -129,6 +129,7 @@ impl Plugin for TrackPlugin {
         // the renderer nor anywhere to put a shader.
         if app.is_plugin_added::<PbrPlugin>() {
             embedded_asset!(app, "tiles.wgsl");
+            embedded_asset!(app, "tiles_prepass.wgsl");
             app.add_plugins(MaterialPlugin::<TileMaterial>::default());
         }
         app.add_systems(
