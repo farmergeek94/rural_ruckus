@@ -48,6 +48,17 @@ fn cube() -> SceneryModel {
     }
 }
 
+/// A fence panel standing on its edge, as The Graveyard's fences and gates are: 6 m long,
+/// 5 m high and a centimetre thick, about its middle.
+fn panel() -> SceneryModel {
+    let mut model = cube();
+    for corner in &mut model.positions {
+        *corner = [corner[0] * 6.0, (corner[1] - 0.5) * 5.0, corner[2] * 0.01];
+    }
+    model.name = "PANEL.BIN".into();
+    model
+}
+
 /// A tire lying flat, as a scrapyard stacks them: sixteen-sided, 1.2 m across and 0.3 m
 /// high, standing on its bottom face.
 fn tire() -> SceneryModel {
@@ -106,7 +117,7 @@ fn app_with(more: impl Fn(Vec2) -> Vec<Placed>) -> App {
         tile_size: 8,
         tiles: vec![vec![128; 8 * 8 * 4]],
         texture_cycles: Vec::new(),
-        models: vec![cube(), tire()],
+        models: vec![cube(), tire(), panel()],
         objects: [
             object(away, SceneryMotion::Fixed),
             object(away + Vec2::X * 5.0, SceneryMotion::Loose { mass: 50.0 }),
@@ -192,10 +203,9 @@ fn a_loose_object_left_alone_stands_asleep_where_it_was_put() {
     run(&mut app, 2.0);
     let (now, sleeping) = body(&mut app, RigidBody::Dynamic);
     assert!(sleeping);
-    // It settles onto the ground a little in the steps before it is put to sleep: by up to
-    // 9 cm on Alpine's slopes.
+    // It is held where it was put until it is put to sleep.
     assert!(
-        now.translation.distance(placed.translation) < 0.1,
+        now.translation.distance(placed.translation) < 1e-4,
         "{} to {}",
         placed.translation,
         now.translation
@@ -222,6 +232,41 @@ fn a_moving_object_comes_back_onto_the_map_at_the_other_side() {
     );
     assert!((back.translation.y - placed.translation.y).abs() < 1e-3);
     assert!((back.translation.z - placed.translation.z).abs() < 1e-3);
+}
+
+/// A loose fence panel, a centimetre thick, stands where it was put until something
+/// touches it. Let go in the steps before it was put to sleep, The Graveyard's gates fell
+/// over, and slept lying on the ground.
+#[test]
+fn a_loose_panel_on_its_edge_stays_upright() {
+    let mut app = app_with(|away| {
+        vec![Placed {
+            model: 2,
+            position: away + Vec2::Y * 10.0,
+            height_above_ground: 2.5,
+            yaw: 0.3,
+            solid: true,
+            motion: SceneryMotion::Loose { mass: 900.0 },
+            faces_camera: false,
+        }]
+    });
+    let panel = |app: &mut App| {
+        bodies(app)
+            .into_iter()
+            .filter(|(body, ..)| *body == RigidBody::Dynamic)
+            .max_by(|a, b| a.1.translation.y.total_cmp(&b.1.translation.y))
+            .unwrap()
+    };
+    let (_, placed, _) = panel(&mut app);
+    run(&mut app, 2.0);
+    let (_, now, sleeping) = panel(&mut app);
+    assert!(sleeping);
+    assert!(
+        now.rotation.angle_between(placed.rotation) < 1e-4,
+        "turned {}°",
+        now.rotation.angle_between(placed.rotation).to_degrees()
+    );
+    assert!(now.translation.distance(placed.translation) < 1e-4);
 }
 
 /// A stack of loose tires put down a little apart, as Scrapyard Run puts them, all sleeps.
