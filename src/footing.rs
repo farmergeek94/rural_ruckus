@@ -82,7 +82,8 @@ fn footing_under(track: &TrackData, bottom: Vec3, frozen: bool) -> Footing {
     }
 }
 
-/// How much of a tire's grip the ground leaves it.
+/// What the ground multiplies a tire's grip by: the tire's own figure on loose ground, a
+/// tenth more on firm and unnamed ground, and `ICE_GRIP` of it on ice.
 fn grip_of(footing: Footing) -> f32 {
     match footing {
         Footing::Loose => 1.0,
@@ -98,8 +99,8 @@ mod tests {
     #[test]
     fn ice_grips_less_than_firm_ground_but_not_nothing() {
         assert_eq!(grip_of(Footing::Loose), 1.0);
-        assert_eq!(grip_of(Footing::Firm), 1.0);
-        assert_eq!(grip_of(Footing::Unnamed), 1.0);
+        assert!(grip_of(Footing::Firm) > 1.0);
+        assert!(grip_of(Footing::Unnamed) > 1.0);
         assert!(grip_of(Footing::Ice) > 0.0 && grip_of(Footing::Ice) < 1.0);
     }
 

@@ -178,9 +178,10 @@ pub struct SeenFromInside;
 #[derive(Component)]
 pub struct Truck;
 
-/// On a truck: how much of its tires' grip the ground under each of them gives, as a share
-/// from 0 to 1, in `TruckConfig::wheel_rest`'s order. The slice builds a truck with all of
-/// it and leaves it so: whoever knows the ground writes it, before `TruckSystems::Drive`.
+/// On a truck: what the ground under each of its tires multiplies the tire's grip by, in
+/// `TruckConfig::wheel_rest`'s order. 1 leaves it as it is, less slides, and a little more
+/// is firm ground. The slice builds a truck with all of it as it is and leaves it so:
+/// whoever knows the ground writes it, before `TruckSystems::Drive`.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct GroundGrip(pub [f32; 4]);
 
