@@ -28,6 +28,10 @@ its row in [Feature status](#feature-status).
 | 9 | Race flow: front end and garage, start sequence, finish and results, cockpit and look-round views | Done, but not yet driven. Stage 11 finishes it. |
 | 10 | Computer trucks: a driver that follows the course | Done, first pass |
 
+Outside the stages: the physics engine is now Avian in place of Rapier, by the user's
+request. Done and measured headless against Rapier, but not yet driven. See
+[avian.md](avian.md).
+
 ## Next: stages 11 to 16
 
 Many items below are **open**: we do not know what MTM2 does. For each one, first find

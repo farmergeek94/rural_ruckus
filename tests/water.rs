@@ -5,12 +5,13 @@
 
 use std::time::Duration;
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use bevy_rapier3d::prelude::*;
 use monster_truck_rural_ruckus::game_state::GameState;
+use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, builtin_track};
-use monster_truck_rural_ruckus::truck::{TireContacts, TruckPlugin};
+use monster_truck_rural_ruckus::truck::TruckPlugin;
 use monster_truck_rural_ruckus::water::{WaterPlugin, WaterSurface};
 use monster_truck_rural_ruckus::weather::{Weather, WeatherSettings};
 
@@ -31,21 +32,21 @@ fn headless_app_in(water_level: Option<f32>, weather: Weather) -> App {
             MinimalPlugins,
             TransformPlugin,
             AssetPlugin::default(),
-            RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule(),
+            GamePhysicsPlugin,
         ))
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(Time::<Fixed>::from_seconds(STEP))
-        .insert_resource(TimestepMode::Fixed {
-            dt: STEP as f32,
-            substeps: 1,
-        })
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
             STEP,
         )));
     app.world_mut().resource_mut::<Track>().0.water_level = water_level;
     app.add_plugins((TrackPlugin, TruckPlugin, WaterPlugin));
+    // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+    // calls (see `physics`).
+    app.finish();
+    app.cleanup();
     app.update();
     app
 }
@@ -89,8 +90,8 @@ fn solid_ice(app: &mut App) -> Vec<f32> {
         .iter(app.world())
         .filter(|(name, _, _)| name.as_str() == "Ice slab")
         .filter_map(|(_, at, collider)| {
-            let slab = collider.as_cuboid()?;
-            Some(at.translation().y + slab.half_extents().y)
+            let slab = collider.shape().as_cuboid()?;
+            Some(at.translation().y + slab.half_extents.y)
         })
         .collect()
 }

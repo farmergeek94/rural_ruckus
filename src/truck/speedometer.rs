@@ -1,7 +1,7 @@
 //! On-screen speed readout.
 
+use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::{Player, SpeedUnits};
 use crate::game_state::GameState;
@@ -29,11 +29,11 @@ pub(super) fn spawn_speedometer(mut commands: Commands, units: Res<SpeedUnits>) 
 }
 
 pub(super) fn update_speedometer(
-    truck: Single<&Velocity, Player>,
+    truck: Single<&LinearVelocity, Player>,
     units: Res<SpeedUnits>,
     mut text: Single<&mut Text, With<SpeedText>>,
 ) {
-    text.0 = speed_text(truck.linear.length(), *units);
+    text.0 = speed_text(truck.0.length(), *units);
 }
 
 /// `speed` in metres per second.

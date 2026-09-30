@@ -8,14 +8,14 @@ use bevy::image::ImageSampler;
 use bevy::light::CascadeShadowConfig;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use bevy_rapier3d::prelude::*;
 use monster_truck_rural_ruckus::camera::{CameraSettings, ChaseCameraPlugin};
 use monster_truck_rural_ruckus::environment::{EnvironmentPlugin, EnvironmentSettings};
 use monster_truck_rural_ruckus::graphics_debug::{GraphicsDebug, GraphicsDebugPlugin};
+use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::track::{
     TileMaterial, TileTextures, TrackPlugin, TrackSettings, tile_array,
 };
-use monster_truck_rural_ruckus::truck::{TireContacts, TruckPlugin};
+use monster_truck_rural_ruckus::truck::TruckPlugin;
 
 const STEP: f64 = 1.0 / 120.0;
 
@@ -25,7 +25,7 @@ fn headless_app() -> App {
         MinimalPlugins,
         TransformPlugin,
         AssetPlugin::default(),
-        RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule(),
+        GamePhysicsPlugin,
         EnvironmentPlugin,
         TrackPlugin,
         TruckPlugin,
@@ -39,13 +39,13 @@ fn headless_app() -> App {
     .init_asset::<TileMaterial>()
     .init_resource::<ButtonInput<KeyCode>>()
     .insert_resource(Time::<Fixed>::from_seconds(STEP))
-    .insert_resource(TimestepMode::Fixed {
-        dt: STEP as f32,
-        substeps: 1,
-    })
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         STEP,
     )));
+    // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+    // calls (see `physics`).
+    app.finish();
+    app.cleanup();
     app.update();
     app
 }

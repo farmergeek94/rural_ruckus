@@ -23,12 +23,12 @@
 //! Where the truck is comes from how it is drawn (`TruckVisual`), so that the spray leaves
 //! the tires where they are seen. How fast it goes comes from its body.
 
+use avian3d::prelude::{AngularVelocity, LinearVelocity};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::entity::EntityHashMap;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy_rapier3d::prelude::*;
 
 use super::WaterSettings;
 use super::forces::Column;
@@ -357,7 +357,7 @@ pub(super) fn make_waves(
     wind: Res<Wind>,
     settings: Res<WaterSettings>,
     trucks: Query<(Entity, &Transform, &TruckVisual)>,
-    bodies: Query<(&Velocity, &TruckConfig)>,
+    bodies: Query<(&LinearVelocity, &AngularVelocity, &TruckConfig)>,
     mut drops: Query<&mut Particles, (With<Drops>, Without<Mist>)>,
     mut mist: Query<&mut Particles, (With<Mist>, Without<Drops>)>,
     mut ripples: ResMut<Ripples>,
@@ -411,7 +411,7 @@ pub(super) fn make_waves(
     wading.retain(|visual, _| trucks.contains(*visual));
 
     for (visual, transform, truck) in &trucks {
-        let Ok((velocity, config)) = bodies.get(truck.truck) else {
+        let Ok((linear, angular, config)) = bodies.get(truck.truck) else {
             continue;
         };
         let state = wading.entry(visual).or_default();
@@ -432,7 +432,7 @@ pub(super) fn make_waves(
             let outwards = right * rest.x.signum();
             let at_surface = Vec3::new(hub.x, level, hub.z) + outwards * config.wheel_width / 2.0;
             breaking.push(at_surface.xz());
-            let moving = velocity.linear + velocity.angular.cross(hub - transform.translation);
+            let moving = linear.0 + angular.0.cross(hub - transform.translation);
 
             if !was_wet && -moving.y > SPLASH_SPEED {
                 let down = -moving.y;
@@ -507,7 +507,7 @@ pub(super) fn make_waves(
             continue;
         }
         let center = breaking.iter().sum::<Vec2>() / breaking.len() as f32;
-        let speed = velocity.linear.xz().length();
+        let speed = linear.0.xz().length();
         let due = match state.last_ripple {
             None => true,
             Some((last, when)) => ripple_due(center.distance(last), now - when),

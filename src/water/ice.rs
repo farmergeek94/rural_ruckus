@@ -18,9 +18,9 @@
 //! Monster Truck Madness 2 has no frozen water that is known. The look and the values are
 //! the game's own.
 
+use avian3d::prelude::*;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::surface::WaterMaterial;
 use crate::game_state::GameState;
@@ -75,18 +75,12 @@ pub(super) fn spawn_ice(
                 Name::new("Ice slab"),
                 // The collider is a child, so that its top, not its middle, is at the level.
                 Transform::from_xyz(0.0, -THICKNESS / 2.0, 0.0),
-                RigidBody::Fixed,
-                Collider::cuboid(size / 2.0, THICKNESS / 2.0, size / 2.0),
+                RigidBody::Static,
+                Collider::cuboid(size, THICKNESS, size),
                 ColliderDisabled,
                 crate::collision_groups::ground(),
-                Friction {
-                    coefficient: FRICTION,
-                    combine_rule: CoefficientCombineRule::Min,
-                },
-                Restitution {
-                    coefficient: 0.0,
-                    combine_rule: CoefficientCombineRule::Min,
-                },
+                Friction::new(FRICTION).with_combine_rule(CoefficientCombine::Min),
+                Restitution::new(0.0).with_combine_rule(CoefficientCombine::Min),
             )],
         ))
         .id();
@@ -113,7 +107,7 @@ pub(super) fn spawn_ice(
 }
 
 /// Makes the ice solid and shows it while the water is frozen, and hides it and shows the
-/// water while it is not. Only on a change, so that Rapier is not told of one every step.
+/// water while it is not. Only on a change, so that the physics is not told of one every step.
 pub(super) fn freeze_or_thaw(
     mut commands: Commands,
     weather: Option<Res<WeatherSettings>>,

@@ -8,7 +8,6 @@ use std::time::Duration;
 use bevy::ecs::resource::IsResource;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use bevy_rapier3d::prelude::*;
 use monster_truck_rural_ruckus::camera::{CameraSettings, ChaseCameraPlugin};
 use monster_truck_rural_ruckus::controls_help::{ControlsHelpPlugin, ControlsHelpSettings};
 use monster_truck_rural_ruckus::dirt::DirtSettings;
@@ -17,13 +16,14 @@ use monster_truck_rural_ruckus::environment::{EnvironmentPlugin, EnvironmentSett
 use monster_truck_rural_ruckus::front_end::{BaseGameChoice, FrontEndPlugin, FrontEndSettings};
 use monster_truck_rural_ruckus::game_state::GameState;
 use monster_truck_rural_ruckus::keys::{Control, KeyBindings};
+use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::race::{RaceClock, RacePause, RacePlugin, RaceSettings, Racer};
 use monster_truck_rural_ruckus::scenery::SceneryPlugin;
 use monster_truck_rural_ruckus::store::Store;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, TrackSettings, builtin_track};
 use monster_truck_rural_ruckus::truck::{
-    ChosenTruck, ComputerTrucks, PlayerTruck, SpeedUnits, TireContacts, Truck, TruckConfig,
-    TruckData, TruckDisplay, TruckPlugin, TruckSetup,
+    ChosenTruck, ComputerTrucks, PlayerTruck, SpeedUnits, Truck, TruckConfig, TruckData,
+    TruckDisplay, TruckPlugin, TruckSetup,
 };
 use monster_truck_rural_ruckus::ui::{
     Action, Catalogue, Choices, Dials, Entry, FolderBrowser, PlayerDid, Screen, Settings, Turntable,
@@ -61,7 +61,7 @@ fn headless_app(settings: FrontEndSettings, store: Option<Arc<Store>>) -> App {
             MinimalPlugins,
             TransformPlugin,
             AssetPlugin::default(),
-            RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule(),
+            GamePhysicsPlugin,
             DisplayPlugin,
             EnvironmentPlugin,
             TrackPlugin,
@@ -78,13 +78,13 @@ fn headless_app(settings: FrontEndSettings, store: Option<Arc<Store>>) -> App {
         .init_asset::<StandardMaterial>()
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(Time::<Fixed>::from_seconds(STEP))
-        .insert_resource(TimestepMode::Fixed {
-            dt: STEP as f32,
-            substeps: 1,
-        })
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
             STEP,
         )));
+    // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+    // calls (see `physics`).
+    app.finish();
+    app.cleanup();
     app
 }
 

@@ -8,8 +8,8 @@
 
 use std::f32::consts::FRAC_PI_2;
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::display::{self, CHASSIS_HALF_EXTENTS, Paint};
 use super::drive::TipGuard;
@@ -48,6 +48,16 @@ const TIRE_BOUNCE: f32 = 0.8;
 const CORE_SHARE: f32 = 0.75;
 /// The same for the body: less than a tire, being steel over a frame.
 const BODY_BOUNCE: f32 = 0.2;
+/// How far ahead of touching something the physics makes a contact with it, in metres.
+/// The physics makes one as far ahead as the truck will go in a step unless told
+/// otherwise, which keeps a fast body from passing through a thin one. But a truck is
+/// built round contacts that are made only where it overlaps something: `contacts` reads
+/// where a tire is pressed in, and the sweep in `drive` climbs whatever a tire has
+/// reached into. Made ahead of time, the contact with a kerb's face held the tire off it,
+/// the sweep never found the top, and the truck stopped dead: measured, a 0.9 m step
+/// stopped Bigfoot at 14 m/s, where it had gone over. The truck's tires and body are
+/// large and its ground is swept, so it has little to pass through.
+const SPECULATION: f32 = 0.0;
 
 const SPAWN_POSITION: Vec3 = Vec3::new(0.0, 3.0, 0.0);
 /// How far apart trucks are spawned, in metres: two bodies in one place would be thrown
@@ -108,13 +118,10 @@ fn spawn_truck(
     // The hull of the body's corners, where the truck says what they are.
     let collider = Some(&chosen.collider_points)
         .filter(|points| points.len() >= 4)
-        .and_then(|points| Collider::convex_hull(points))
+        .and_then(|points| Collider::convex_hull(points.clone()))
         .unwrap_or_else(|| {
-            Collider::cuboid(
-                CHASSIS_HALF_EXTENTS.x,
-                CHASSIS_HALF_EXTENTS.y,
-                CHASSIS_HALF_EXTENTS.z,
-            )
+            let size = CHASSIS_HALF_EXTENTS * 2.0;
+            Collider::cuboid(size.x, size.y, size.z)
         });
 
     let start =
@@ -133,30 +140,30 @@ fn spawn_truck(
         .insert((
             RigidBody::Dynamic,
             collider,
-            ColliderMassProperties::MassProperties(MassProperties {
-                local_center_of_mass: config.center_of_mass,
-                mass: config.mass,
-                principal_inertia_local_frame: Quat::IDENTITY,
-                principal_inertia,
-            }),
-            Friction::coefficient(0.4),
+            // The truck's own figures, whatever its colliders would make of them.
+            (
+                Mass(config.mass),
+                AngularInertia::new(principal_inertia),
+                CenterOfMass(config.center_of_mass),
+                NoAutoMass,
+                NoAutoAngularInertia,
+                NoAutoCenterOfMass,
+            ),
+            Friction::new(0.4),
             // Bodywork that springs back off whatever it hits, the ground included: a
             // truck that lands on its roof bounces rather than sticking.
-            Restitution {
-                coefficient: BODY_BOUNCE,
-                combine_rule: CoefficientCombineRule::Max,
-            },
-            Velocity::default(),
-            ExternalForce::default(),
-            ReadMassProperties::default(),
+            Restitution::new(BODY_BOUNCE).with_combine_rule(CoefficientCombine::Max),
             GroundGrip::default(),
-            Damping {
-                linear_damping: 0.02,
-                angular_damping: 0.4,
-            },
-            // The suspension forces come from us, not from contacts, so Rapier can't tell
-            // on its own that a resting truck still needs simulating.
-            Sleeping::disabled(),
+            LinearDamping(0.02),
+            AngularDamping(0.4),
+            // The suspension forces come from us, not from contacts, so the physics can't
+            // tell on its own that a resting truck still needs simulating.
+            SleepingDisabled,
+            // So that `contacts` can drop the ground's push on the body from underneath.
+            ActiveCollisionHooks::MODIFY_CONTACTS,
+            // Contacts only where the truck touches, not where it is about to: see
+            // `SPECULATION`.
+            SpeculativeMargin(SPECULATION),
         ))
         .id();
 
@@ -169,8 +176,8 @@ fn spawn_truck(
             DespawnOnExit(GameState::Racing),
         ))
         .id();
-    // A tire-shaped collider at each wheel, as a child of the body so that Rapier makes it
-    // part of it, which `drive` keeps at the hub as the suspension moves. It is what
+    // A tire-shaped collider at each wheel, as a child of the body so that the physics
+    // makes it part of it, which `drive` keeps at the hub as the suspension moves. It is what
     // walls, rails, scenery and other trucks meet at wheel height, and what another
     // truck's tire can climb onto. It touches the ground too, but only where the
     // suspension doesn't: a contact under the tread would fight the cast, so `contacts`
@@ -187,16 +194,13 @@ fn spawn_truck(
                     Transform::from_translation(rest),
                     // A ball, which rolls over the edges between the ground's triangles
                     // where the rim of a cylinder could catch on them.
-                    Collider::ball(config.wheel_radius * CORE_SHARE),
+                    Collider::sphere(config.wheel_radius * CORE_SHARE),
                     crate::collision_groups::wheel_core(),
                     // So that `contacts` lets it roll rather than scrub.
-                    ActiveHooks::MODIFY_SOLVER_CONTACTS,
-                    ColliderMassProperties::Mass(0.0),
+                    ActiveCollisionHooks::MODIFY_CONTACTS,
+                    ColliderDensity(0.0),
                     // The ground's own bounce, which is the softer (see `track`).
-                    Restitution {
-                        coefficient: TIRE_BOUNCE,
-                        combine_rule: CoefficientCombineRule::Min,
-                    },
+                    Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
                 ))
                 .id();
             commands
@@ -209,13 +213,13 @@ fn spawn_truck(
                     ChildOf(truck),
                     Transform::from_translation(rest)
                         .with_rotation(Quat::from_rotation_z(FRAC_PI_2)),
-                    Collider::cylinder(config.wheel_width / 2.0, config.wheel_radius),
+                    Collider::cylinder(config.wheel_radius, config.wheel_width),
                     crate::collision_groups::wheel(),
                     // So that `contacts` is asked which of its contacts to keep.
-                    ActiveHooks::MODIFY_SOLVER_CONTACTS,
+                    ActiveCollisionHooks::MODIFY_CONTACTS,
                     // The body's mass is given whole on the chassis.
-                    ColliderMassProperties::Mass(0.0),
-                    Friction::coefficient(0.4),
+                    ColliderDensity(0.0),
+                    Friction::new(0.4),
                     // Rubber: a tire that meets a tire, a rail or a body springs back
                     // off it. `Min` so that a surface may be softer than the tire and say
                     // so -- the ground does, because dirt is not rubber (see `track`) --
@@ -223,10 +227,7 @@ fn spawn_truck(
                     // livelier one, leaves the tire's. A collider carries one restitution
                     // for everything it touches, and this is the only way to tell the
                     // ground apart from a rail.
-                    Restitution {
-                        coefficient: TIRE_BOUNCE,
-                        combine_rule: CoefficientCombineRule::Min,
-                    },
+                    Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
                 ))
                 .id()
         })

@@ -3,7 +3,7 @@
 //! A track is plain data (`TrackData`), either generated in code or converted from a
 //! Monster Truck Madness 2 POD archive. This slice holds the current one in the `Track`
 //! resource and builds the terrain from it: one height grid feeds both the render mesh
-//! and the Rapier heightfield collider, so the two can never disagree.
+//! and the physics heightfield collider, so the two can never disagree.
 
 mod collider;
 mod course;
@@ -18,12 +18,12 @@ mod pod_scenery;
 mod shading;
 mod tile_material;
 
+use avian3d::prelude::*;
 use bevy::asset::embedded_asset;
 use bevy::ecs::change_detection::Tick;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 
@@ -186,20 +186,17 @@ fn spawn_terrain(
     // wheels treat them the same (see `truck/contacts.rs`).
     let ground = || {
         (
-            RigidBody::Fixed,
+            RigidBody::Static,
             // So that `truck/contacts.rs` can tell a wheel's contacts with it apart.
             crate::collision_groups::ground(),
-            Friction::coefficient(1.0),
+            Friction::new(1.0),
             // Dirt, not rubber. Once a truck's springs are shut its tires are what meets
             // the ground (see `truck/contacts.rs`), and a tire's own bounce is a lively
             // 0.8: at that a truck dropped flat from 30 m came off the ground at 70% of
             // the speed it hit at and flew 13 m back up. The tire takes the softer of the
             // two (see `truck/spawn.rs`), so this is what it gets here, and its own is
             // what it keeps against a rail or another truck.
-            Restitution {
-                coefficient: GROUND_BOUNCE,
-                combine_rule: CoefficientCombineRule::Min,
-            },
+            Restitution::new(GROUND_BOUNCE).with_combine_rule(CoefficientCombine::Min),
         )
     };
     let terrain = commands
