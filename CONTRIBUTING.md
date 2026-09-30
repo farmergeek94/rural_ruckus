@@ -14,7 +14,8 @@ cargo run -- tracks/AlpineMtns.pod --smooth-terrain   # with the ground lit as i
 cargo run -- tracks/AlpineMtns.pod --no-mipmaps       # textures without mipmaps, to compare
 cargo run -- --log-fps --no-vsync  # print the true frame time once a second
 cargo run -- --fifo                # strict vsync (PresentMode::Fifo): never shows a late frame early
-cargo run -- tracks/AlpineMtns.pod --no-antialiasing --shadow-cascades=2 --shadow-distance=100 --anisotropy=4   # start with cheaper graphics (F2 changes them while racing)
+cargo run -- tracks/AlpineMtns.pod --integrated-graphics   # start with the graphics for a processor's built-in graphics (INTEGRATED GRAPHICS on the options screen)
+cargo run -- tracks/AlpineMtns.pod --antialiasing=fxaa --shadow-cascades=2 --shadow-distance=100 --anisotropy=4   # start with single cheaper graphics settings (F2 changes them while racing)
 cargo run -- tracks/AlpineMtns.pod --log-fps --autopilot   # measure while it drives itself
 cargo run -- tracks/AlpineMtns.pod --opponents=7   # against seven computer trucks
 cargo run -- tracks/AlpineMtns.pod --no-backdrop   # without the distant hills round the horizon

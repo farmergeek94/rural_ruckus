@@ -525,7 +525,10 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
             }
         );
         let camera = world.resource::<CameraSettings>();
-        assert!(!camera.antialiasing);
+        assert_eq!(
+            camera.antialiasing,
+            monster_truck_rural_ruckus::camera::Antialiasing::Off
+        );
         assert!(camera.rig.distance > CameraSettings::default().rig.distance);
         let environment = world.resource::<EnvironmentSettings>();
         assert_eq!(
@@ -577,6 +580,40 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
     assert!(second.world().resource::<DirtSettings>().on);
 }
 
+/// The INTEGRATED GRAPHICS button beside RESTORE DEFAULTS turns down what costs most on a
+/// processor's built-in graphics, and leaves the other lines as they were.
+#[test]
+fn integrated_graphics_is_a_preset_on_the_options_screen() {
+    let mut app = headless_app(nowhere(), None);
+    app.update();
+    player_does(&mut app, Action::Show(Screen::Options));
+    set_option(&mut app, "option.mipmaps", "Off");
+    let preset = app
+        .world()
+        .resource::<monster_truck_rural_ruckus::ui::Presets>()
+        .0
+        .iter()
+        .position(|preset| preset.label == "INTEGRATED GRAPHICS")
+        .expect("the preset is offered");
+    player_does(&mut app, Action::ApplyPreset(preset));
+
+    let mut camera = CameraSettings::default();
+    let mut environment = EnvironmentSettings::default();
+    let mut track = TrackSettings {
+        mipmaps: false,
+        ..TrackSettings::default()
+    };
+    monster_truck_rural_ruckus::front_end::integrated_graphics(
+        &mut camera,
+        &mut environment,
+        &mut track,
+    );
+    let world = app.world();
+    assert_eq!(*world.resource::<CameraSettings>(), camera);
+    assert_eq!(*world.resource::<EnvironmentSettings>(), environment);
+    assert_eq!(*world.resource::<TrackSettings>(), track);
+}
+
 /// F2 changes the graphics in a race, and the command line can set values that no line of
 /// the options screen has. The screen shows the nearest, and leaves them alone until the
 /// player changes that line.
@@ -603,7 +640,10 @@ fn a_setting_changed_elsewhere_is_shown_and_left_alone() {
 
     // Another line changed, and this one kept as it was.
     set_option(&mut app, "option.antialiasing", "Off");
-    assert!(!app.world().resource::<CameraSettings>().antialiasing);
+    assert_eq!(
+        app.world().resource::<CameraSettings>().antialiasing,
+        monster_truck_rural_ruckus::camera::Antialiasing::Off
+    );
     assert_eq!(
         app.world()
             .resource::<EnvironmentSettings>()

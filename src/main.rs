@@ -28,9 +28,13 @@ fn main() {
     // lights the ground as if it were rounded off,
     // `--no-mipmaps` draws textures without their smaller copies,
     // `--log-fps` prints frame times and how much is drawn, once a second, and `--autopilot`
-    // drives the course by itself. See `diagnostics.rs`. `--no-antialiasing`,
+    // drives the course by itself. See `diagnostics.rs`. `--antialiasing=fxaa` (off, fxaa
+    // or msaa; `--no-antialiasing` is off),
     // `--shadow-cascades=2` (0 for no shadows), `--shadow-distance=100` and `--anisotropy=4`
-    // start with the graphics settings that F2 changes while racing. `--opponents=3` races
+    // start with the graphics settings that F2 changes while racing, and
+    // `--integrated-graphics` with the set of them for a graphics processor built into the
+    // CPU (`front_end::integrated_graphics`, the options screen's INTEGRATED GRAPHICS); an
+    // option after it on the command line wins over it. `--opponents=3` races
     // against that many trucks driven by the computer, which are copies of the player's.
     // `--weather=rain` races in that weather (clear, overcast, fog, rain, storm or snow), and
     // `--weather=random` in one picked at random, and `--time=night` at that time of day
@@ -105,7 +109,20 @@ fn main() {
             Some("--fifo") => fifo = true,
             Some("--race") => race_at_once = true,
             Some("--builtin") => builtin = true,
-            Some("--no-antialiasing") => camera_settings.antialiasing = false,
+            Some("--no-antialiasing") => camera_settings.antialiasing = camera::Antialiasing::Off,
+            Some(flag) if flag.starts_with("--antialiasing=") => {
+                let name = flag.split_once('=').map_or("", |(_, name)| name);
+                camera_settings.antialiasing =
+                    camera::Antialiasing::named(name).unwrap_or_else(|| {
+                        eprintln!("{flag}: the antialiasing is off, fxaa or msaa");
+                        std::process::exit(2);
+                    });
+            }
+            Some("--integrated-graphics") => front_end::integrated_graphics(
+                &mut camera_settings,
+                &mut environment_settings,
+                &mut settings,
+            ),
             Some("--no-backdrop") => backdrop_settings.on = false,
             Some(flag) if flag.starts_with("--base-game=") => {}
             Some(flag) if flag.starts_with("--shadow-cascades=") => {
@@ -147,7 +164,7 @@ fn main() {
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
                     "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-mipmaps --log-fps --no-vsync --fifo --autopilot \
-                     --no-antialiasing --no-backdrop --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
+                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
             }

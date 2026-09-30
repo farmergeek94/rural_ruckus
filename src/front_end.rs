@@ -52,7 +52,7 @@ use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use crate::base_game::{self, BaseGame};
 
 use crate::backdrop::BackdropSettings;
-use crate::camera::CameraSettings;
+use crate::camera::{Antialiasing, CameraSettings};
 use crate::controls_help::ControlsHelpSettings;
 use crate::dirt::DirtSettings;
 use crate::display::{DisplaySettings, ScreenMode, Vsync};
@@ -222,6 +222,7 @@ impl Plugin for FrontEndPlugin {
             .insert_resource(dials_for(&setup))
             .insert_resource(setup)
             .insert_resource(option_lines)
+            .insert_resource(ui::Presets(presets_for()))
             .insert_resource(Saves(store))
             .insert_resource(browser)
             .insert_resource(browsing)
@@ -742,6 +743,24 @@ struct Options {
 }
 
 impl Options {
+    /// Every slice's own defaults.
+    fn defaults() -> Self {
+        Self {
+            display: default(),
+            track: default(),
+            camera: default(),
+            environment: default(),
+            help: default(),
+            speed: default(),
+            truck_looks: default(),
+            water: default(),
+            dirt: default(),
+            backdrop: default(),
+            weather: default(),
+            keys: default(),
+        }
+    }
+
     fn in_world(world: &World) -> Self {
         Self {
             display: *world.resource(),
@@ -942,10 +961,10 @@ const OPTIONS: &[OptionLine] = &[
         key: "option.antialiasing",
         section: GRAPHICS,
         label: "Antialiasing",
-        detail: "Smooths jagged edges. Costs most on graphics built into the processor.",
-        values: &["Off", "4x MSAA"],
-        get: |options| options.camera.antialiasing as usize,
-        set: |options, value| options.camera.antialiasing = value == 1,
+        detail: "Smooths jagged edges. FXAA softens the finished picture and costs little. 4x MSAA is sharper, and costs most on graphics built into the processor.",
+        values: &["Off", "FXAA", "4x MSAA"],
+        get: |options| place(&Antialiasing::ALL, &options.camera.antialiasing),
+        set: |options, value| options.camera.antialiasing = Antialiasing::ALL[value],
     },
     OptionLine {
         key: "option.bloom",
@@ -1135,22 +1154,53 @@ const OPTIONS: &[OptionLine] = &[
     ),
 ];
 
+/// Graphics for a graphics processor built into the CPU, which shares the computer's
+/// memory: what costs most on one turned down, and the rest left as it is. Four samples
+/// a pixel give way to FXAA, a pass over the finished picture, and the glow goes, since
+/// it draws the picture in high dynamic range: both cost most where memory is slowest.
+/// The sun's shadows keep two of their four maps, over 100 m, and the ground's filtering
+/// keeps a quarter of its sharpness. Chosen, not
+/// measured: measure with the F2 panel and `--no-vsync` (see `docs/smoothness.md`)
+/// before changing it. The options screen offers it as INTEGRATED GRAPHICS, and
+/// `--integrated-graphics` starts a race with it.
+pub fn integrated_graphics(
+    camera: &mut CameraSettings,
+    environment: &mut EnvironmentSettings,
+    track: &mut TrackSettings,
+) {
+    camera.antialiasing = Antialiasing::Fxaa;
+    camera.bloom = false;
+    environment.shadow_cascades = 2;
+    environment.shadow_distance = 100.0;
+    track.anisotropy = 4;
+}
+
+/// The presets the options screen offers beside "restore defaults". Each names only the
+/// lines it changes from the defaults, and leaves the rest as the player had them.
+fn presets_for() -> Vec<ui::Preset> {
+    let defaults = Options::defaults();
+    let mut integrated = defaults.clone();
+    integrated_graphics(
+        &mut integrated.camera,
+        &mut integrated.environment,
+        &mut integrated.track,
+    );
+    let preset = |label: &str, options: &Options| ui::Preset {
+        label: label.into(),
+        values: OPTIONS
+            .iter()
+            .map(|line| {
+                let value = (line.get)(options);
+                (value != (line.get)(&defaults)).then_some(value)
+            })
+            .collect(),
+    };
+    vec![preset("INTEGRATED GRAPHICS", &integrated)]
+}
+
 /// The options screen's lines, standing where `options` do.
 fn settings_for(options: &Options) -> Vec<Setting> {
-    let defaults = Options {
-        display: default(),
-        track: default(),
-        camera: default(),
-        environment: default(),
-        help: default(),
-        speed: default(),
-        truck_looks: default(),
-        water: default(),
-        dirt: default(),
-        backdrop: default(),
-        weather: default(),
-        keys: default(),
-    };
+    let defaults = Options::defaults();
     OPTIONS
         .iter()
         .map(|line| Setting {
@@ -1802,6 +1852,30 @@ mod tests {
         assert_eq!(
             in_base(&entry.id),
             Some((Path::new("base/Shared/JUNK.POD"), "WORLD\\GRAVEY.SIT"))
+        );
+    }
+
+    #[test]
+    fn integrated_graphics_names_only_the_lines_it_turns_down() {
+        let presets = presets_for();
+        let [preset] = presets.as_slice() else {
+            panic!("one preset, not {}", presets.len());
+        };
+        assert_eq!(preset.label, "INTEGRATED GRAPHICS");
+        let named: Vec<(&str, &str)> = OPTIONS
+            .iter()
+            .zip(&preset.values)
+            .filter_map(|(line, value)| Some((line.key, line.values[(*value)?])))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("option.antialiasing", "FXAA"),
+                ("option.bloom", "Off"),
+                ("option.shadows", "Medium"),
+                ("option.shadow_distance", "100 m"),
+                ("option.anisotropy", "4x"),
+            ]
         );
     }
 

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
-use crate::camera::CameraSettings;
+use crate::camera::{Antialiasing, CameraSettings};
 use crate::environment::EnvironmentSettings;
 use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
@@ -134,7 +134,7 @@ fn change_settings(
         return;
     }
     if keys.just_pressed(ANTIALIASING_KEY) {
-        camera.antialiasing = !camera.antialiasing;
+        camera.antialiasing = next(&Antialiasing::ALL, camera.antialiasing);
     }
     if keys.just_pressed(SHADOW_CASCADES_KEY) {
         environment.shadow_cascades = next(&SHADOW_CASCADES, environment.shadow_cascades);
@@ -228,11 +228,7 @@ fn panel_text(
     track: &TrackSettings,
     frames: Option<FrameReport>,
 ) -> String {
-    let antialiasing = if camera.antialiasing {
-        "4x MSAA"
-    } else {
-        "off"
-    };
+    let antialiasing = camera.antialiasing.name();
     let cascades = match environment.shadow_cascades {
         0 => "no shadows".to_string(),
         cascades => cascades.to_string(),
@@ -289,7 +285,7 @@ mod tests {
     fn the_panel_says_what_is_set() {
         let text = panel_text(
             &CameraSettings {
-                antialiasing: false,
+                antialiasing: Antialiasing::Off,
                 ..default()
             },
             &EnvironmentSettings {
@@ -303,7 +299,7 @@ mod tests {
                 Duration::from_millis(14),
             ]),
         );
-        assert!(text.contains("Antialiasing      off"), "{text}");
+        assert!(text.contains("Antialiasing      Off"), "{text}");
         assert!(text.contains("no shadows"), "{text}");
         assert!(text.contains("100 m"), "{text}");
         assert!(text.contains("16x anisotropic"), "{text}");
