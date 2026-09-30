@@ -159,8 +159,6 @@ fn spawn_truck(
             // The suspension forces come from us, not from contacts, so the physics can't
             // tell on its own that a resting truck still needs simulating.
             SleepingDisabled,
-            // So that `contacts` can drop the ground's push on the body from underneath.
-            ActiveCollisionHooks::MODIFY_CONTACTS,
             // Contacts only where the truck touches, not where it is about to: see
             // `SPECULATION`.
             SpeculativeMargin(SPECULATION),
