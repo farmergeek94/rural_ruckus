@@ -18,9 +18,9 @@ mod results;
 mod start;
 mod systems;
 
+use avian3d::prelude::PhysicsSystems;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 use crate::track::TrackSystems;
@@ -105,10 +105,10 @@ impl Plugin for RacePlugin {
             )
             // After the physics step, so that a truck's position is this tick's.
             .add_systems(
-                FixedUpdate,
+                FixedPostUpdate,
                 (systems::tick_clock, systems::track_progress)
                     .chain()
-                    .after(PhysicsSet::Writeback)
+                    .after(PhysicsSystems::Writeback)
                     .run_if(in_state(GameState::Racing)),
             )
             // Before the forces, so that a truck is let go in the step of GO.

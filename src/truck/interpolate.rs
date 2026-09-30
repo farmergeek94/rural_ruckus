@@ -7,7 +7,7 @@
 //! each frame between the last two physics poses by how far the frame falls between steps.
 //! It is at most one step (8 ms) behind the physics, which nobody can see.
 //!
-//! The physics body itself must not be moved for the sake of looks: Rapier would take
+//! The physics body itself must not be moved for the sake of looks: the physics would take
 //! that for a teleport.
 
 use bevy::prelude::*;

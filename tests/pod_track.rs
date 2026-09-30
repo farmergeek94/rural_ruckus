@@ -3,15 +3,15 @@
 
 use std::path::Path;
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 use monster_truck_rural_ruckus::base_game::BaseGame;
+use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::pod;
 use monster_truck_rural_ruckus::scenery::SceneryPlugin;
 use monster_truck_rural_ruckus::track::{
     Footing, Track, TrackData, TrackPlugin, TrackSettings, load_pod,
 };
-use monster_truck_rural_ruckus::truck::TireContacts;
 
 /// The archives in a folder of the repository and in every folder under it, leaving out
 /// anything else there (the `.gitkeep` that keeps an empty folder in git).
@@ -438,7 +438,7 @@ fn the_mipmaps_setting_reaches_the_textures() {
                 MinimalPlugins,
                 TransformPlugin,
                 AssetPlugin::default(),
-                RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule(),
+                GamePhysicsPlugin,
                 TrackPlugin,
                 SceneryPlugin,
             ))
@@ -447,6 +447,10 @@ fn the_mipmaps_setting_reaches_the_textures() {
             // What a drawing app would have, so that the textures get made.
             .init_asset::<Image>()
             .init_asset::<TileMaterial>();
+        // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+        // calls (see `physics`).
+        app.finish();
+        app.cleanup();
         app.update();
 
         let images = app.world().resource::<Assets<Image>>();
@@ -474,11 +478,15 @@ fn alpine_bridge_is_solid_where_the_course_crosses_it() {
             MinimalPlugins,
             TransformPlugin,
             AssetPlugin::default(),
-            RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule(),
+            GamePhysicsPlugin,
             TrackPlugin,
         ))
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>();
+    // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+    // calls (see `physics`).
+    app.finish();
+    app.cleanup();
     app.update();
 
     let world = app.world_mut();
@@ -492,8 +500,8 @@ fn alpine_bridge_is_solid_where_the_course_crosses_it() {
     // Along the course's line over the middle of the ravine, at (1310, 6048) ft.
     let at = Vec2::new(1310.0 - 4096.0, 4096.0 - 6048.0) * feet;
     let from = Vec3::new(at.x, 200.0, at.y);
-    let hit = collider
-        .cast_local_ray(from, Vec3::NEG_Y, 1000.0, true)
+    let (hit, _) = collider
+        .cast_ray(Vec3::ZERO, Quat::IDENTITY, from, Vec3::NEG_Y, 1000.0, true)
         .expect("the bridge is there");
     let deck = from.y - hit;
     assert!(

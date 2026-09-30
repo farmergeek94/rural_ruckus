@@ -13,10 +13,10 @@
 //! Hidden in every other view, and for a truck without a dashboard. Drawn only, and only
 //! when the app can draw.
 
+use avian3d::prelude::LinearVelocity;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy_rapier3d::prelude::*;
 
 use super::views::{CameraView, Look};
 use crate::game_state::GameState;
@@ -167,7 +167,7 @@ pub(super) fn show_dashboard(
         (&Needle, &mut UiTransform, &mut Visibility),
         (Without<Wheel>, Without<DashboardRoot>),
     >,
-    player: Single<(&Velocity, &TruckInput, &TruckConfig), Player>,
+    player: Single<(&LinearVelocity, &TruckInput, &TruckConfig), Player>,
 ) {
     let Some(root) = root else {
         return;
@@ -217,7 +217,7 @@ pub(super) fn show_dashboard(
             image.image = frame.clone();
         }
     }
-    let speed = velocity.linear.length();
+    let speed = velocity.0.length();
     for (needle, mut transform, mut visibility) in &mut needles {
         visibility.set_if_neq(seen);
         let (dial, reading) = match needle {

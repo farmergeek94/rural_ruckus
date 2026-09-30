@@ -4,9 +4,10 @@
 
 use std::time::Duration;
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use bevy_rapier3d::prelude::*;
+use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::scenery::{SceneryObject, SceneryPlugin};
 use monster_truck_rural_ruckus::track::{
     Scenery, SceneryModel, SceneryMotion, SceneryObject as Placed, Track, TrackPlugin,
@@ -85,20 +86,20 @@ fn app() -> App {
             MinimalPlugins,
             TransformPlugin,
             AssetPlugin::default(),
-            RapierPhysicsPlugin::<NoUserData>::default().in_fixed_schedule(),
+            GamePhysicsPlugin,
             TrackPlugin,
             SceneryPlugin,
         ))
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
         .insert_resource(Time::<Fixed>::from_seconds(STEP))
-        .insert_resource(TimestepMode::Fixed {
-            dt: STEP as f32,
-            substeps: 1,
-        })
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
             STEP,
         )));
+    // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+    // calls (see `physics`).
+    app.finish();
+    app.cleanup();
     app.update();
     app
 }
@@ -109,19 +110,19 @@ fn run(app: &mut App, seconds: f64) {
     }
 }
 
-fn bodies(app: &mut App) -> Vec<(RigidBody, Transform, Option<Sleeping>)> {
+fn bodies(app: &mut App) -> Vec<(RigidBody, Transform, bool)> {
     let mut query = app
         .world_mut()
-        .query_filtered::<(&RigidBody, &Transform, Option<&Sleeping>), With<SceneryObject>>();
+        .query_filtered::<(&RigidBody, &Transform, Has<Sleeping>), With<SceneryObject>>();
     let mut bodies: Vec<_> = query
         .iter(app.world())
-        .map(|(body, transform, sleeping)| (*body, *transform, sleeping.copied()))
+        .map(|(body, transform, sleeping)| (*body, *transform, sleeping))
         .collect();
     bodies.sort_by_key(|(body, ..)| format!("{body:?}"));
     bodies
 }
 
-fn body(app: &mut App, kind: RigidBody) -> (Transform, Option<Sleeping>) {
+fn body(app: &mut App, kind: RigidBody) -> (Transform, bool) {
     let (_, transform, sleeping) = bodies(app)
         .into_iter()
         .find(|(body, ..)| *body == kind)
@@ -138,11 +139,7 @@ fn each_object_is_the_body_its_motion_says() {
         .collect();
     assert_eq!(
         kinds,
-        [
-            RigidBody::Dynamic,
-            RigidBody::Fixed,
-            RigidBody::KinematicVelocityBased
-        ]
+        [RigidBody::Dynamic, RigidBody::Kinematic, RigidBody::Static]
     );
 }
 
@@ -152,7 +149,7 @@ fn a_loose_object_left_alone_stands_asleep_where_it_was_put() {
     let (placed, _) = body(&mut app, RigidBody::Dynamic);
     run(&mut app, 2.0);
     let (now, sleeping) = body(&mut app, RigidBody::Dynamic);
-    assert!(sleeping.unwrap().sleeping);
+    assert!(sleeping);
     // It settles onto the ground a little in the steps before it is put to sleep: by up to
     // 9 cm on Alpine's slopes.
     assert!(
@@ -166,15 +163,15 @@ fn a_loose_object_left_alone_stands_asleep_where_it_was_put() {
 #[test]
 fn a_moving_object_comes_back_onto_the_map_at_the_other_side() {
     let mut app = app();
-    let (placed, _) = body(&mut app, RigidBody::KinematicVelocityBased);
+    let (placed, _) = body(&mut app, RigidBody::Kinematic);
     let half = app.world().resource::<Track>().heights.size() / 2.0;
     run(&mut app, 1.0);
-    let (on, _) = body(&mut app, RigidBody::KinematicVelocityBased);
+    let (on, _) = body(&mut app, RigidBody::Kinematic);
     assert!((on.translation.x - placed.translation.x - 10.0).abs() < 0.2);
     // 20 m from the edge at 10 m/s: across it after 2 s, and 10 m in from the other side
     // after 3 s. Its height and its way across the map are as they were.
     run(&mut app, 2.0);
-    let (back, _) = body(&mut app, RigidBody::KinematicVelocityBased);
+    let (back, _) = body(&mut app, RigidBody::Kinematic);
     assert!(
         (back.translation.x - (10.0 - half)).abs() < 0.2,
         "{} on a map {} across",

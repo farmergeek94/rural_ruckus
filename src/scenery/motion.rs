@@ -3,14 +3,14 @@
 //!
 //! A loose object is a body with its track's mass. It is put to sleep, so that it stands
 //! where it was put, whatever the ground under it does, until something wakes it by
-//! touching it. Not at once: bevy_rapier wakes a body as it first applies its
-//! `ExternalImpulse`, a step or two after the body is made, so it is put to sleep after
-//! that (`settle`). For the same reason it carries no `Velocity`, which bevy_rapier would
-//! see changed as the body comes to rest, and would wake it again with. Its collider is the hull round its model, since it must meet fixed scenery
-//! as well as the ground and the trucks, and Rapier finds no contacts between two triangle
+//! touching it. Not at once: the physics puts a body in with the others it touches (its
+//! island) in its first step, and one made asleep is never put in; two such that touch
+//! each other stop the game (measured: two of a track's rocks, in Avian 0.7). So it is put
+//! to sleep a few steps after it is made (`settle`). Its collider is the hull round its model, since it must meet fixed scenery
+//! as well as the ground and the trucks, and no contacts are found between two triangle
 //! meshes. It can be moved fast by a heavy truck, so it is swept (CCD) to keep it from
-//! going through the ground in one step. It carries an `ExternalImpulse`, which a tire that
-//! stands on it pushes it back through (see `truck/drive.rs`).
+//! going through the ground in one step. A tire that stands on it pushes it back (see
+//! `truck/drive.rs`).
 //!
 //! A moving object is kinematic: nothing pushes it, and what is in its way is pushed. It
 //! keeps its height, because every one found goes along a level line of ground and bridges
@@ -18,8 +18,8 @@
 //! one side of the map it comes back on the other, as the map's own edges do. Whether MTM2
 //! does that too is open.
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::{SceneryObject, bouncy};
 use crate::game_state::GameState;
@@ -39,7 +39,7 @@ pub(super) struct Moving;
 pub(super) struct Loose;
 
 /// How many physics steps a loose object is left before it is put to sleep: past the
-/// steps in which bevy_rapier makes the body and applies its first impulse.
+/// first, in which the physics puts it in with what it touches.
 const SETTLE_STEPS: u8 = 3;
 
 /// A loose object that is still to be put to sleep, in so many more physics steps.
@@ -60,14 +60,13 @@ pub(super) fn loose(
             DespawnOnExit(GameState::Racing),
             transform,
             RigidBody::Dynamic,
+            // The density that gives the hull the track's mass, so that it turns as a
+            // solid of that shape and mass would.
+            ColliderDensity(mass / hull.mass(1.0).max(f32::EPSILON)),
             hull,
-            ColliderMassProperties::Mass(mass),
             bouncy(),
-            Sleeping::default(),
             Settling(SETTLE_STEPS),
-            Ccd::enabled(),
-            ReadMassProperties::default(),
-            ExternalImpulse::default(),
+            SweptCcd::default(),
         ))
         .id()
 }
@@ -85,23 +84,20 @@ pub(super) fn moving(
             Moving,
             DespawnOnExit(GameState::Racing),
             transform,
-            RigidBody::KinematicVelocityBased,
+            RigidBody::Kinematic,
             collider,
             bouncy(),
-            Velocity::linear(velocity),
+            LinearVelocity(velocity),
         ))
         .id()
 }
 
-/// Puts loose objects to sleep once bevy_rapier has done waking them.
-pub(super) fn settle(
-    mut commands: Commands,
-    mut objects: Query<(Entity, &mut Settling, &mut Sleeping)>,
-) {
-    for (entity, mut settling, mut sleeping) in &mut objects {
+/// Puts loose objects to sleep once the physics has them in its islands.
+pub(super) fn settle(mut commands: Commands, mut objects: Query<(Entity, &mut Settling)>) {
+    for (entity, mut settling) in &mut objects {
         settling.0 = settling.0.saturating_sub(1);
         if settling.0 == 0 {
-            sleeping.sleeping = true;
+            commands.queue(SleepBody(entity));
             commands.entity(entity).remove::<Settling>();
         }
     }

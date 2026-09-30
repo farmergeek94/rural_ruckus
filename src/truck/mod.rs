@@ -30,9 +30,9 @@ mod reset;
 mod spawn;
 mod speedometer;
 
+use avian3d::prelude::PhysicsSystems;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 
@@ -96,15 +96,12 @@ impl Plugin for TruckPlugin {
                     looks::cycle_textures,
                 ),
             )
-            // Forces must be computed at the physics rate, right before Rapier reads them.
+            // Forces must be computed at the physics rate, before each step, which the
+            // physics takes in `FixedPostUpdate`.
+            .add_systems(FixedUpdate, drive::drive_truck.in_set(TruckSystems::Drive))
             .add_systems(
-                FixedUpdate,
-                (
-                    drive::drive_truck
-                        .in_set(TruckSystems::Drive)
-                        .before(PhysicsSet::SyncBackend),
-                    interpolate::record_poses.after(PhysicsSet::Writeback),
-                ),
+                FixedPostUpdate,
+                interpolate::record_poses.after(PhysicsSystems::Writeback),
             );
     }
 }
@@ -238,8 +235,8 @@ pub enum TruckSystems {
     /// Moves every `TruckVisual` to where its truck is this frame, in `Update`. Run
     /// after this set to follow a truck on screen without judder.
     PlaceVisuals,
-    /// Works out each truck's suspension and tire forces, in `FixedUpdate`, and writes
-    /// them to its `ExternalForce` in place of the last step's. Add forces of your own
-    /// after this set and before `PhysicsSet::SyncBackend`.
+    /// Works out each truck's suspension and tire forces, in `FixedUpdate`, and hands them
+    /// to the physics for the coming step. Add forces of your own through `Forces` in
+    /// `FixedUpdate` too: they add to these, in any order.
     Drive,
 }

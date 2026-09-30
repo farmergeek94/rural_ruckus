@@ -42,8 +42,8 @@
 //! Uses the `track` slice for the course, the `truck` slice for the trucks and the `race`
 //! slice for the checkpoints. Needs `RacePlugin`.
 
+use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 use crate::race::{BackToCheckpoint, RaceSystems, Racer};
@@ -213,12 +213,7 @@ impl Plugin for OpponentsPlugin {
                 .run_if(in_state(GameState::Racing)),
         )
         // With the forces, so that a driver does the same at any frame rate.
-        .add_systems(
-            FixedUpdate,
-            drive
-                .before(PhysicsSet::SyncBackend)
-                .run_if(in_state(GameState::Racing)),
-        );
+        .add_systems(FixedUpdate, drive.run_if(in_state(GameState::Racing)));
     }
 }
 
@@ -919,7 +914,7 @@ fn distance_to_segment(point: Vec2, a: Vec2, b: Vec2) -> f32 {
 type Driving<'a> = (
     Entity,
     &'a Transform,
-    &'a Velocity,
+    &'a LinearVelocity,
     &'a mut TruckConfig,
     &'a mut TruckInput,
     &'a mut ComputerDriver,
@@ -932,7 +927,7 @@ type Driving<'a> = (
 type Watching<'a> = (
     Entity,
     &'a Transform,
-    &'a Velocity,
+    &'a LinearVelocity,
     &'a TruckConfig,
     Option<&'a Racer>,
 );
@@ -976,7 +971,7 @@ fn drive(
                 places.of(
                     entity,
                     transform.translation.xz(),
-                    velocity.linear.xz(),
+                    velocity.0.xz(),
                     reach(config),
                     driver.along,
                     lap_number(racer),
@@ -988,7 +983,7 @@ fn drive(
         let player = places.of(
             entity,
             transform.translation.xz(),
-            velocity.linear.xz(),
+            velocity.0.xz(),
             reach(config),
             *player_along,
             lap_number(racer),
@@ -1020,7 +1015,7 @@ fn drive(
         }
         let position = transform.translation.xz();
         let forward = transform.forward().xz().normalize_or_zero();
-        let speed = velocity.linear.dot(transform.forward().as_vec3());
+        let speed = velocity.0.dot(transform.forward().as_vec3());
 
         // The trucks near enough to be in the way. Near in a straight line as well as along
         // the course: where the course doubles back, what is on the next stretch of it is

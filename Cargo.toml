@@ -4,11 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# bevy_rapier3d releases are tied to one Bevy minor version: upgrade them together.
+# avian3d releases are tied to one Bevy minor version: upgrade them together.
 bevy = "0.19"
-# `parallel` lets Rapier spread a step's work over the CPU's cores (rayon), with eight
-# trucks and their wheels to solve 120 times a second.
-bevy_rapier3d = { version = "0.36", features = ["parallel"] }
+# The physics engine (see `docs/avian.md`, and `physics.rs` for how it is set up). Only
+# what the game uses: no colliders from meshes, scenes or picking. `parallel` spreads a
+# step's work over the CPU's cores, with eight trucks and their wheels to solve 120 times
+# a second.
+avian3d = { version = "0.7", default-features = false, features = [
+    "3d",
+    "f32",
+    "parry-f32",
+    "parallel",
+    "debug-plugin",
+] }
 # What `store` keeps between runs. Pure Rust, one file, transactional writes, and an
 # in-memory backend for tests. No redb type appears in `store`'s API, so that it can be
 # swapped or upgraded.
@@ -18,7 +26,7 @@ redb = "4.3"
 png = "0.18"
 
 # Our own code is unoptimised so the debugger can show every local and step line by line,
-# while full optimisation for dependencies keeps Bevy and Rapier usable in debug builds.
+# while full optimisation for dependencies keeps Bevy and Avian usable in debug builds.
 [profile.dev]
 opt-level = 0
 

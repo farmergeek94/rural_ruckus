@@ -25,8 +25,8 @@
 //! front of the body and just under its roof. With a dashboard, it is tipped down a little,
 //! so that the road is in the dashboard's window (`dashboard::eye_pitch`).
 
+use avian3d::prelude::Collider;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::ChaseCamera;
 use super::dashboard::eye_pitch;
@@ -322,7 +322,7 @@ pub(super) fn place_view(
 
     let (chase, mut transform, projection) = camera.into_inner();
     if cockpit {
-        let body = collider.raw.compute_local_aabb();
+        let body = collider.shape().compute_local_aabb();
         let eye = cockpit_eye(body.mins, body.maxs);
         let pitch = match (&chosen.dashboard, projection) {
             (Some(dashboard), Some(Projection::Perspective(perspective))) => {
