@@ -48,9 +48,48 @@ fn cube() -> SceneryModel {
     }
 }
 
+/// A tire lying flat, as a scrapyard stacks them: sixteen-sided, 1.2 m across and 0.3 m
+/// high, standing on its bottom face.
+fn tire() -> SceneryModel {
+    const SIDES: usize = 16;
+    let positions: Vec<[f32; 3]> = [0.0, 0.3]
+        .iter()
+        .flat_map(|&y| {
+            (0..SIDES).map(move |side| {
+                let angle = side as f32 / SIDES as f32 * std::f32::consts::TAU;
+                [0.6 * angle.cos(), y, 0.6 * angle.sin()]
+            })
+        })
+        .collect();
+    let mut indices = Vec::new();
+    for side in 0..SIDES as u32 {
+        let next = (side + 1) % SIDES as u32;
+        let (low, low_next, high, high_next) = (side, next, side + 16, next + 16);
+        indices.extend([low, high, low_next, low_next, high, high_next]);
+        if side > 0 && next > 0 {
+            indices.extend([0, next, side, 16, side + 16, next + 16]);
+        }
+    }
+    let count = positions.len();
+    SceneryModel {
+        name: "TIRE.BIN".into(),
+        normals: vec![[0.0, 1.0, 0.0]; count],
+        uvs: vec![[0.0, 0.0]; count],
+        tiles: vec![0; count],
+        positions,
+        indices,
+        ..default()
+    }
+}
+
 /// The built-in track with three cubes on it, well away from the truck: one fixed, one
 /// loose and one moving, 20 m from the edge of the map and heading off it at 10 m/s.
 fn app() -> App {
+    app_with(|_| Vec::new())
+}
+
+/// The same, with more objects, placed from the point the cubes are put about.
+fn app_with(more: impl Fn(Vec2) -> Vec<Placed>) -> App {
     let mut track = builtin_track();
     let away = track.start.position - yaw_direction(track.start.yaw) * 60.0;
     let half = track.heights.size() / 2.0;
@@ -67,8 +106,8 @@ fn app() -> App {
         tile_size: 8,
         tiles: vec![vec![128; 8 * 8 * 4]],
         texture_cycles: Vec::new(),
-        models: vec![cube()],
-        objects: vec![
+        models: vec![cube(), tire()],
+        objects: [
             object(away, SceneryMotion::Fixed),
             object(away + Vec2::X * 5.0, SceneryMotion::Loose { mass: 50.0 }),
             object(
@@ -77,7 +116,10 @@ fn app() -> App {
                     velocity: Vec3::X * 10.0,
                 },
             ),
-        ],
+        ]
+        .into_iter()
+        .chain(more(away))
+        .collect(),
     };
 
     let mut app = App::new();
@@ -180,4 +222,31 @@ fn a_moving_object_comes_back_onto_the_map_at_the_other_side() {
     );
     assert!((back.translation.y - placed.translation.y).abs() < 1e-3);
     assert!((back.translation.z - placed.translation.z).abs() < 1e-3);
+}
+
+/// A stack of loose tires put down a little apart, as Scrapyard Run puts them, all sleeps.
+/// Put to sleep before they met, they woke as they did, and rocked for the whole race;
+/// with forty of them awake, the game ran at 3 frames a second.
+#[test]
+fn a_stack_of_loose_tires_falls_asleep() {
+    let mut app = app_with(|away| {
+        (0..3)
+            .map(|level| Placed {
+                model: 1,
+                position: away - Vec2::X * 5.0,
+                height_above_ground: 0.303 * level as f32,
+                yaw: 0.0,
+                solid: true,
+                motion: SceneryMotion::Loose { mass: 50.0 },
+                faces_camera: false,
+            })
+            .collect()
+    });
+    run(&mut app, 2.0);
+    let loose: Vec<bool> = bodies(&mut app)
+        .into_iter()
+        .filter(|(body, ..)| *body == RigidBody::Dynamic)
+        .map(|(_, _, sleeping)| sleeping)
+        .collect();
+    assert_eq!(loose, [true; 4]);
 }
