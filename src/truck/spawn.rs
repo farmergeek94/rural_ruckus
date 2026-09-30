@@ -180,38 +180,19 @@ fn spawn_truck(
     // truck's tire can climb onto. It touches the ground too, but only where the
     // suspension doesn't: a contact under the tread would fight the cast, so `contacts`
     // drops it, and what is left holds up a tire the ground meets anywhere else.
+    let tire = Collider::cylinder(config.wheel_radius, config.wheel_width);
     let wheel_colliders = config
         .wheel_rest
         .iter()
         .map(|&rest| {
-            let core = commands
-                .spawn((
-                    Name::new("Wheel core"),
-                    WheelCore,
-                    ChildOf(truck),
-                    Transform::from_translation(rest),
-                    // A ball, which rolls over the edges between the ground's triangles
-                    // where the rim of a cylinder could catch on them.
-                    Collider::sphere(config.wheel_radius * CORE_SHARE),
-                    crate::collision_groups::wheel_core(),
-                    // So that `contacts` lets it roll rather than scrub.
-                    ActiveCollisionHooks::MODIFY_CONTACTS,
-                    ColliderDensity(0.0),
-                    // The ground's own bounce, which is the softer (see `track`).
-                    Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
-                ))
-                .id();
-            commands
+            let collider = commands
                 .spawn((
                     Name::new("Wheel collider"),
-                    WheelCollider {
-                        bottomed: false,
-                        core,
-                    },
+                    WheelCollider { bottomed: false },
                     ChildOf(truck),
                     Transform::from_translation(rest)
                         .with_rotation(Quat::from_rotation_z(FRAC_PI_2)),
-                    Collider::cylinder(config.wheel_radius, config.wheel_width),
+                    tire.clone(),
                     crate::collision_groups::wheel(),
                     // So that `contacts` is asked which of its contacts to keep.
                     ActiveCollisionHooks::MODIFY_CONTACTS,
@@ -227,12 +208,31 @@ fn spawn_truck(
                     // ground apart from a rail.
                     Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
                 ))
-                .id()
+                .id();
+            // The core is the collider's child, at its middle, so that it goes wherever
+            // `drive` puts the collider, with nothing to move of its own.
+            commands.spawn((
+                Name::new("Wheel core"),
+                WheelCore,
+                ChildOf(collider),
+                Transform::IDENTITY,
+                // A ball, which rolls over the edges between the ground's triangles
+                // where the rim of a cylinder could catch on them.
+                Collider::sphere(config.wheel_radius * CORE_SHARE),
+                crate::collision_groups::wheel_core(),
+                // So that `contacts` lets it roll rather than scrub.
+                ActiveCollisionHooks::MODIFY_CONTACTS,
+                ColliderDensity(0.0),
+                // The ground's own bounce, which is the softer (see `track`).
+                Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
+            ));
+            collider
         })
         .collect();
-    commands
-        .entity(truck)
-        .insert(TruckWheelColliders(wheel_colliders));
+    commands.entity(truck).insert(TruckWheelColliders {
+        colliders: wheel_colliders,
+        tire,
+    });
 
     let wheels = display::build(commands, visual, chosen, &config, paint);
     commands.entity(truck).insert(TruckWheels(wheels));

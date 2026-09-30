@@ -7,11 +7,10 @@
 //! nothing compress, and another truck's tire would be a wall on wheels instead of a hill.
 //! The cast in `drive` already finds whatever is under the tread and lets the suspension
 //! climb it, so a contact that pushes the wheel up on its tread is dropped here and left
-//! to the cast. The physics asks about every contact of a collider that carries
+//! to the cast. `decide_tire_contacts` is shown every pair of colliders one of which carries
 //! `ActiveCollisionHooks::MODIFY_CONTACTS`, which the wheel colliders, their cores and the
-//! body do (see `spawn`). It asks once for each pair of colliders, with all their contact
-//! manifolds, and each manifold is decided on its own: against the ground a tire has one
-//! for each triangle it touches.
+//! body do (see `spawn`), with all their contact manifolds, and each manifold is decided on
+//! its own: against the ground a tire has one for each triangle it touches.
 //!
 //! The ground is among what a wheel touches (see `collision_groups`), and nearly all of
 //! it is dropped here, because nearly all of it is the cast's. What is not is the tire
@@ -42,7 +41,7 @@
 //! same truck rose 1.15 m onto the other. Seven computer trucks racing on Alpine for two
 //! minutes were tipped past 60 degrees in 3 of 1912 samples, where they had been in 61.
 //!
-//! The physics is handed this by `physics::GamePhysicsPlugin`. An app that sets up the
+//! `physics::GamePhysicsPlugin` runs `decide_tire_contacts`. An app that sets up the
 //! physics without it keeps every contact, and its trucks bump into each other rather
 //! than climb.
 //!
@@ -51,6 +50,7 @@
 use avian3d::prelude::*;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::tasks::{ComputeTaskPool, TaskPool};
 
 use super::drive::{AXLE_ALONG_X, SIDEWALL, UPWARD, below_the_axle};
 use super::{Truck, WheelCollider, WheelCore};
@@ -82,7 +82,8 @@ pub struct TireContacts<'w, 's> {
         With<Truck>,
     >,
     layers: Query<'w, 's, &'static CollisionLayers>,
-    cores: Query<'w, 's, &'static ChildOf, With<WheelCore>>,
+    /// A core is its wheel collider's child, and so the truck's through the physics.
+    cores: Query<'w, 's, &'static ColliderOf, With<WheelCore>>,
 }
 
 /// How steeply a tire rides up another truck that it is driven into, in radians above
@@ -197,7 +198,7 @@ impl TireContacts<'_, '_> {
         self.wheels
             .get(wheel)
             .map(|(_, _, child_of, _)| child_of.0)
-            .or_else(|_| self.cores.get(wheel).map(|child_of| child_of.0))
+            .or_else(|_| self.cores.get(wheel).map(|of| of.body))
             .ok()
     }
 
@@ -316,80 +317,119 @@ fn mean_point(manifold: &ContactManifold) -> Option<Vec3> {
     })
 }
 
-impl CollisionHooks for TireContacts<'_, '_> {
-    fn modify_contacts(&self, contacts: &mut ContactPair, _commands: &mut Commands) -> bool {
+impl TireContacts<'_, '_> {
+    /// Decides every manifold of a pair of colliders that one of them asked about. A
+    /// manifold the physics is not to solve is emptied of its points: by now the physics
+    /// has counted each pair's manifolds for its solver, and a manifold with no points
+    /// gives it nothing to do.
+    fn modify(&self, contacts: &mut ContactPair) {
         let (first, second) = (contacts.collider1, contacts.collider2);
-        let wheel = |collider| self.wheels.contains(collider) || self.cores.contains(collider);
-        contacts.manifolds.retain_mut(|manifold| {
-            // The normal points out of the first collider, so the first is pushed against
-            // it and the second along it. Each point is given from each body's centre of
-            // mass, in the world, halfway between the two surfaces; each surface is half the
-            // depth from there along the normal. Taken halfway, a tire pressed 0.2 m into
-            // another was touched inside its tread, and so on its sidewall, and stopped as by
-            // a wall instead of riding up.
-            let normal = manifold.normal;
-            let on_first = self.on_the_wheel(
-                first,
-                manifold
-                    .points
-                    .iter()
-                    .map(|p| p.anchor1 + normal * p.penetration / 2.0),
-            );
-            let on_second = self.on_the_wheel(
-                second,
-                manifold
-                    .points
-                    .iter()
-                    .map(|p| p.anchor2 - normal * p.penetration / 2.0),
-            );
-            if self.suspension_takes(first, second, -normal, &on_first)
-                || self.suspension_takes(second, first, normal, &on_second)
-                || self.ground_holds_down(first, second, normal)
-                || self.ground_holds_down(second, first, -normal)
-            {
-                return false;
+        for manifold in &mut contacts.manifolds {
+            if !self.keep(first, second, manifold) {
+                manifold.points.clear();
             }
-            // A tire driven into another truck low down rides up it (see the module's notes).
-            if let Some((rider, pushed)) = self.riding_up([
-                (first, second, -normal, &on_first),
-                (second, first, normal, &on_second),
-            ]) {
-                let Some(truck) = self.truck_of(rider) else {
-                    return true;
-                };
-                let Ok((_, rotation, ..)) = self.trucks.get(truck) else {
-                    return true;
-                };
-                let up = rotation.0 * Vec3::Y;
-                let level = pushed.reject_from_normalized(up).normalize_or_zero();
-                if pushed.dot(up) < RAMP.sin() && level != Vec3::ZERO {
-                    let ramp = level * RAMP.cos() + up * RAMP.sin();
-                    manifold.normal = if rider == first { -ramp } else { ramp };
-                }
-                manifold.friction = 0.0;
-                manifold.restitution = 0.0;
-                return true;
-            }
-            // A tire with its springs shut pushes straight up off the ground, not back along
-            // it. A wheel's core does not: it meets the ground where the tire has gone into
-            // it, which is often a bank beside the wheel, and it must push the wheel back out
-            // of the bank. Pushed straight up it slid into the bank and rode up inside it: an
-            // axle was under the ground for 1 164 wheel-steps on Alpine in two minutes of 7
-            // trucks, and for none pushed along the ground's own face.
-            if self.bottomed(first) && self.is_ground(second) {
-                self.stand_it_up(first, true, manifold);
-            } else if self.bottomed(second) && self.is_ground(first) {
-                self.stand_it_up(second, false, manifold);
-            }
-            // Whatever is left on a wheel or its core against the ground rolls; it does not
-            // skid.
-            if wheel(first) && self.is_ground(second) {
-                self.let_it_roll(first, true, manifold);
-            } else if wheel(second) && self.is_ground(first) {
-                self.let_it_roll(second, false, manifold);
-            }
-            true
-        });
-        !contacts.manifolds.is_empty()
+        }
     }
+
+    /// Whether the physics is to solve this manifold between `first` and `second`, which it
+    /// may first have changed.
+    fn keep(&self, first: Entity, second: Entity, manifold: &mut ContactManifold) -> bool {
+        let wheel = |collider| self.wheels.contains(collider) || self.cores.contains(collider);
+        // The normal points out of the first collider, so the first is pushed against
+        // it and the second along it. Each point is given from each body's centre of
+        // mass, in the world, halfway between the two surfaces; each surface is half the
+        // depth from there along the normal. Taken halfway, a tire pressed 0.2 m into
+        // another was touched inside its tread, and so on its sidewall, and stopped as by
+        // a wall instead of riding up.
+        let normal = manifold.normal;
+        let on_first = self.on_the_wheel(
+            first,
+            manifold
+                .points
+                .iter()
+                .map(|p| p.anchor1 + normal * p.penetration / 2.0),
+        );
+        let on_second = self.on_the_wheel(
+            second,
+            manifold
+                .points
+                .iter()
+                .map(|p| p.anchor2 - normal * p.penetration / 2.0),
+        );
+        if self.suspension_takes(first, second, -normal, &on_first)
+            || self.suspension_takes(second, first, normal, &on_second)
+            || self.ground_holds_down(first, second, normal)
+            || self.ground_holds_down(second, first, -normal)
+        {
+            return false;
+        }
+        // A tire driven into another truck low down rides up it (see the module's notes).
+        if let Some((rider, pushed)) = self.riding_up([
+            (first, second, -normal, &on_first),
+            (second, first, normal, &on_second),
+        ]) {
+            let Some(truck) = self.truck_of(rider) else {
+                return true;
+            };
+            let Ok((_, rotation, ..)) = self.trucks.get(truck) else {
+                return true;
+            };
+            let up = rotation.0 * Vec3::Y;
+            let level = pushed.reject_from_normalized(up).normalize_or_zero();
+            if pushed.dot(up) < RAMP.sin() && level != Vec3::ZERO {
+                let ramp = level * RAMP.cos() + up * RAMP.sin();
+                manifold.normal = if rider == first { -ramp } else { ramp };
+            }
+            manifold.friction = 0.0;
+            manifold.restitution = 0.0;
+            return true;
+        }
+        // A tire with its springs shut pushes straight up off the ground, not back along
+        // it. A wheel's core does not: it meets the ground where the tire has gone into
+        // it, which is often a bank beside the wheel, and it must push the wheel back out
+        // of the bank. Pushed straight up it slid into the bank and rode up inside it: an
+        // axle was under the ground for 1 164 wheel-steps on Alpine in two minutes of 7
+        // trucks, and for none pushed along the ground's own face.
+        if self.bottomed(first) && self.is_ground(second) {
+            self.stand_it_up(first, true, manifold);
+        } else if self.bottomed(second) && self.is_ground(first) {
+            self.stand_it_up(second, false, manifold);
+        }
+        // Whatever is left on a wheel or its core against the ground rolls; it does not
+        // skid.
+        if wheel(first) && self.is_ground(second) {
+            self.let_it_roll(first, true, manifold);
+        } else if wheel(second) && self.is_ground(first) {
+            self.let_it_roll(second, false, manifold);
+        }
+        true
+    }
+}
+
+/// How many contact pairs each task is given: a task costs more to hand out than a pair
+/// does to decide.
+const PAIRS_PER_TASK: usize = 16;
+
+/// Decides the contacts of every wheel collider, core and truck body at the end of each
+/// narrow phase, before the solver sees them, on as many threads as the machine has. The
+/// physics marks the pairs to decide from `ActiveCollisionHooks::MODIFY_CONTACTS`.
+///
+/// A system rather than one of the physics' own collision hooks. A hook makes the physics
+/// build its broad and narrow phase round the hook's type, in this crate, so that they ran
+/// unoptimised in a development build; and a hook is asked about each pair as the narrow
+/// phase finds it, one after another.
+pub fn decide_tire_contacts(contacts: TireContacts, mut graph: ResMut<ContactGraph>) {
+    let contacts = &contacts;
+    ComputeTaskPool::get_or_init(TaskPool::default).scope(|scope| {
+        for chunk in graph.active_pairs_mut().chunks_mut(PAIRS_PER_TASK) {
+            scope.spawn(async move {
+                for pair in chunk {
+                    if pair.flags.contains(ContactPairFlags::MODIFY_CONTACTS) && pair.is_touching()
+                    {
+                        contacts.modify(pair);
+                    }
+                }
+            });
+        }
+    });
 }

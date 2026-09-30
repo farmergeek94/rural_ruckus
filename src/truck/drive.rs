@@ -175,14 +175,9 @@ pub(super) const AXLE_ALONG_X: Quat = Quat::from_xyzw(
 /// The three queries write `Transform`s of three kinds of entity, which must not overlap.
 type OnlyWheels = (Without<Truck>, Without<WheelCollider>, Without<WheelCore>);
 type OnlyWheelColliders = (With<WheelCollider>, Without<Truck>);
-/// What `drive_truck` reads and writes of each wheel collider: where it is, whether its
-/// springs are shut, and its shape, which is the tire's and what the sweep sweeps.
-type WheelColliderParts = (
-    &'static mut Transform,
-    &'static mut WheelCollider,
-    &'static Collider,
-);
-type OnlyWheelCores = (With<WheelCore>, Without<Truck>, Without<WheelCollider>);
+/// What `drive_truck` writes of each wheel collider: where it is, and whether its springs
+/// are shut.
+type WheelColliderParts = (&'static mut Transform, &'static mut WheelCollider);
 /// Any part of a truck the sweep could find: its body, a wheel collider or a core.
 type TruckParts = Or<(With<Truck>, With<WheelCollider>, With<WheelCore>)>;
 /// What `drive_truck` reads and writes of each truck.
@@ -262,20 +257,21 @@ pub(super) fn drive_truck(
     mut trucks: Query<DrivenTruck, With<Truck>>,
     mut wheels: Query<(&mut Wheel, &mut Transform), OnlyWheels>,
     mut wheel_colliders: Query<WheelColliderParts, OnlyWheelColliders>,
-    mut wheel_cores: Query<&mut Transform, OnlyWheelCores>,
     truck_parts: Query<(), TruckParts>,
-    // Whatever a tire stands on that is a body, and the body a collider is part of.
+    // Whatever a tire stands on that is a body, the body a collider is part of, and what
+    // kind of body it is.
     mut surfaces: Query<(Forces, &ComputedMass), Without<Truck>>,
     bodies: Query<&ColliderOf>,
+    kinds: Query<&RigidBody>,
 ) {
     let dt = time.delta_secs();
     // Not this truck, nor any other (see the module's notes).
     let not_a_truck = |collider: Entity| !truck_parts.contains(collider);
 
     // First where every tire of every truck is swept from, then all the sweeps at once. For
-    // each truck, for each of its wheels, which of `casts` is its, and how it is steered.
+    // each truck, for each of its wheels, what is known of it before its sweep.
     let mut casts = Vec::new();
-    let mut planned: Vec<Vec<Option<(usize, Quat)>>> = Vec::new();
+    let mut planned: Vec<Vec<Option<Planned>>> = Vec::new();
     for (_, transform, forces, config, input, children, colliders, guard, ..) in &mut trucks {
         let up = transform.up().as_vec3();
         // Full lock is what the tires can hold at this speed.
@@ -288,10 +284,8 @@ pub(super) fn drive_truck(
         let wheels_of_truck = children
             .0
             .iter()
-            .zip(&colliders.0)
-            .map(|(&child, &collider)| {
+            .map(|&child| {
                 let (wheel, _) = wheels.get(child).ok()?;
-                let (_, _, tire) = wheel_colliders.get(collider).ok()?;
                 let steer_angle = input.steer
                     * lock
                     * if wheel.front {
@@ -309,13 +303,18 @@ pub(super) fn drive_truck(
                 // nothing of how deep.
                 let mount = transform.transform_point(wheel.mount);
                 casts.push(Cast {
-                    tire: tire.clone(),
+                    tire: colliders.tire.clone(),
                     from: mount + up * BUMP_STOP_REACH,
                     turned: transform.rotation * tire_rotation * AXLE_ALONG_X,
                     down: Dir3::new(-up).unwrap_or(Dir3::NEG_Y),
                     reach: travel + BUMP_STOP_REACH,
                 });
-                Some((casts.len() - 1, steer_rotation))
+                Some(Planned {
+                    cast: casts.len() - 1,
+                    steer_rotation,
+                    mount: wheel.mount,
+                    mount_in_world: mount,
+                })
             })
             .collect();
         planned.push(wheels_of_truck);
@@ -346,13 +345,22 @@ pub(super) fn drive_truck(
         let travel = config.suspension_bump + config.suspension_droop;
         let mut sweeps = Vec::with_capacity(children.0.len());
         // Both in `TruckConfig::wheel_rest`'s order, as `GroundGrip` is.
-        for (index, ((&child, &collider), plan)) in
-            children.0.iter().zip(&colliders.0).zip(planned).enumerate()
+        for (index, ((&child, &collider), plan)) in children
+            .0
+            .iter()
+            .zip(&colliders.colliders)
+            .zip(planned)
+            .enumerate()
         {
-            let (Some((cast, steer_rotation)), Ok((wheel, _))) = (*plan, wheels.get(child)) else {
+            let Some(Planned {
+                cast,
+                steer_rotation,
+                mount: mount_in_truck,
+                mount_in_world: mount,
+            }) = *plan
+            else {
                 continue;
             };
-            let mount = transform.transform_point(wheel.mount);
             let lift = BUMP_STOP_REACH;
             let (from, tire_turned) = (casts[cast].from, casts[cast].turned);
             let touch = hits[cast].and_then(|hit| {
@@ -369,11 +377,24 @@ pub(super) fn drive_truck(
                 // the ground against the top of a tire on a truck tipped over, which
                 // the wheel collider takes as a rigid contact instead (see `contacts`).
                 let underneath = normal.dot(up) > UPWARD;
-                (on_the_tread > 0.0 && underneath).then_some(Touch {
+                if on_the_tread <= 0.0 || !underneath {
+                    return None;
+                }
+                // The ground and scenery are each a body of their own; only a collider
+                // within a body, such as a truck's, needs its body looked up.
+                let (surface, kind) = match kinds.get(hit.entity) {
+                    Ok(kind) => (hit.entity, Some(kind)),
+                    Err(_) => {
+                        let body = bodies.get(hit.entity).map_or(hit.entity, |of| of.body);
+                        (body, kinds.get(body).ok())
+                    }
+                };
+                Some(Touch {
                     below_mount: hit.distance - lift,
                     normal,
                     on_the_tread,
-                    surface: bodies.get(hit.entity).map_or(hit.entity, |of| of.body),
+                    surface,
+                    moves: kind.is_some_and(|kind| !kind.is_static()),
                 })
             });
 
@@ -384,6 +405,7 @@ pub(super) fn drive_truck(
             let hub = mount - up * length;
             // Against what it stands on, which is only the ground's own when that is still.
             let surface_velocity = touch
+                .filter(|touch| touch.moves)
                 .and_then(|touch| surfaces.get(touch.surface).ok())
                 .map_or(Vec3::ZERO, |(surface, _)| surface.velocity_at_point(hub));
             let hub_velocity = forces.velocity_at_point(hub) - surface_velocity;
@@ -391,7 +413,7 @@ pub(super) fn drive_truck(
                 index,
                 wheel: child,
                 collider,
-                mount: wheel.mount,
+                mount: mount_in_truck,
                 steer_rotation,
                 length,
                 hub,
@@ -536,8 +558,11 @@ pub(super) fn drive_truck(
                 // grip `cornering_lever` of the way down to the ground.
                 let sideways = side * tire.dot(side);
                 forces.apply_force_at_point(normal * load + tire - sideways, hub);
-                // And what it stands on takes the same back, where the tire meets it.
-                if let Ok((mut surface, mass)) = surfaces.get_mut(touch.surface) {
+                // And what it stands on takes the same back, where the tire meets it. The
+                // ground and fixed scenery take nothing.
+                if let Some(Ok((mut surface, mass))) =
+                    touch.moves.then(|| surfaces.get_mut(touch.surface))
+                {
                     let push =
                         pushed_back(-(normal * load + tire) * dt, mass.value(), hub_velocity, dt);
                     surface.apply_linear_impulse_at_point(push, hub - normal * config.wheel_radius);
@@ -562,19 +587,16 @@ pub(super) fn drive_truck(
             wheel_transform.translation = wheel.mount - Vec3::Y * sweep.length;
             // The wheel is a pivot whose axle lies along X. What is drawn hangs from it.
             wheel_transform.rotation = tire_rotation * Quat::from_rotation_x(wheel.spin);
-            // And the collider goes with it. A cylinder needs no spin. It also carries
-            // whether the springs are shut, which is what tells `contacts` to stop
-            // dropping this wheel's ground contact and let the tire be solid.
-            if let Ok((mut collider_transform, mut wheel_collider, _)) =
+            // And the collider goes with it, and its core, which is its child. A cylinder
+            // needs no spin. It also carries whether the springs are shut, which is what
+            // tells `contacts` to stop dropping this wheel's ground contact and let the
+            // tire be solid.
+            if let Ok((mut collider_transform, mut wheel_collider)) =
                 wheel_colliders.get_mut(sweep.collider)
             {
                 collider_transform.translation = wheel_transform.translation;
                 collider_transform.rotation = tire_rotation * AXLE_ALONG_X;
                 wheel_collider.bottomed = bottomed;
-                // The core rides at the hub with it.
-                if let Ok(mut core_transform) = wheel_cores.get_mut(wheel_collider.core) {
-                    core_transform.translation = wheel_transform.translation;
-                }
             }
         }
     }
@@ -655,8 +677,22 @@ struct Touch {
     normal: Vec3,
     /// How much of the touch is on the tread rather than the sidewall, from 0 to 1.
     on_the_tread: f32,
-    /// The collider it touches.
+    /// The body it touches.
     surface: Entity,
+    /// Whether that body can move: not the ground or fixed scenery, which neither move
+    /// nor can be pushed, and which are not looked into.
+    moves: bool,
+}
+
+/// What is known of a wheel before its tire is swept.
+#[derive(Clone, Copy)]
+struct Planned {
+    /// Which of the sweeps is its.
+    cast: usize,
+    steer_rotation: Quat,
+    /// The top of its travel, in the truck's axes and in the world.
+    mount: Vec3,
+    mount_in_world: Vec3,
 }
 
 /// One wheel's sweep, kept until its axle's springs are known.

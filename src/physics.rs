@@ -13,7 +13,7 @@ use avian3d::dynamics::solver::SolverConfig;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::truck::TireContacts;
+use crate::truck::decide_tire_contacts;
 
 /// How many times the solver works through each physics step. Avian's own default, and
 /// what its solver is built round: it solves each contact once for each substep, where
@@ -32,8 +32,13 @@ pub struct GamePhysicsPlugin;
 
 impl Plugin for GamePhysicsPlugin {
     fn build(&self, app: &mut App) {
-        // `TireContacts` hands a wheel's contacts under its tread to the suspension.
-        app.add_plugins(PhysicsPlugins::default().with_collision_hooks::<TireContacts>())
+        app.add_plugins(PhysicsPlugins::default())
+            // Hands a wheel's contacts under its tread to the suspension, and shapes the
+            // rest, before the solver sees them.
+            .add_systems(
+                PhysicsSchedule,
+                decide_tire_contacts.in_set(NarrowPhaseSystems::Last),
+            )
             .insert_resource(SubstepCount(SUBSTEPS))
             .insert_resource(SolverConfig {
                 max_overlap_solve_speed: OVERLAP_SOLVE_SPEED,
