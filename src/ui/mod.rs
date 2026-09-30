@@ -60,6 +60,7 @@ impl Plugin for UiPlugin {
             .init_resource::<Dials>()
             .init_resource::<Choices>()
             .init_resource::<Settings>()
+            .init_resource::<Presets>()
             .init_resource::<TrackPreview>()
             .init_resource::<FolderBrowser>()
             .init_resource::<Theme>()
@@ -198,6 +199,18 @@ impl Setting {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Settings(pub Vec<Setting>);
 
+/// A set of values for the settings, chosen all at once by a button beside "restore
+/// defaults" on the options screen: for each `Setting`, in order, which value it chooses,
+/// or `None` to leave that setting as it is. Settings past the end are left as well.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Preset {
+    pub label: String,
+    pub values: Vec<Option<usize>>,
+}
+
+#[derive(Resource, Clone, Debug, Default)]
+pub struct Presets(pub Vec<Preset>);
+
 /// A folder being browsed: what is shown, and what can be done there. The module knows
 /// nothing of files; the game reads the folder and fills this in.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -307,6 +320,7 @@ fn read_what_to_show(
     choices: Res<Choices>,
     dials: Res<Dials>,
     settings: Res<Settings>,
+    presets: Res<Presets>,
     browser: Res<FolderBrowser>,
     theme: Res<Theme>,
     model: Option<Res<Model>>,
@@ -352,6 +366,11 @@ fn read_what_to_show(
             })
             .collect(),
     );
+    front_end.presets = presets
+        .0
+        .iter()
+        .map(|preset| preset.values.clone())
+        .collect();
     front_end.browsing = browser.0.as_ref().map(|folder| Browsing {
         folders: list(&folder.folders, folder.highlighted),
         can_choose: folder.can_choose,

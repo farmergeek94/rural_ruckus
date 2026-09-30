@@ -73,6 +73,8 @@ pub enum Action {
     SetSetting(usize, usize),
     /// Every setting back to its default.
     RestoreDefaults,
+    /// Every setting that preset number `0` names, to the value it names.
+    ApplyPreset(usize),
     /// Setting number `0`, a key binding, waits for a key.
     Listen(usize),
     /// Stop waiting for a key, and keep the one there was.
@@ -301,6 +303,9 @@ pub struct FrontEnd {
     /// Which dial `Less` and `More` turn, on the garage screen.
     pub dial_in_hand: usize,
     pub settings: Vec<SettingValues>,
+    /// What each preset chooses: a value for each setting, in order, or `None` to leave
+    /// it as it is.
+    pub presets: Vec<Vec<Option<usize>>>,
     /// Which setting `Less` and `More` change, on the options screen.
     pub setting_in_hand: usize,
     /// Whether the key binding in hand is waiting for a key.
@@ -347,6 +352,7 @@ impl FrontEnd {
                     }
                 })
                 .collect(),
+            presets: Vec::new(),
             setting_in_hand: 0,
             listening: false,
             typing: false,
@@ -495,6 +501,16 @@ impl FrontEnd {
                 for index in 0..self.settings.len() {
                     if self.on_screen(index) {
                         self.set_setting(index, self.settings[index].default, &mut happened);
+                    }
+                }
+            }
+            Action::ApplyPreset(preset) => {
+                let values = self.presets.get(preset).cloned().unwrap_or_default();
+                for (index, value) in values.into_iter().enumerate() {
+                    if let Some(value) = value
+                        && self.on_screen(index)
+                    {
+                        self.set_setting(index, value, &mut happened);
                     }
                 }
             }
@@ -963,6 +979,23 @@ mod tests {
             ]
         );
         assert_eq!(model.apply(Action::RestoreDefaults), []);
+    }
+
+    #[test]
+    fn a_preset_sets_the_settings_it_names_and_leaves_the_rest() {
+        let mut model = front_end(1, 1);
+        model.presets = vec![vec![Some(0), None]];
+        // Those of the screen that is up, and none elsewhere.
+        assert_eq!(model.apply(Action::ApplyPreset(0)), []);
+        model.apply(Action::Show(Screen::Options));
+        assert_eq!(
+            model.apply(Action::ApplyPreset(0)),
+            [Happened::SettingChanged(0, 0)]
+        );
+        assert_eq!(model.apply(Action::ApplyPreset(0)), []);
+        assert_eq!(model.settings[1].chosen, 3);
+        // A preset there isn't does nothing.
+        assert_eq!(model.apply(Action::ApplyPreset(3)), []);
     }
 
     #[test]

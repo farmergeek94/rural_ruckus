@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use bevy::anti_alias::fxaa::Fxaa;
 use bevy::image::ImageSampler;
 use bevy::light::CascadeShadowConfig;
 use bevy::prelude::*;
@@ -136,10 +137,13 @@ fn each_key_reaches_what_is_already_spawned() {
 
     press(&mut app, KeyCode::F2);
 
-    // Antialiasing: on to off.
+    // Antialiasing: 4x MSAA goes round to off, and on to FXAA, which takes one sample
+    // and a pass over the picture.
     press(&mut app, KeyCode::F3);
-    let mut cameras = app.world_mut().query::<&Msaa>();
-    assert_eq!(*cameras.single(app.world()).unwrap(), Msaa::Off);
+    let mut cameras = app.world_mut().query::<(&Msaa, Has<Fxaa>)>();
+    assert_eq!(cameras.single(app.world()).unwrap(), (&Msaa::Off, false));
+    press(&mut app, KeyCode::F3);
+    assert_eq!(cameras.single(app.world()).unwrap(), (&Msaa::Off, true));
 
     // Shadow distance: 150 m to 300 m, with the four cascades it began with.
     press(&mut app, KeyCode::F5);

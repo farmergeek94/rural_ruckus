@@ -16,8 +16,8 @@ use super::input::Does;
 use super::model::{Action, FrontEnd, List, Screen, split_in_two, visible_rows};
 use super::theme::Look;
 use super::{
-    Catalogue, Dial, Dials, Entry, Folder, FolderBrowser, FrontEndOpen, Model, Setting, Settings,
-    Theme, TrackPreview,
+    Catalogue, Dial, Dials, Entry, Folder, FolderBrowser, FrontEndOpen, Model, Preset, Presets,
+    Setting, Settings, Theme, TrackPreview,
 };
 
 /// The root of everything drawn here.
@@ -42,6 +42,7 @@ pub(super) fn redraw(
     catalogue: Res<Catalogue>,
     dials: Res<Dials>,
     settings: Res<Settings>,
+    presets: Res<Presets>,
     browser: Res<FolderBrowser>,
     preview: Res<TrackPreview>,
     theme: Res<Theme>,
@@ -62,6 +63,7 @@ pub(super) fn redraw(
         catalogue: &catalogue,
         dials: &dials.0,
         settings: &settings.0,
+        presets: &presets.0,
         // Only while the model has it too: the two change a frame apart.
         folder: browser.0.as_ref().filter(|_| model.0.browsing.is_some()),
         preview: preview.0.as_ref(),
@@ -117,6 +119,7 @@ struct Drawing<'a> {
     catalogue: &'a Catalogue,
     dials: &'a [Dial],
     settings: &'a [Setting],
+    presets: &'a [Preset],
     folder: Option<&'a Folder>,
     preview: Option<&'a Handle<Image>>,
     theme: &'a Theme,
@@ -764,6 +767,26 @@ impl Drawing<'_> {
                             ..default()
                         },
                     );
+                    // The presets, under it: each a set of values chosen at once.
+                    for (index, preset) in self.presets.iter().enumerate() {
+                        panel.spawn(Node {
+                            height: px(8),
+                            ..default()
+                        });
+                        self.button(
+                            panel,
+                            &preset.label,
+                            theme.text_size,
+                            Action::ApplyPreset(index),
+                            false,
+                            Node {
+                                height: px(theme.row_height),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        );
+                    }
                 });
         }
     }

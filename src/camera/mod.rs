@@ -18,6 +18,7 @@ mod rig;
 mod spring;
 mod views;
 
+use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
@@ -87,10 +88,8 @@ impl Plugin for ChaseCameraPlugin {
 /// change it while racing.
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct CameraSettings {
-    /// Smooths jagged edges by working out four samples for every pixel (MSAA). The cost
-    /// grows with the size of the screen, and is felt most on graphics built into the
-    /// processor.
-    pub antialiasing: bool,
+    /// How jagged edges are smoothed, if at all.
+    pub antialiasing: Antialiasing,
     /// Draws in high dynamic range, so that what is brighter than white (the trucks'
     /// lamps) spills a glow round it (bloom). Costs a few passes over the screen a frame.
     pub bloom: bool,
@@ -101,7 +100,7 @@ pub struct CameraSettings {
 impl Default for CameraSettings {
     fn default() -> Self {
         Self {
-            antialiasing: true,
+            antialiasing: Antialiasing::Msaa,
             bloom: true,
             rig: RigConfig::default(),
         }
@@ -109,12 +108,49 @@ impl Default for CameraSettings {
 }
 
 impl CameraSettings {
-    /// Four samples or one: the two counts every graphics card supports.
+    /// Four samples or one: the two counts every graphics card supports. FXAA works on
+    /// the finished picture, so it takes one.
     fn msaa(&self) -> Msaa {
-        if self.antialiasing {
-            Msaa::Sample4
-        } else {
-            Msaa::Off
+        match self.antialiasing {
+            Antialiasing::Msaa => Msaa::Sample4,
+            Antialiasing::Off | Antialiasing::Fxaa => Msaa::Off,
+        }
+    }
+}
+
+/// How jagged edges are smoothed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Antialiasing {
+    Off,
+    /// A pass over the finished picture that softens the edges it finds (FXAA). Costs
+    /// little, and blurs fine detail a little.
+    Fxaa,
+    /// Four samples worked out for every pixel (MSAA). Sharp. The cost grows with the
+    /// size of the screen, and is felt most on graphics built into the processor.
+    #[default]
+    Msaa,
+}
+
+impl Antialiasing {
+    /// Every kind, from the cheapest up: the order the F2 panel steps through.
+    pub const ALL: [Antialiasing; 3] = [Antialiasing::Off, Antialiasing::Fxaa, Antialiasing::Msaa];
+
+    /// What the player sees it called.
+    pub fn name(self) -> &'static str {
+        match self {
+            Antialiasing::Off => "Off",
+            Antialiasing::Fxaa => "FXAA",
+            Antialiasing::Msaa => "4x MSAA",
+        }
+    }
+
+    /// The kind called `name` on the command line, in any case: `off`, `fxaa` or `msaa`.
+    pub fn named(name: &str) -> Option<Antialiasing> {
+        match name.to_ascii_lowercase().as_str() {
+            "off" => Some(Antialiasing::Off),
+            "fxaa" => Some(Antialiasing::Fxaa),
+            "msaa" | "4x msaa" => Some(Antialiasing::Msaa),
+            _ => None,
         }
     }
 }
@@ -132,6 +168,9 @@ fn spawn_camera(mut commands: Commands, settings: Res<CameraSettings>) {
         .id();
     if settings.bloom {
         commands.entity(camera).insert(glow());
+    }
+    if settings.antialiasing == Antialiasing::Fxaa {
+        commands.entity(camera).insert(Fxaa::default());
     }
 }
 
@@ -161,16 +200,23 @@ fn glow() -> Bloom {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn apply_settings(
     mut commands: Commands,
     settings: Res<CameraSettings>,
-    mut cameras: Query<(Entity, &mut Msaa, &mut ChaseCamera, Has<Bloom>)>,
+    mut cameras: Query<(Entity, &mut Msaa, &mut ChaseCamera, Has<Bloom>, Has<Fxaa>)>,
 ) {
-    for (entity, mut msaa, mut camera, bloom) in &mut cameras {
+    for (entity, mut msaa, mut camera, bloom, fxaa) in &mut cameras {
         if settings.bloom && !bloom {
             commands.entity(entity).insert(glow());
         } else if !settings.bloom && bloom {
             commands.entity(entity).remove::<(Bloom, Hdr)>();
+        }
+        let wants_fxaa = settings.antialiasing == Antialiasing::Fxaa;
+        if wants_fxaa && !fxaa {
+            commands.entity(entity).insert(Fxaa::default());
+        } else if !wants_fxaa && fxaa {
+            commands.entity(entity).remove::<Fxaa>();
         }
         msaa.set_if_neq(settings.msaa());
         if camera.config != settings.rig {
@@ -203,4 +249,32 @@ fn follow_truck(
 fn tell_of_the_ground(track: Res<Track>, mut camera: Single<&mut ChaseCamera>) {
     let eye = camera.wanted_eye();
     camera.ground = Some(track.heights.height_at(eye.x, eye.z));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_kind_of_antialiasing_is_known_by_its_name() {
+        for kind in Antialiasing::ALL {
+            assert_eq!(Antialiasing::named(kind.name()), Some(kind), "{kind:?}");
+        }
+        assert_eq!(Antialiasing::named("MSAA"), Some(Antialiasing::Msaa));
+        assert_eq!(Antialiasing::named("smaa"), None);
+    }
+
+    #[test]
+    fn only_msaa_takes_more_than_one_sample_a_pixel() {
+        let with = |antialiasing| {
+            CameraSettings {
+                antialiasing,
+                ..default()
+            }
+            .msaa()
+        };
+        assert_eq!(with(Antialiasing::Msaa), Msaa::Sample4);
+        assert_eq!(with(Antialiasing::Fxaa), Msaa::Off);
+        assert_eq!(with(Antialiasing::Off), Msaa::Off);
+    }
 }
