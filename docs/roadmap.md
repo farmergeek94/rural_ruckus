@@ -214,7 +214,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Starting grid of eight | Done | File: [situation.md](formats/situation.md) | |
 | Back to the last checkpoint | Done | | Key C, and the computer's trucks when stuck. How MTM2 does it (for example a helicopter) is not confirmed. |
 | Race position | Done | | |
-| Computer trucks, up to seven | Done | | First pass. Not tuned to be fast. They cut no corner past their next checkpoint, and steer through its gate. |
+| Computer trucks, up to seven | Done | | First pass. Not tuned to be fast. They cut no corner past their next checkpoint, and steer through its gate. Near a bend they steer at a nearer point of their line, so that they do not cut across its inside. |
 | Computer trucks' speed hints from the track (`cspeed`, `ctype`, `cTrackWidth`) | Open | File: [situation.md](formats/situation.md) | |
 | Start sequence (countdown) | Own | Game | 3, 2, 1, GO, with every truck held on the grid (`truck::Held`), and again on a restart. How MTM2 starts a race is not confirmed. Not yet driven. |
 | Finish and results screen | Own | Game | Once the player finishes: every truck's place, race time and best lap, kept up to date as the rest finish. The computer then drives the player's truck on, and the camera changes to a random view every 7 seconds, with a swing round the truck or a fade through black. Enter races again. What MTM2's results show is not confirmed. |

@@ -9,7 +9,8 @@
 //! The driver follows `TrackData::course`, which for a Monster Truck Madness 2 track is the
 //! route its own computer trucks follow. It keeps to the road rather than cutting corners:
 //! it steers at a point of its own line a little way up the course, and so follows the road
-//! round every bend on that line. Each driver's line is the middle of the road or a little to
+//! round every bend on that line. Near a bend that point is nearer (`BEND_CUT`), so that a
+//! truck at speed does not take a chord across the inside of the bend to a point far round it. Each driver's line is the middle of the road or a little to
 //! one side of it, so that trucks don't all want the same one. It keeps to a speed that the
 //! bends ahead allow, which is the sharper the slower (`bend_speed`): all of it in `plan`, a
 //! pure function. Every truck drives the straights flat out, so a driver catches up in the
@@ -64,7 +65,7 @@ const PACE_STEP: f32 = 0.025;
 /// than there is and runs wide. Higher is quicker through bends, and slides off more of them.
 /// Much lower is too slow for the jumps: at 20, trucks on Alpine fell into the ditch after
 /// checkpoint 2 and got stuck there, where at 30 they got by.
-const CORNERING: f32 = 26.0;
+const CORNERING: f32 = 22.0;
 /// Braking a driver counts on when it works out how early to slow for a bend, in m/s²: a
 /// little under what the tires give, so it has done its braking by the bend and drives
 /// through it. Measured on Alpine, one truck from sixteen starts to the foot of the ravine
@@ -85,6 +86,14 @@ const HORIZON: f32 = 250.0;
 /// and weaves more, and swerves more sharply.
 const AIM_AHEAD_SECONDS: f32 = 1.7;
 const AIM_AHEAD: std::ops::RangeInclusive<f32> = 20.0..=50.0;
+/// How far up its line a driver steers at near a bend, as a length in metres: a bend of
+/// radius `R` within `AIM_AHEAD_SECONDS` of driving brings the aim point in to
+/// `sqrt(2 R BEND_CUT)`, and never nearer than the start of `AIM_AHEAD`. Without it a driver
+/// at speed steered at a point up to 50 m round a bend, and in bends it was 8 to 9 m inside
+/// its line, at the edge of the road, three times in four. Measured with a model truck on
+/// five Monster Truck Madness 2 tracks: at 16, 4 m; at 10, 2.5 m, but then it turned in late
+/// and ran wide off the outside of more bends than before. Smaller cuts less of every bend.
+const BEND_CUT: f32 = 16.0;
 /// Full lock is used when the aim point is this far off straight ahead, in radians. Smaller
 /// is a driver that turns sooner and harder for the same aim point, and weaves more on a
 /// straight; at 0.3 it is at full lock 17 degrees off.
@@ -451,7 +460,7 @@ fn plan(
     let ahead = Ahead::of(course, along, style.reach_across);
     // Nothing nearer than this is steered at: further when going faster.
     let reach = (speed * AIM_AHEAD_SECONDS).clamp(*AIM_AHEAD.start(), *AIM_AHEAD.end());
-    let aim = ahead.aim(course, position, reach, style);
+    let aim = ahead.aim(course, position, ahead.steering_reach(reach), style);
     let to_aim = (aim - position).normalize_or_zero();
     // Positive when the aim point is to the left.
     let off_straight = (-forward.perp_dot(to_aim)).atan2(forward.dot(to_aim));
@@ -840,6 +849,23 @@ impl Ahead {
     /// positive to the right.
     fn bend(&self, i: usize) -> f32 {
         self.samples[i].1.angle_to(self.samples[i + self.span].1)
+    }
+
+    /// How far up its line a driver steers at, in metres: `reach`, or nearer where a bend
+    /// within it would take the truck far across the inside of it (`BEND_CUT`).
+    fn steering_reach(&self, reach: f32) -> f32 {
+        let mut nearest = reach;
+        for i in 0..self.bends() {
+            if self.distance(i) > reach {
+                break;
+            }
+            let bend = self.bend(i).abs();
+            if bend > 1e-3 {
+                let radius = BEND_SPAN / bend;
+                nearest = nearest.min((2.0 * radius * BEND_CUT).sqrt());
+            }
+        }
+        nearest.max(*AIM_AHEAD.start()).min(reach)
     }
 
     /// Where a driver of this `style` at `position` steers at: the point of its line `reach`
@@ -1372,6 +1398,22 @@ mod tests {
             (left - Vec2::new(300.0 + LANE_SPACING, 10.0)).length() < 1e-3,
             "{left}"
         );
+    }
+
+    #[test]
+    fn near_a_bend_it_steers_at_a_nearer_point_of_its_line() {
+        let course = course();
+        let reach = *AIM_AHEAD.end();
+        // A plain straight ahead: as far up the road as its speed has it.
+        let straight = Ahead::of(&course, FAR_FROM_THE_CORNER, built_in().x);
+        assert_eq!(straight.steering_reach(reach), reach);
+        // The corner at (300, 0) is a right angle: within reach of it, nearer, but never
+        // nearer than the start of `AIM_AHEAD`.
+        let near = Ahead::of(&course, 270.0, built_in().x).steering_reach(reach);
+        assert!(near < reach && near >= *AIM_AHEAD.start(), "{near}");
+        // At a speed that steers at no more than that already, nothing changes.
+        let slow = Ahead::of(&course, 270.0, built_in().x);
+        assert_eq!(slow.steering_reach(*AIM_AHEAD.start()), *AIM_AHEAD.start());
     }
 
     #[test]
