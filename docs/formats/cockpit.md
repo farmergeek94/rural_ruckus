@@ -7,8 +7,7 @@ dashboard's pictures, dials, steering wheel and mirror go on the screen.
 No reference project reads these files. Every fact on this page is **measured** on the
 base game's `COCKPIT.POD` (in `Shared`), and on the 33 truck files in `trucks/` and in the
 base game's archives, unless it is marked **open** or **Own** (the game's own choice).
-The tests are in `tests/base_game.rs`. The parser is `src/pod/cockpit.rs`. Nothing on
-this page comes from the game's program.
+The parser is `src/pod/cockpit.rs`. Nothing on this page comes from the game's program.
 
 ## Where the files are
 

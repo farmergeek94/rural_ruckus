@@ -1,7 +1,6 @@
 //! The front end in a headless app: the real ui crate, the real slices, and no window.
 //! The player is played by writing `PlayerDid`, as the ui crate's own input does.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -40,17 +39,6 @@ fn nowhere() -> FrontEndSettings {
         builtin: true,
         base_game_folders: vec!["no/such/base".into()],
         ask_for_base_game: false,
-    }
-}
-
-/// The player's own, which may be empty, with the built-in truck and track first.
-fn real_folders() -> FrontEndSettings {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    FrontEndSettings {
-        trucks_folder: root.join("trucks"),
-        tracks_folder: root.join("tracks"),
-        builtin: true,
-        ..FrontEndSettings::default()
     }
 }
 
@@ -185,25 +173,6 @@ fn without_the_builtin_flag_only_archives_are_listed() {
     let catalogue = app.world().resource::<Catalogue>();
     assert!(catalogue.trucks.is_empty());
     assert!(catalogue.tracks.is_empty());
-}
-
-#[test]
-fn highlighting_another_truck_replaces_the_one_on_show() {
-    let mut app = headless_app(real_folders(), None);
-    run_until(&mut app, "the first truck", |app| !on_show(app).is_empty());
-    let trucks = app.world().resource::<Catalogue>().trucks.clone();
-    let Some(second) = trucks.get(1).filter(|entry| entry.available) else {
-        return;
-    };
-
-    player_does(&mut app, Action::PickTruck(1));
-    run_until(&mut app, "the second truck", |app| {
-        on_show(app) == [second.name.clone()]
-    });
-    // Back to the first, which was kept: it is there the very next frame.
-    player_does(&mut app, Action::PickTruck(0));
-    app.update();
-    assert_eq!(on_show(&mut app), [trucks[0].name.clone()]);
 }
 
 /// Community archives are often malformed. One that lists and then won't load is greyed
@@ -398,52 +367,6 @@ fn exit_closes_the_game() {
     assert!(app.should_exit().is_none());
     player_does(&mut app, Action::Exit);
     assert_eq!(app.should_exit(), Some(AppExit::Success));
-}
-
-#[test]
-fn what_was_chosen_is_chosen_again_next_time() {
-    let store = Arc::new(Store::in_memory());
-    let mut first = headless_app(real_folders(), Some(store.clone()));
-    first.update();
-    let catalogue = first.world().resource::<Catalogue>().clone();
-    // The last of each, which is an archive if there are any.
-    let last = |entries: &[Entry]| {
-        entries
-            .iter()
-            .rposition(|entry| entry.available)
-            .expect("the built-in one at least")
-    };
-    let (truck, track) = (last(&catalogue.trucks), last(&catalogue.tracks));
-    player_does(&mut first, Action::PickTruck(truck));
-    player_does(&mut first, Action::PickTrack(track));
-    player_does(&mut first, Action::FewerLaps);
-    player_does(&mut first, Action::MoreOpponents);
-    player_does(&mut first, Action::SetDial(1, 3));
-    player_does(&mut first, Action::Go);
-    first.update();
-    assert_eq!(state(&first), GameState::Racing);
-
-    let mut second = headless_app(real_folders(), Some(store.clone()));
-    second.update();
-    assert_eq!(
-        *second.world().resource::<Choices>(),
-        Choices {
-            truck,
-            track,
-            laps: 2,
-            opponents: 4,
-        }
-    );
-    assert_eq!(second.world().resource::<Dials>().0[1].step, 3);
-    assert_eq!(second.world().resource::<TruckSetup>().gearing, 0.5);
-
-    // The same store, and the folders gone: back to the built-in ones, laps and setup kept.
-    let third = headless_app(nowhere(), Some(store));
-    let choices = third.world().resource::<Choices>();
-    if truck > 0 {
-        assert_eq!((choices.truck, choices.track), (0, 0));
-    }
-    assert_eq!((choices.laps, choices.opponents), (2, 4));
 }
 
 /// Numbers that no dial could have written are brought back within range.

@@ -141,7 +141,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         })
         // MTM2 splits its even cells from the origin corner. With Z flipped those are
         // our odd cells, and that diagonal becomes our +X to +Z one: exactly what
-        // `Checkerboard` gives the odd cells. `tests/pod_track.rs` checks the result.
+        // `Checkerboard` gives the odd cells (see `docs/formats/terrain.md`).
         .with_diagonals(Diagonals::Checkerboard);
 
     // Without the ground textures, at least show where they change: whatever isn't the
