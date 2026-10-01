@@ -63,7 +63,7 @@ POD compatibility.
 | Fog from the track: the fog file that the `.LVL` names | Missing. Format **open**. |
 | Lighting from the track: sun direction, shadow strength, lighting table (`.LTE`) | Missing. Only **reference**. |
 | Box types 0, 1 and 11: solid or not | **Open** |
-| Ramps, cylinders and the stadium in the track file | **Open** |
+| Ramps with no model (a wedge from `length,width,height`), cylinders and the stadium in the track file | **Open** |
 | Computer trucks' speed hints: `cspeed`, `ctype`, `cTrackWidth` | **Open** |
 | Extra courses on one track (`Extended Course Definitions`) | **Open** |
 | `Track Race Type` | **Open**. Needed by stage 15. |
@@ -185,7 +185,8 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Ground types (`.TTY`): ice | Own | File: [texture_types.md](formats/texture_types.md) | Only ice is used. `ICE_GRIP` is the game's own. |
 | Ground types (`.TTY`): loose ground | Own | File: [texture_types.md](formats/texture_types.md) | The hundreds of the base game's types are measured: 1 road, 2 dirt, 3 water, 4 mud, 5 sand, 6 grass, 7 rocky ground, 10 metal, 12 rock, 14 railway track. Tires throw up dirt only on 2 and 4 to 7, and, on ground the list doesn't name, where it is coloured and not blue (the game's own rule). Not yet driven. |
 | Ground types: the other hundreds (sounds, spray, speed: mud, sand, water) | Open | File: [texture_types.md](formats/texture_types.md) | What each shows is known; what MTM2 did with it is not. |
-| Ramps, cylinders and the stadium in the track file | Open | File: [situation.md](formats/situation.md) | |
+| Ramps with a model (`RAMP.BIN`, `CRURAMP.BIN`) | Done | File: [situation.md](formats/situation.md) | Read from the Ramps section, and placed and made solid as a box with a model is. Measured on Arizona. Not yet driven. |
+| Ramps with no model, cylinders and the stadium in the track file | Open | File: [situation.md](formats/situation.md) | A ramp with no model is a wedge (**reference**). Sidewinder Canyon has 8, Torture Pit 1. |
 | Track music | Out of scope | File: [level.md](formats/level.md) | The `.LVL` names it. See Audio. |
 
 ### Trucks

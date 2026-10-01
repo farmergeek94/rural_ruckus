@@ -638,3 +638,142 @@ fn a_base_truck_converts_with_its_dashboard() {
     assert_eq!(wheel.frames.first().unwrap().0, -1.0);
     assert_eq!(wheel.frames.last().unwrap().0, 1.0);
 }
+
+/// Sidewinder Canyon has eight ramps, ahead of its boxes, each given by its size alone,
+/// with the Traxx editor's ramp type.
+#[test]
+fn sidewinder_canyons_ramps_are_read() {
+    let Some(base) = base() else {
+        return;
+    };
+    let Some(found) = track::peek_base(&base)
+        .into_iter()
+        .find(|found| found.file.eq_ignore_ascii_case("WORLD\\SNAKE.SIT"))
+    else {
+        return;
+    };
+    let archive = base.archive(&found.archive).unwrap();
+    let situation = Track::from_file(archive, &found.file, &base)
+        .unwrap()
+        .situation;
+    let ramps: Vec<_> = situation
+        .boxes
+        .iter()
+        .take_while(|situation_box| situation_box.kind == pod::box_type::RAMP)
+        .collect();
+    assert_eq!(ramps.len(), 8);
+    assert!(
+        situation.boxes[8..]
+            .iter()
+            .all(|situation_box| situation_box.kind != pod::box_type::RAMP)
+    );
+    for ramp in ramps {
+        assert!(matches!(ramp.shape, BoxShape::Dimensions(_)), "{ramp:?}");
+        assert_eq!(ramp.mass, 0.0);
+    }
+}
+
+/// Arizona (`WORLD\DEMO.SIT`, in the Community Patch's `GAME.POD`) has a train standing
+/// across the road between its first and second checkpoints, and one ramp, `RAMP.BIN`, a
+/// wedge that rises 15 ft. Only placed the right way round does it carry a truck over the
+/// train: its high edge faces the train, short of it, and level with the train's roof.
+#[test]
+fn arizonas_ramp_leads_over_the_train() {
+    use bevy::math::{Quat, Vec3, Vec3Swizzles};
+
+    let Some(base) = base() else {
+        return;
+    };
+    let Some(found) = track::peek_base(&base)
+        .into_iter()
+        .find(|found| found.file.eq_ignore_ascii_case("WORLD\\DEMO.SIT"))
+    else {
+        return;
+    };
+    let arizona = track::load_base(&base, &found.archive, &found.file).unwrap();
+    let scenery = &arizona.scenery;
+    // Every corner of every placed object of a model, in the world, in metres.
+    let corners = |name: &str| -> Vec<Vec<Vec3>> {
+        scenery
+            .objects
+            .iter()
+            .filter(|object| scenery.models[object.model].name == name)
+            .map(|object| {
+                let ground = arizona
+                    .heights
+                    .height_at(object.position.x, object.position.y);
+                let at = Vec3::new(
+                    object.position.x,
+                    ground + object.height_above_ground,
+                    object.position.y,
+                );
+                let turn = Quat::from_rotation_y(object.yaw);
+                scenery.models[object.model]
+                    .positions
+                    .iter()
+                    .map(|&corner| at + turn * Vec3::from(corner))
+                    .collect()
+            })
+            .collect()
+    };
+
+    let ramps = corners("RAMP.BIN");
+    assert_eq!(ramps.len(), 1, "one ramp");
+    let ramp = &ramps[0];
+    let solid = scenery
+        .objects
+        .iter()
+        .find(|object| scenery.models[object.model].name == "RAMP.BIN")
+        .unwrap();
+    assert!(solid.solid);
+    assert!(matches!(solid.motion, track::SceneryMotion::Fixed));
+
+    let train: Vec<Vec3> = ["LOCOMTV.BIN", "BOXCAR.BIN", "CABOOSE.BIN"]
+        .into_iter()
+        .flat_map(corners)
+        .flatten()
+        .collect();
+    assert!(!train.is_empty());
+    let roof = train.iter().map(|corner| corner.y).fold(f32::MIN, f32::max);
+    let distance_to_train = |at: Vec3| {
+        train
+            .iter()
+            .map(|corner| corner.xz().distance(at.xz()))
+            .fold(f32::MAX, f32::min)
+    };
+
+    let low = ramp.iter().map(|corner| corner.y).fold(f32::MAX, f32::min);
+    let high = ramp.iter().map(|corner| corner.y).fold(f32::MIN, f32::max);
+    let edge = |height: f32| -> Vec<&Vec3> {
+        ramp.iter()
+            .filter(|corner| (corner.y - height).abs() < 0.05)
+            .collect()
+    };
+    // The lip is the top of the high edge; the foot is the low edge furthest from it.
+    let lip = edge(high);
+    let foot_distance = edge(low)
+        .into_iter()
+        .map(|&corner| distance_to_train(corner))
+        .fold(f32::MIN, f32::max);
+    for &corner in &lip {
+        let short_of_train = distance_to_train(*corner);
+        assert!(
+            short_of_train < foot_distance && short_of_train > 5.0,
+            "lip {short_of_train} m from the train, foot {foot_distance} m"
+        );
+        assert!(
+            (corner.y - roof).abs() < 0.5,
+            "lip at {} m, the train's roof at {roof} m",
+            corner.y
+        );
+    }
+    // It stands on the ground: its foot is no further from the ground than a step of the
+    // heightmap.
+    let foot = edge(low)[0];
+    let ground = arizona.heights.height_at(foot.x, foot.z);
+    assert!(
+        (foot.y - ground).abs() < 1.0,
+        "foot {} m, ground {ground} m",
+        foot.y
+    );
+}
