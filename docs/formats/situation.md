@@ -47,13 +47,13 @@ The game reads a `.SI2` when an archive has no `.SIT`.
 | --- | --- | --- |
 | `Race Track Name` | top | Display name |
 | `truckFile` | Vehicles | Truck definition (.TRK) for this grid slot, pole position first |
-| `ipos` | Vehicles, Boxes | Position in feet: x, height, z |
-| `theta,phi,psi` | Vehicles, Boxes | Pitch, roll and heading in radians. At `psi` = 0 a truck faces +Z |
-| `model` | Boxes | 3D model file (.BIN) |
-| `length,width,height` | Boxes | Replaces `model` for an invisible box, in feet |
-| `type,flags` | Boxes | See below |
-| `mass` | Boxes | Mass in slugs (pounds divided by g). 0 is a box that nothing can move. See "Mass" below |
-| `bvel` | Boxes | Velocity of a moving box (type 10), in feet per second, along the world's axes. See "Moving boxes" below |
+| `ipos` | Vehicles, Ramps, Boxes | Position in feet: x, height, z |
+| `theta,phi,psi` | Vehicles, Ramps, Boxes | Pitch, roll and heading in radians. At `psi` = 0 a truck faces +Z |
+| `model` | Ramps, Boxes | 3D model file (.BIN) |
+| `length,width,height` | Ramps, Boxes | Replaces `model` for an invisible box, in feet |
+| `type,flags` | Boxes | See below. A ramp has none |
+| `mass` | Ramps, Boxes | Mass in slugs (pounds divided by g). 0 is a box that nothing can move. See "Mass" below |
+| `bvel` | Ramps, Boxes | Velocity of a moving box (type 10), in feet per second, along the world's axes. See "Moving boxes" below |
 | `cstart`, `cend` | Course | Ends of one straight piece of the computer trucks' route, in feet. The pieces run in lap order with the corners between them left out: Alpine has 79, making a loop of 8.9 km that passes within 11 ft of every checkpoint but the finish (40 ft). The game joins them end to end as the track's course. |
 
 `psi` = 0 facing +Z is **measured**: the grid's front row has the largest z, the finish
@@ -72,6 +72,31 @@ not normalised: checkpoints in the same file have `psi` of 15.7 and 18.9.
 | 9 | "Collide (facing)": faces the camera as type 8 does, with a solid trunk. 2 boxes in `landsbetween.pod`. The game treats it as ordinary solid scenery | **Reference** (JSTrackViewer `src/scene.js`, quoting Traxx's `TrackPODBox.h`) |
 | 10 | Moves along its `bvel`: trains in Monte Carlo, traffic in Route 756. Not moved by anything | **Reference** ("moving - use bvel", the Traxx editor's notes, quoted by JSTrackViewer `src/drive/colliders.js`). Every type 10 box seen has mass 0 |
 | 11 | Seen only on boxes with `length,width,height`, standing at the feet of a checkpoint banner | **Measured** that they occur together; the meaning is a guess |
+
+## Ramps
+
+The Ramps section comes before the Boxes section. Its count is 0 in most tracks.
+
+- **Measured** on 14 track files (`DEMO.SIT`, `CIRC5.SIT` and the ten `DRAG*.SIT` and
+  `DRAG*.SIX` files in Community Patch 3's `GAME.POD`, and `SNAKE.SIT` and `WAR.SIT` on
+  the CD): a ramp is laid out as a box, with `ipos`, `theta,phi,psi`, `model` or
+  `length,width,height`, `mass`, `bvel` and `p,q,r`. It has no `type,flags`, no
+  `priority` and no sound entries. Every ramp seen has mass 0 and `bvel` 0.
+- Two kinds occur. Arizona (`DEMO.SIT`) has one ramp with the model `RAMP.BIN`, and each
+  circuit and drag file in `GAME.POD` has six with `CRURAMP.BIN`. Sidewinder Canyon
+  (`SNAKE.SIT`, 8 ramps) and Torture Pit (`WAR.SIT`, 1) give only `length,width,height`.
+- **Reference** (JSTrackViewer `src/worker/sit-parser.js`, quoting the Traxx editor's
+  `TrackPODBox.h`): the editor gives a ramp the box type 99, `BOXTYPE_RAMP`. The game uses
+  the same number for a ramp (`box_type::RAMP`).
+- **Measured** on Arizona (`tests/base_game.rs`): `RAMP.BIN` is a wedge 50 ft square that
+  rises from 0 to 15 ft along the model's Z, with its origin at the foot. Placed as a box
+  is, its high edge faces a train that stands across the road, 12.6 m short of it, and is
+  level with the train's roof (0.2 m below it). The ramp carries trucks over the train.
+  So a ramp with a model is placed and drawn as any box with a model is, and is solid.
+- **Reference** (JSTrackViewer `src/scene.js`, from the Traxx editor's `ramppoly`): a ramp
+  with no model is a wedge in its box, with `length,width,height` as half sizes, rising
+  from the box's local -y edge to its +y edge in the editor's axes. The game does not
+  build this wedge yet, so those ramps are missing.
 
 ## Objects that face the camera
 
@@ -206,8 +231,9 @@ CROKDROP.BIN
 ## Open
 
 - Everything not listed above, including the Course section's other fields
-  (`ctype`, `cspeed`, `cTrackWidth`), a box's `p,q,r` and `priority`, ramps, cylinders and
+  (`ctype`, `cspeed`, `cTrackWidth`), a box's `p,q,r` and `priority`, cylinders and
   stadium, and `backdropType`.
+- The shape of a ramp with no model, as MTM2 builds it (see "Ramps").
 - What box types 1 to 5 and 9 mean. The game goes by `mass` alone, whatever the type.
 - What MTM2 does with a moving box at the edge of the map (see "Moving boxes").
 - `Track Race Type` (2 in our file): presumably circuit, rally or drag.
