@@ -208,14 +208,15 @@ fn spawn_scenery(
         )
         .with_rotation(Quat::from_rotation_y(object.yaw));
         let name = Name::new(scenery.models[object.model].name.clone());
-        let drawn = looks.as_ref().map(|(meshes, materials, _)| {
+        // An invisible object, such as a ramp given by its size alone, is solid but unseen.
+        let looks_of_object = looks.as_ref().filter(|_| object.visible);
+        let drawn = looks_of_object.map(|(meshes, materials, _)| {
             (
                 Mesh3d(meshes[object.model].clone()),
                 MeshMaterial3d(materials[object.model].clone()),
             )
         });
-        let morph = looks
-            .as_ref()
+        let morph = looks_of_object
             .and_then(|(_, _, morphs)| morphs[object.model].clone())
             .map(|(weights, bounds)| (weights, bounds, NoAutoAabb));
         let collider = colliders[object.model].as_ref().filter(|_| object.solid);

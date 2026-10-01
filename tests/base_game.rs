@@ -777,3 +777,156 @@ fn arizonas_ramp_leads_over_the_train() {
         foot.y
     );
 }
+
+/// Each scenery object that `chosen` picks, with every corner of its model, placed as the
+/// game places it, in the world, in metres.
+fn placed_corners(
+    track: &track::TrackData,
+    chosen: impl Fn(&track::SceneryObject) -> bool,
+) -> Vec<(&track::SceneryObject, Vec<bevy::math::Vec3>)> {
+    use bevy::math::{Quat, Vec3};
+    let scenery = &track.scenery;
+    scenery
+        .objects
+        .iter()
+        .filter(|object| chosen(object))
+        .map(|object| {
+            let ground = track
+                .heights
+                .height_at(object.position.x, object.position.y);
+            let at = Vec3::new(
+                object.position.x,
+                ground + object.height_above_ground,
+                object.position.y,
+            );
+            let turn = Quat::from_rotation_y(object.yaw);
+            let corners = scenery.models[object.model]
+                .positions
+                .iter()
+                .map(|&corner| at + turn * Vec3::from(corner))
+                .collect();
+            (object, corners)
+        })
+        .collect()
+}
+
+/// Torture Pit's one ramp is given by its size alone (82 x 80 x 30 ft), on the floor of
+/// the pit, where the course climbs out over two drive-through spikes. Read with whole
+/// sizes, its foot at `ipos` and rising towards its heading, it is the way out: its lip
+/// meets the far rim and the course runs up it. Of the 16 readings tried (half or whole
+/// sizes, `ipos` at the foot or the middle, rising towards the heading or away, the length
+/// along the heading or across it), no other does both (situation.md, "Ramps").
+#[test]
+fn torture_pits_ramp_climbs_out_of_the_pit() {
+    use bevy::math::{Vec2, Vec3Swizzles};
+    let Some(base) = base() else {
+        return;
+    };
+    let Some(found) = track::peek_base(&base)
+        .into_iter()
+        .find(|found| found.file.eq_ignore_ascii_case("WORLD\\WAR.SIT"))
+    else {
+        return;
+    };
+    let pit = track::load_base(&base, &found.archive, &found.file).unwrap();
+    let ramps = placed_corners(&pit, |object| !object.visible);
+    assert_eq!(ramps.len(), 1);
+    let (ramp, corners) = &ramps[0];
+    assert!(ramp.solid);
+    assert!(matches!(ramp.motion, track::SceneryMotion::Fixed));
+
+    let low = corners
+        .iter()
+        .map(|corner| corner.y)
+        .fold(f32::MAX, f32::min);
+    let high = corners
+        .iter()
+        .map(|corner| corner.y)
+        .fold(f32::MIN, f32::max);
+    // The middle of an edge, from its corners. A corner is written once for each face
+    // that it is a corner of, so they are not averaged.
+    let middle = |edge: Vec<Vec2>| {
+        let (min, max) = edge.iter().fold(
+            (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)),
+            |(min, max), &corner| (min.min(corner), max.max(corner)),
+        );
+        (min + max) / 2.0
+    };
+    let edge_at = |height: f32| -> Vec<Vec2> {
+        corners
+            .iter()
+            .filter(|corner| (corner.y - height).abs() < 0.05)
+            .map(|corner| corner.xz())
+            .collect()
+    };
+    let lip = middle(edge_at(high));
+    // The foot is the bottom edge furthest from the lip.
+    let furthest = edge_at(low)
+        .into_iter()
+        .map(|corner| corner.distance(lip))
+        .fold(f32::MIN, f32::max);
+    let foot = middle(
+        edge_at(low)
+            .into_iter()
+            .filter(|corner| corner.distance(lip) > furthest - 0.5)
+            .collect(),
+    );
+    let ground = |at: Vec2| pit.heights.height_at(at.x, at.y);
+    assert!(
+        (high - ground(lip)).abs() < 1.0,
+        "lip at {high} m, the rim at {} m",
+        ground(lip)
+    );
+    assert!(low < ground(foot), "the foot goes into the near wall");
+
+    let course = pit.course.as_ref().unwrap();
+    let nearest = course.nearest((lip + foot) / 2.0);
+    assert!(
+        nearest.distance < 5.0,
+        "{} m off the course",
+        nearest.distance
+    );
+    let line = course.centerline();
+    let way = (line[(nearest.segment + 1) % line.len()] - line[nearest.segment]).normalize();
+    assert!(
+        way.dot((lip - foot).normalize()) > 0.9,
+        "the course climbs it"
+    );
+}
+
+/// Sidewinder Canyon's eight ramps are each the solid body of a cattle skeleton, a model
+/// that trucks drive through: each lies under one, turned the same way.
+#[test]
+fn sidewinder_canyons_ramps_lie_under_its_skeletons() {
+    let Some(base) = base() else {
+        return;
+    };
+    let Some(found) = track::peek_base(&base)
+        .into_iter()
+        .find(|found| found.file.eq_ignore_ascii_case("WORLD\\SNAKE.SIT"))
+    else {
+        return;
+    };
+    let canyon = track::load_base(&base, &found.archive, &found.file).unwrap();
+    let skeletons: Vec<&track::SceneryObject> = canyon
+        .scenery
+        .objects
+        .iter()
+        .filter(|object| canyon.scenery.models[object.model].name == "SKELTN.BIN")
+        .collect();
+    assert_eq!(skeletons.len(), 8);
+    let ramps = placed_corners(&canyon, |object| !object.visible);
+    assert_eq!(ramps.len(), 8);
+    for (ramp, _) in ramps {
+        assert!(ramp.solid);
+        let under = skeletons
+            .iter()
+            .find(|skeleton| skeleton.position.distance(ramp.position) < 1.5)
+            .unwrap_or_else(|| panic!("no skeleton over the ramp at {}", ramp.position));
+        let turned = (under.yaw - ramp.yaw).rem_euclid(std::f32::consts::TAU);
+        assert!(
+            turned.min(std::f32::consts::TAU - turned) < 0.06,
+            "{turned} rad"
+        );
+    }
+}

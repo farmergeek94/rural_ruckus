@@ -93,10 +93,31 @@ The Ramps section comes before the Boxes section. Its count is 0 in most tracks.
   is, its high edge faces a train that stands across the road, 12.6 m short of it, and is
   level with the train's roof (0.2 m below it). The ramp carries trucks over the train.
   So a ramp with a model is placed and drawn as any box with a model is, and is solid.
-- **Reference** (JSTrackViewer `src/scene.js`, from the Traxx editor's `ramppoly`): a ramp
-  with no model is a wedge in its box, with `length,width,height` as half sizes, rising
-  from the box's local -y edge to its +y edge in the editor's axes. The game does not
-  build this wedge yet, so those ramps are missing.
+- A ramp with no model is a wedge. **Reference** (JSTrackViewer `src/scene.js`, from the
+  Traxx editor's `ramppoly`): the editor builds it in the box's eight corners, without
+  the top of one end, and shows it as a yellow wedge.
+- **Measured** on all 9 such ramps (`tests/base_game.rs`): each is the solid shape under a
+  model that trucks drive through.
+  - Sidewinder Canyon: each of its 8 ramps (38 x 18 x 10 ft, one 38 x 18 x 8) is within
+    4 ft of a cattle skeleton, `SKELTN.BIN` (type 7), at the same heading within
+    0.06 rad. The skeleton is 56 ft long, 16 ft wide and 11 ft high, and rises towards
+    its +Z end. The wedge's top follows it.
+  - Torture Pit: its one ramp (82 x 80 x 30 ft) is on the floor of the pit, 3 m from the
+    course, with two spikes `LENSPIK2.BIN` (type 7, 30 ft high) standing on it. The tips
+    of the spikes lie along its slope.
+- How to read the wedge is **measured** on Torture Pit: of 16 readings (whole or half
+  sizes, `ipos` at the foot or the middle, rising towards the heading or away from it,
+  the length along the heading or across it), only one puts the lip on the far rim of the
+  pit (within 2 ft) with the course running up it:
+  - `length,width,height` are the whole sizes, in feet. This disagrees with JSTrackViewer,
+    which reads a box's sizes as half sizes. Read as half sizes, the skeletons' wedges
+    would be 36 ft wide and 20 ft high, twice the skeleton.
+  - `ipos` is at the middle of the foot's level: the wedge stands on it.
+  - The length lies along the heading (the model's Z), and the slope rises towards the
+    heading.
+- The game makes such a ramp an invisible, fixed, solid wedge. The file gives it no model
+  and no texture, so there is nothing to draw it with. Whether MTM2 draws anything for it
+  is **open**.
 
 ## Objects that face the camera
 
@@ -233,7 +254,7 @@ CROKDROP.BIN
 - Everything not listed above, including the Course section's other fields
   (`ctype`, `cspeed`, `cTrackWidth`), a box's `p,q,r` and `priority`, cylinders and
   stadium, and `backdropType`.
-- The shape of a ramp with no model, as MTM2 builds it (see "Ramps").
+- Whether MTM2 draws anything for a ramp with no model (see "Ramps").
 - What box types 1 to 5 and 9 mean. The game goes by `mass` alone, whatever the type.
 - What MTM2 does with a moving box at the edge of the map (see "Moving boxes").
 - `Track Race Type` (2 in our file): presumably circuit, rally or drag.

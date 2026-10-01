@@ -112,6 +112,7 @@ fn app_with(more: impl Fn(Vec2) -> Vec<Placed>) -> App {
         solid: true,
         motion,
         faces_camera: false,
+        visible: true,
     };
     track.scenery = Scenery {
         tile_size: 8,
@@ -248,6 +249,7 @@ fn a_loose_panel_on_its_edge_stays_upright() {
             solid: true,
             motion: SceneryMotion::Loose { mass: 900.0 },
             faces_camera: false,
+            visible: true,
         }]
     });
     let panel = |app: &mut App| {
@@ -284,6 +286,7 @@ fn a_stack_of_loose_tires_falls_asleep() {
                 solid: true,
                 motion: SceneryMotion::Loose { mass: 50.0 },
                 faces_camera: false,
+                visible: true,
             })
             .collect()
     });
