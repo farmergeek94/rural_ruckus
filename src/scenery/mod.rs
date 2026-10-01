@@ -23,13 +23,13 @@ mod facing;
 mod interpolate;
 mod motion;
 
+use avian3d::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::NoAutoAabb;
 use bevy::mesh::morph::{MeshMorphWeights, MorphWeights};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::camera::CameraSystems;
 use crate::game_state::GameState;
@@ -47,12 +47,15 @@ impl Plugin for SceneryPlugin {
             OnEnter(GameState::Racing),
             spawn_scenery.after(TrackSystems::Prepare),
         )
+        // Before the physics step, which is in `FixedPostUpdate`.
         .add_systems(
             FixedUpdate,
-            (
-                (motion::settle, motion::keep_moving).before(PhysicsSet::SyncBackend),
-                (motion::remove_lost, interpolate::record_poses).after(PhysicsSet::Writeback),
-            )
+            (motion::settle, motion::keep_moving).run_if(in_state(GameState::Racing)),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            (motion::remove_lost, interpolate::record_poses)
+                .after(PhysicsSystems::Writeback)
                 .run_if(in_state(GameState::Racing)),
         )
         .add_systems(
@@ -174,7 +177,7 @@ fn spawn_scenery(
 
     // A model's colliders are built once and shared by every object that uses it: the
     // triangles themselves for what doesn't move or is moved, and the hull round them for
-    // a body that tumbles, since Rapier finds no contacts between two triangle meshes.
+    // a body that tumbles, since no contacts are found between two triangle meshes.
     // A model that moves by keyframes is solid as it stands in its first frame.
     let colliders: Vec<Option<Collider>> = scenery
         .models
@@ -182,7 +185,7 @@ fn spawn_scenery(
         .map(|model| {
             let vertices = model.positions.iter().copied().map(Vec3::from).collect();
             let triangles = model.indices.as_chunks::<3>().0.to_vec();
-            Collider::trimesh(vertices, triangles).ok()
+            Collider::try_trimesh(vertices, triangles).ok()
         })
         .collect();
     let hulls: Vec<Option<Collider>> = scenery
@@ -190,7 +193,7 @@ fn spawn_scenery(
         .iter()
         .map(|model| {
             let vertices: Vec<Vec3> = model.positions.iter().copied().map(Vec3::from).collect();
-            Collider::convex_hull(&vertices)
+            Collider::convex_hull(vertices)
         })
         .collect();
 
@@ -205,14 +208,15 @@ fn spawn_scenery(
         )
         .with_rotation(Quat::from_rotation_y(object.yaw));
         let name = Name::new(scenery.models[object.model].name.clone());
-        let drawn = looks.as_ref().map(|(meshes, materials, _)| {
+        // An invisible object, such as a ramp given by its size alone, is solid but unseen.
+        let looks_of_object = looks.as_ref().filter(|_| object.visible);
+        let drawn = looks_of_object.map(|(meshes, materials, _)| {
             (
                 Mesh3d(meshes[object.model].clone()),
                 MeshMaterial3d(materials[object.model].clone()),
             )
         });
-        let morph = looks
-            .as_ref()
+        let morph = looks_of_object
             .and_then(|(_, _, morphs)| morphs[object.model].clone())
             .map(|(weights, bounds)| (weights, bounds, NoAutoAabb));
         let collider = colliders[object.model].as_ref().filter(|_| object.solid);
@@ -244,7 +248,7 @@ fn spawn_scenery(
                     entity.insert(facing::FacesCamera);
                 }
                 if let Some(collider) = collider {
-                    entity.insert((RigidBody::Fixed, collider.clone(), bouncy()));
+                    entity.insert((RigidBody::Static, collider.clone(), bouncy()));
                 }
                 continue;
             }
@@ -303,10 +307,7 @@ fn shows_a_hole(model: &SceneryModel, cycles: &[TextureCycle], holes: &[bool]) -
 /// says it is at least as lively as the tire to be left alone: a truck springs off a post
 /// or a rail as it always did, and only the ground, which names a duller one, damps it.
 fn bouncy() -> Restitution {
-    Restitution {
-        coefficient: 1.0,
-        combine_rule: CoefficientCombineRule::Min,
-    }
+    Restitution::new(1.0).with_combine_rule(CoefficientCombine::Min)
 }
 
 /// The model's mesh, drawn as its first keyframe has it where it moves by keyframes, with

@@ -129,8 +129,8 @@ in 8 of its models (the four trees, the two huts, the ship and the plane), 554 f
 the same corners in the reverse order. Both faces are two-sided, and the texture positions
 are different. The importer draws the back of a two-sided face only when the model does not
 have that face in the reverse order. If it did, the two backs are in the same position
-with different textures, and they flicker. `tests/pod_track.rs` examines this on all
-tracks. No other track or truck has such faces.
+with different textures, and they flicker. **Measured** on all our tracks: no other track
+or truck has such faces.
 
 Some files also write a face two times, in the same order. On Baja Beach the copies
 are the same (the fence and the raft). On Rute 756 Jam (`BFVPROP.BIN`) they have
@@ -176,8 +176,7 @@ and about 2/3 of it), as the 16.16 numbers of this format are (texture coordinat
 material's base alpha); no file shows the unit. The scenery puts a cycle's frames in
 consecutive tiles and steps through them in its material (`track/tiles.wgsl`); a truck
 switches the texture of the material (`truck/looks.rs`). The backdrop shows the first
-frame. `tests/pod_real_tracks.rs` and `tests/pod_real_trucks.rs` check that every frame is
-in its archive.
+frame. **Measured**: every frame is in its archive, on every track and truck we have.
 
 ## Order and Jump (records 12 and 18)
 
@@ -191,7 +190,7 @@ jumps from after the vertices to the Order near the end, the other two to the en
 The Order's last two ints, added likewise, land on the starts of the body's first record
 and of the rotor's animated texture. Read straight through, stepping over both, the
 helicopter reads every face once and to its end record, and the rotor's faces take the
-animated texture: `tests/pod_real_tracks.rs` checks this. What a model would need if it
+animated texture (**measured**). What a model would need if it
 had faces that a Jump jumps over is **open**; no such model has been seen.
 
 ## Animation control files (keyframes)
@@ -213,9 +212,8 @@ the four in our files:
 | 344 | 0 | An end record. Every file is 348 bytes. |
 
 Every frame is a model in the same archive, and all the frames of one file have as many
-vertices as its first (**measured**, `tests/base_game.rs` and `tests/pod_real_tracks.rs`).
-They also have as many records of each type, which was read from the files but no test
-pins. So the frames of one animation read as one model with
+vertices as its first, and as many records of each type (**measured**, on the base game
+and on our tracks). So the frames of one animation read as one model with
 its vertices in other places.
 
 | File | Archive | Frames | Vertices | Rate | Placed |
@@ -261,7 +259,7 @@ names starting `CKBOX` are the way to tell, is **reference** (community document
 
 The models that the track file's Backdrop section names (situation.md).
 
-- **Measured** on the 9 in our archives (`tests/pod_real_tracks.rs`): each is a ring of
+- **Measured** on the 9 in our archives: each is a ring of
   8 to 32 upright faces round its origin, 163 to 202 ft out, reaching 28 to 87 ft below
   the origin and 28 to 51 ft above it. Every face is a cutout (type 17): the black of the
   texture is the sky.

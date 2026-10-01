@@ -15,8 +15,8 @@
 //! the water is, and how its trucks behaved in it has not been measured. The values below
 //! are chosen against the truck's own figures and are for tuning by driving.
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::track::Track;
 use crate::truck::{Truck, TruckConfig};
@@ -42,23 +42,13 @@ const GRAVITY: f32 = 9.81;
 
 pub(super) fn push_trucks(
     track: Res<Track>,
-    mut trucks: Query<
-        (
-            &Transform,
-            &Velocity,
-            &ReadMassProperties,
-            &TruckConfig,
-            &mut ExternalForce,
-        ),
-        With<Truck>,
-    >,
+    mut trucks: Query<(&Transform, &TruckConfig, Forces), With<Truck>>,
 ) {
     let Some(level) = track.water_level else {
         return;
     };
-    for (transform, velocity, mass_properties, config, mut external_force) in &mut trucks {
+    for (transform, config, mut forces) in &mut trucks {
         let up = transform.up().as_vec3();
-        let center_of_mass = transform.transform_point(mass_properties.local_center_of_mass);
         let share = config.mass / config.wheel_rest.len() as f32;
         for rest in config.wheel_rest {
             let hub = transform.transform_point(rest);
@@ -67,9 +57,9 @@ pub(super) fn push_trucks(
                 continue;
             };
             let at = column.middle_under(depth);
-            let moving = velocity.linear + velocity.angular.cross(at - center_of_mass);
+            let moving = forces.velocity_at_point(at);
             let force = buoyancy(share, depth) + drag(share, depth, moving);
-            *external_force += ExternalForce::at_point(force, at, center_of_mass);
+            forces.apply_force_at_point(force, at);
         }
     }
 }

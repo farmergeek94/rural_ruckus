@@ -28,6 +28,10 @@ its row in [Feature status](#feature-status).
 | 9 | Race flow: front end and garage, start sequence, finish and results, cockpit and look-round views | Done, but not yet driven. Stage 11 finishes it. |
 | 10 | Computer trucks: a driver that follows the course | Done, first pass |
 
+Outside the stages: the physics engine is now Avian in place of Rapier, by the user's
+request. Done and measured headless against Rapier, but not yet driven. See
+[avian.md](avian.md).
+
 ## Next: stages 11 to 16
 
 Many items below are **open**: we do not know what MTM2 does. For each one, first find
@@ -59,7 +63,7 @@ POD compatibility.
 | Fog from the track: the fog file that the `.LVL` names | Missing. Format **open**. |
 | Lighting from the track: sun direction, shadow strength, lighting table (`.LTE`) | Missing. Only **reference**. |
 | Box types 0, 1 and 11: solid or not | **Open** |
-| Ramps, cylinders and the stadium in the track file | **Open** |
+| Cylinders and the stadium in the track file | **Open** |
 | Computer trucks' speed hints: `cspeed`, `ctype`, `cTrackWidth` | **Open** |
 | Extra courses on one track (`Extended Course Definitions`) | **Open** |
 | `Track Race Type` | **Open**. Needed by stage 15. |
@@ -181,7 +185,9 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Ground types (`.TTY`): ice | Own | File: [texture_types.md](formats/texture_types.md) | Only ice is used. `ICE_GRIP` is the game's own. |
 | Ground types (`.TTY`): loose ground | Own | File: [texture_types.md](formats/texture_types.md) | The hundreds of the base game's types are measured: 1 road, 2 dirt, 3 water, 4 mud, 5 sand, 6 grass, 7 rocky ground, 10 metal, 12 rock, 14 railway track. Tires throw up dirt only on 2 and 4 to 7, and, on ground the list doesn't name, where it is coloured and not blue (the game's own rule). Not yet driven. |
 | Ground types: the other hundreds (sounds, spray, speed: mud, sand, water) | Open | File: [texture_types.md](formats/texture_types.md) | What each shows is known; what MTM2 did with it is not. |
-| Ramps, cylinders and the stadium in the track file | Open | File: [situation.md](formats/situation.md) | |
+| Ramps with a model (`RAMP.BIN`, `CRURAMP.BIN`) | Done | File: [situation.md](formats/situation.md) | Read from the Ramps section, and placed and made solid as a box with a model is. Measured on Arizona. Not yet driven. |
+| Ramps with no model | Done | File: [situation.md](formats/situation.md) | An invisible, fixed, solid wedge. How to read its sizes is measured on Torture Pit; it disagrees with the reference. Sidewinder Canyon has 8, under its skeletons, and Torture Pit 1. Not yet driven. |
+| Cylinders and the stadium in the track file | Open | File: [situation.md](formats/situation.md) | |
 | Track music | Out of scope | File: [level.md](formats/level.md) | The `.LVL` names it. See Audio. |
 
 ### Trucks
@@ -208,7 +214,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Starting grid of eight | Done | File: [situation.md](formats/situation.md) | |
 | Back to the last checkpoint | Done | | Key C, and the computer's trucks when stuck. How MTM2 does it (for example a helicopter) is not confirmed. |
 | Race position | Done | | |
-| Computer trucks, up to seven | Done | | First pass. Not tuned to be fast. They cut no corner past their next checkpoint, and steer through its gate. |
+| Computer trucks, up to seven | Done | | First pass. Not tuned to be fast. They cut no corner past their next checkpoint, and steer through its gate. Near a bend they steer at a nearer point of their line, so that they do not cut across its inside. |
 | Computer trucks' speed hints from the track (`cspeed`, `ctype`, `cTrackWidth`) | Open | File: [situation.md](formats/situation.md) | |
 | Start sequence (countdown) | Own | Game | 3, 2, 1, GO, with every truck held on the grid (`truck::Held`), and again on a restart. How MTM2 starts a race is not confirmed. Not yet driven. |
 | Finish and results screen | Own | Game | Once the player finishes: every truck's place, race time and best lap, kept up to date as the rest finish. The computer then drives the player's truck on, and the camera changes to a random view every 7 seconds, with a swing round the truck or a fade through black. Enter races again. What MTM2's results show is not confirmed. |

@@ -1,9 +1,8 @@
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 use monster_truck_rural_ruckus::{
     backdrop, base_game, camera, controls_help, diagnostics, dirt, display, environment, footing,
-    frame_pacing, front_end, game_state, graphics_debug, opponents, physics_debug, race, scenery,
-    sky, store, track, truck, water, weather,
+    frame_pacing, front_end, game_state, graphics_debug, opponents, physics, physics_debug, race,
+    scenery, sky, store, track, truck, water, weather,
 };
 
 /// Where what the player chose is remembered, beside the working directory as `tracks/` and
@@ -252,14 +251,9 @@ fn main() {
         }),
         // Physics runs on Bevy's fixed timestep so that handling doesn't change
         // with the frame rate.
-        // `TireContacts` hands a wheel's contacts under its tread to the suspension.
-        RapierPhysicsPlugin::<truck::TireContacts>::default().in_fixed_schedule(),
+        physics::GamePhysicsPlugin,
     ))
     .insert_resource(Time::<Fixed>::from_hz(PHYSICS_HZ))
-    .insert_resource(TimestepMode::Fixed {
-        dt: (1.0 / PHYSICS_HZ) as f32,
-        substeps: 1,
-    })
     // One plugin per slice.
     .add_plugins((
         display::DisplayPlugin,

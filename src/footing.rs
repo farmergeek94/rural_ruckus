@@ -17,7 +17,6 @@
 //! grips is not measured: `ICE_GRIP` is the game's own.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::track::{Footing, Track, TrackData};
 use crate::truck::{GroundGrip, Truck, TruckConfig, TruckSystems};
@@ -36,12 +35,7 @@ pub struct FootingPlugin;
 
 impl Plugin for FootingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            FixedUpdate,
-            feel_the_ground
-                .before(TruckSystems::Drive)
-                .before(PhysicsSet::SyncBackend),
-        );
+        app.add_systems(FixedUpdate, feel_the_ground.before(TruckSystems::Drive));
     }
 }
 

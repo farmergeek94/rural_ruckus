@@ -6,6 +6,8 @@
 //! - `fall`: the rain or snow round the camera. One mesh of many small squares, made once,
 //!   which `fall.wgsl` moves on the graphics card. The drops keep to their places in the world as the camera goes through
 //!   them, and what goes out of a box round the camera comes in again at the other side.
+//! - `cover`: what keeps the rain and snow off round the camera, such as a bridge or a
+//!   roof, found once for each square metre by a ray cast down.
 //! - `grip`: wet or snowy ground grips the tires less, every truck alike.
 //!
 //! The time of day (`TimeOfDay`) is part of the weather's settings: dusk lowers the sun and,
@@ -23,6 +25,7 @@
 //! tires. Only the grip works in an app that cannot draw.
 
 mod conditions;
+mod cover;
 mod fall;
 mod grip;
 mod sky;
@@ -68,7 +71,11 @@ impl Plugin for WeatherPlugin {
                 (
                     sky::light_the_sky,
                     // Round the camera as it is placed for this frame.
-                    (fall::start_falling, fall::follow_the_camera)
+                    (
+                        fall::start_falling,
+                        fall::follow_the_camera,
+                        cover::find_cover,
+                    )
                         .chain()
                         .after(CameraSystems::Place),
                     fall::light_the_fall

@@ -17,14 +17,16 @@
 //! jolts of 15 g. Met as a solid, they moved by 0.04 m at most, and turned back 6 times.
 //!
 //! What the sweep does find need not stand still. A tire grips against the way whatever it
-//! stands on is going, if that carries a `Velocity`, so a truck can ride on something that
+//! stands on is going, if that is a body that moves, so a truck can ride on something that
 //! moves. And whatever it stands on is pushed back as hard as it holds the tire up and
-//! grips it, if it is a body that can be pushed: one that carries an `ExternalImpulse`.
-//! The ground and fixed scenery do not.
+//! grips it, if it is a body that can be pushed. The ground and fixed scenery cannot.
+//!
+//! The forces are handed to the physics through `Forces`, which forgets them after each
+//! step, so each step's are worked out afresh.
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
-use bevy_rapier3d::rapier::parry::shape::Cylinder;
+use bevy::tasks::{ComputeTaskPool, TaskPool};
 
 use super::{
     GroundGrip, Held, Truck, TruckConfig, TruckInput, TruckWheelColliders, TruckWheels, Wheel,
@@ -162,7 +164,7 @@ const TIP_GUARD_BRAKE: f32 = 0.6;
 #[derive(Component, Default)]
 pub(super) struct TipGuard(f32);
 
-/// A Rapier cylinder stands along Y; a tire's axle lies along X.
+/// A physics cylinder stands along Y; a tire's axle lies along X.
 pub(super) const AXLE_ALONG_X: Quat = Quat::from_xyzw(
     0.0,
     0.0,
@@ -173,25 +175,18 @@ pub(super) const AXLE_ALONG_X: Quat = Quat::from_xyzw(
 /// The three queries write `Transform`s of three kinds of entity, which must not overlap.
 type OnlyWheels = (Without<Truck>, Without<WheelCollider>, Without<WheelCore>);
 type OnlyWheelColliders = (With<WheelCollider>, Without<Truck>);
-type OnlyWheelCores = (With<WheelCore>, Without<Truck>, Without<WheelCollider>);
+/// What `drive_truck` writes of each wheel collider: where it is, and whether its springs
+/// are shut.
+type WheelColliderParts = (&'static mut Transform, &'static mut WheelCollider);
 /// Any part of a truck the sweep could find: its body, a wheel collider or a core.
 type TruckParts = Or<(With<Truck>, With<WheelCollider>, With<WheelCore>)>;
-/// What `drive_truck` reads and writes of a body a tire stands on that is not a truck.
-type Surface = (
-    Option<&'static Velocity>,
-    &'static GlobalTransform,
-    Option<&'static ReadMassProperties>,
-    Option<&'static mut ExternalImpulse>,
-);
 /// What `drive_truck` reads and writes of each truck.
 type DrivenTruck = (
     Entity,
     &'static Transform,
-    &'static Velocity,
-    &'static ReadMassProperties,
+    Forces,
     &'static TruckConfig,
     &'static TruckInput,
-    &'static mut ExternalForce,
     &'static TruckWheels,
     &'static TruckWheelColliders,
     Option<&'static mut TipGuard>,
@@ -199,116 +194,209 @@ type DrivenTruck = (
     Has<Held>,
 );
 
+/// Where one tire is swept from and how, worked out for every tire before any is swept, so
+/// that the sweeps can all be made at once (see `sweep_all`).
+struct Cast {
+    /// The tire's shape: its wheel collider's.
+    tire: Collider,
+    /// Where it starts, in the world.
+    from: Vec3,
+    /// How it is turned: steered, leaning with its axle, and onto its axle.
+    turned: Quat,
+    /// Down, in the truck's axes.
+    down: Dir3,
+    /// How far it goes, in metres.
+    reach: f32,
+}
+
+/// Makes every tire's sweep, on as many threads as the machine has. The sweeps only read
+/// the world, and none depends on another. One after another they were two thirds of this
+/// system's time: measured on Scrapyard Run with eight trucks, unoptimised, 32 sweeps took
+/// 0.65 to 0.77 ms a step. At once, on 16 threads, they take 0.28 to 0.31 ms, whether a task
+/// is given 1, 2 or 4 of them; given 8, 0.35 ms. Each sweep sees only what `stands_on`
+/// lets it.
+fn sweep_all(
+    spatial: &SpatialQuery,
+    casts: &[Cast],
+    stands_on: &(dyn Fn(Entity) -> bool + Sync),
+) -> Vec<Option<ShapeHitData>> {
+    let sweep = |cast: &Cast| {
+        spatial.cast_shape_predicate(
+            &cast.tire,
+            cast.from,
+            cast.turned,
+            cast.down,
+            &ShapeCastConfig {
+                max_distance: cast.reach,
+                target_distance: 0.0,
+                // A cast that starts inside something stops there, and says so.
+                compute_contact_on_penetration: true,
+                ignore_origin_penetration: false,
+            },
+            &SpatialQueryFilter::default(),
+            stands_on,
+        )
+    };
+    // A few to each task: a task costs more to hand out than a sweep does to make.
+    const PER_TASK: usize = 4;
+    ComputeTaskPool::get_or_init(TaskPool::default)
+        .scope(|scope| {
+            for chunk in casts.chunks(PER_TASK) {
+                scope.spawn(async move { chunk.iter().map(sweep).collect::<Vec<_>>() });
+            }
+        })
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn drive_truck(
     time: Res<Time>,
-    rapier: ReadRapierContext,
+    spatial: SpatialQuery,
     mut trucks: Query<DrivenTruck, With<Truck>>,
     mut wheels: Query<(&mut Wheel, &mut Transform), OnlyWheels>,
-    mut wheel_colliders: Query<(&mut Transform, &mut WheelCollider), OnlyWheelColliders>,
-    mut wheel_cores: Query<&mut Transform, OnlyWheelCores>,
+    mut wheel_colliders: Query<WheelColliderParts, OnlyWheelColliders>,
     truck_parts: Query<(), TruckParts>,
-    mut surfaces: Query<Surface, Without<Truck>>,
-) -> Result {
-    let rapier = rapier.single()?;
+    // Whatever a tire stands on that is a body, the body a collider is part of, and what
+    // kind of body it is.
+    mut surfaces: Query<(Forces, &ComputedMass), Without<Truck>>,
+    bodies: Query<&ColliderOf>,
+    kinds: Query<&RigidBody>,
+) {
     let dt = time.delta_secs();
+    // Not this truck, nor any other (see the module's notes).
+    let not_a_truck = |collider: Entity| !truck_parts.contains(collider);
 
-    for (
-        truck,
-        transform,
-        velocity,
-        mass_properties,
-        config,
-        input,
-        mut external_force,
-        children,
-        colliders,
-        mut guard,
-        ground_grip,
-        held,
-    ) in &mut trucks
-    {
+    // First where every tire of every truck is swept from, then all the sweeps at once. For
+    // each truck, for each of its wheels, what is known of it before its sweep.
+    let mut casts = Vec::new();
+    let mut planned: Vec<Vec<Option<Planned>>> = Vec::new();
+    for (_, transform, forces, config, input, children, colliders, guard, ..) in &mut trucks {
         let up = transform.up().as_vec3();
-        let center_of_mass = transform.transform_point(mass_properties.local_center_of_mass);
-        // Not this truck, nor any other (see the module's notes).
-        let not_a_truck = |collider: Entity| !truck_parts.contains(collider);
-        let filter = QueryFilter::default()
-            .exclude_rigid_body(truck)
-            .exclude_sensors()
-            .predicate(&not_a_truck);
-
-        // `ExternalForce` persists between steps, so rebuild it from scratch each time.
-        let mut total = ExternalForce::default();
         // Full lock is what the tires can hold at this speed.
-        let body_speed = velocity.linear.dot(transform.forward().as_vec3());
+        let body_speed = forces.linear_velocity().dot(transform.forward().as_vec3());
         // The tip guard takes some of the steering off, as it stood after the last step. A
         // truck without one is never guarded.
         let guarding = guard.as_ref().map_or(0.0, |guard| guard.0);
         let lock = holdable_lock(config, body_speed) * (1.0 - TIP_GUARD_STEER * guarding);
+        let travel = config.suspension_bump + config.suspension_droop;
+        let wheels_of_truck = children
+            .0
+            .iter()
+            .map(|&child| {
+                let (wheel, _) = wheels.get(child).ok()?;
+                let steer_angle = input.steer
+                    * lock
+                    * if wheel.front {
+                        1.0
+                    } else {
+                        -config.rear_steer_ratio * rear_steer_share(body_speed)
+                    };
+                let steer_rotation = Quat::from_rotation_y(steer_angle);
+                // Turned as the wheel is steered, and leaning as its axle leans.
+                let tire_rotation = Quat::from_rotation_z(wheel.tilt) * steer_rotation;
+                // The mount is the top of the travel, where the hub meets the bump stop.
+                // The tire is swept down from a little higher, so that a tire pressed up
+                // past its mount, on a hard landing, is found that far in and not merely
+                // touching: a cast that begins inside something stops at once and says
+                // nothing of how deep.
+                let mount = transform.transform_point(wheel.mount);
+                casts.push(Cast {
+                    tire: colliders.tire.clone(),
+                    from: mount + up * BUMP_STOP_REACH,
+                    turned: transform.rotation * tire_rotation * AXLE_ALONG_X,
+                    down: Dir3::new(-up).unwrap_or(Dir3::NEG_Y),
+                    reach: travel + BUMP_STOP_REACH,
+                });
+                Some(Planned {
+                    cast: casts.len() - 1,
+                    steer_rotation,
+                    mount: wheel.mount,
+                    mount_in_world: mount,
+                })
+            })
+            .collect();
+        planned.push(wheels_of_truck);
+    }
+    let hits = sweep_all(&spatial, &casts, &not_a_truck);
 
-        // First every tire is swept, to find where its hub is. Then each axle's springs
-        // are worked out from where both of its hubs are, since they sit on one beam.
+    for (
+        (
+            _truck,
+            transform,
+            mut forces,
+            config,
+            input,
+            children,
+            colliders,
+            mut guard,
+            ground_grip,
+            held,
+        ),
+        planned,
+    ) in trucks.iter_mut().zip(&planned)
+    {
+        let up = transform.up().as_vec3();
+        let body_speed = forces.linear_velocity().dot(transform.forward().as_vec3());
+
+        // Every tire has been swept, to find where its hub is. Now each axle's springs are
+        // worked out from where both of its hubs are, since they sit on one beam.
         let travel = config.suspension_bump + config.suspension_droop;
         let mut sweeps = Vec::with_capacity(children.0.len());
         // Both in `TruckConfig::wheel_rest`'s order, as `GroundGrip` is.
-        for (index, (&child, &collider)) in children.0.iter().zip(&colliders.0).enumerate() {
-            let Ok((wheel, _)) = wheels.get(child) else {
+        for (index, ((&child, &collider), plan)) in children
+            .0
+            .iter()
+            .zip(&colliders.colliders)
+            .zip(planned)
+            .enumerate()
+        {
+            let Some(Planned {
+                cast,
+                steer_rotation,
+                mount: mount_in_truck,
+                mount_in_world: mount,
+            }) = *plan
+            else {
                 continue;
             };
-
-            let steer_angle = input.steer
-                * lock
-                * if wheel.front {
-                    1.0
-                } else {
-                    -config.rear_steer_ratio * rear_steer_share(body_speed)
-                };
-            let steer_rotation = Quat::from_rotation_y(steer_angle);
-            // Turned as the wheel is steered, and leaning as its axle leans.
-            let tire_rotation = Quat::from_rotation_z(wheel.tilt) * steer_rotation;
-
-            // The mount is the top of the travel, where the hub meets the bump stop. The
-            // tire is swept down from a little higher, so that a tire pressed up past its
-            // mount, on a hard landing, is found that far in and not merely touching: a
-            // cast that begins inside something stops at once and says nothing of how deep.
-            let mount = transform.transform_point(wheel.mount);
             let lift = BUMP_STOP_REACH;
-            let tire = Cylinder::new(config.wheel_width / 2.0, config.wheel_radius);
-            let touch = rapier
-                .cast_shape(
-                    mount + up * lift,
-                    transform.rotation * tire_rotation * AXLE_ALONG_X,
-                    -up,
-                    &tire,
-                    ShapeCastOptions {
-                        max_time_of_impact: travel + lift,
-                        target_distance: 0.0,
-                        stop_at_penetration: true,
-                        compute_impact_geometry_on_penetration: true,
-                    },
-                    filter,
-                )
-                .and_then(|(surface, hit)| {
-                    // `normal1` is the outward normal of what was hit, in the world, and
-                    // `witness2` the touch on the tire, in the cylinder's own frame, whose
-                    // axis is Y.
-                    let details = hit.details?;
-                    let normal = details.normal1.try_normalize().unwrap_or(up);
-                    let out_from_axle = details.witness2.xz().length() / config.wheel_radius;
-                    let on_the_tread =
-                        ((out_from_axle - SIDEWALL) / (1.0 - SIDEWALL)).clamp(0.0, 1.0);
-                    // Brushed by the sidewall, and not stood on: the wheel hangs. So does
-                    // a wheel whose tread meets a face that is not holding it up at all --
-                    // the ground against the top of a tire on a truck tipped over, which
-                    // the wheel collider takes as a rigid contact instead (see `contacts`).
-                    let underneath = normal.dot(up) > UPWARD;
-                    (on_the_tread > 0.0 && underneath).then_some(Touch {
-                        below_mount: hit.time_of_impact - lift,
-                        normal,
-                        on_the_tread,
-                        surface,
-                    })
-                });
+            let (from, tire_turned) = (casts[cast].from, casts[cast].turned);
+            let touch = hits[cast].and_then(|hit| {
+                // `normal1` is the outward normal of what was hit, in the world, and
+                // `point2` the touch on the tire, in the world too: taken into the
+                // cylinder's own frame, whose axis is Y, from where the tire touched.
+                let normal = hit.normal1.try_normalize().unwrap_or(up);
+                let touched_at = from - up * hit.distance;
+                let on_the_tire = tire_turned.inverse() * (hit.point2 - touched_at);
+                let out_from_axle = on_the_tire.xz().length() / config.wheel_radius;
+                let on_the_tread = ((out_from_axle - SIDEWALL) / (1.0 - SIDEWALL)).clamp(0.0, 1.0);
+                // Brushed by the sidewall, and not stood on: the wheel hangs. So does
+                // a wheel whose tread meets a face that is not holding it up at all --
+                // the ground against the top of a tire on a truck tipped over, which
+                // the wheel collider takes as a rigid contact instead (see `contacts`).
+                let underneath = normal.dot(up) > UPWARD;
+                if on_the_tread <= 0.0 || !underneath {
+                    return None;
+                }
+                // The ground and scenery are each a body of their own; only a collider
+                // within a body, such as a truck's, needs its body looked up.
+                let (surface, kind) = match kinds.get(hit.entity) {
+                    Ok(kind) => (hit.entity, Some(kind)),
+                    Err(_) => {
+                        let body = bodies.get(hit.entity).map_or(hit.entity, |of| of.body);
+                        (body, kinds.get(body).ok())
+                    }
+                };
+                Some(Touch {
+                    below_mount: hit.distance - lift,
+                    normal,
+                    on_the_tread,
+                    surface,
+                    moves: kind.is_some_and(|kind| !kind.is_static()),
+                })
+            });
 
             // Suspension length: from the mount down to the hub. With nothing under it the
             // wheel hangs at the bottom of its travel. Above the mount it can't go: the hub
@@ -317,21 +405,15 @@ pub(super) fn drive_truck(
             let hub = mount - up * length;
             // Against what it stands on, which is only the ground's own when that is still.
             let surface_velocity = touch
+                .filter(|touch| touch.moves)
                 .and_then(|touch| surfaces.get(touch.surface).ok())
-                .and_then(|(surface, at, mass, _)| {
-                    let centre = at.transform_point(
-                        mass.map_or(Vec3::ZERO, |mass| mass.get().local_center_of_mass),
-                    );
-                    Some(surface?.linear_velocity_at_point(hub, centre))
-                })
-                .unwrap_or(Vec3::ZERO);
-            let hub_velocity =
-                velocity.linear_velocity_at_point(hub, center_of_mass) - surface_velocity;
+                .map_or(Vec3::ZERO, |(surface, _)| surface.velocity_at_point(hub));
+            let hub_velocity = forces.velocity_at_point(hub) - surface_velocity;
             sweeps.push(Sweep {
                 index,
                 wheel: child,
                 collider,
-                mount: wheel.mount,
+                mount: mount_in_truck,
                 steer_rotation,
                 length,
                 hub,
@@ -344,7 +426,7 @@ pub(super) fn drive_truck(
         let tipping = lifting_in_a_sharp_turn(
             input.steer,
             body_speed,
-            velocity.angular.dot(up),
+            forces.angular_velocity().dot(up),
             sweeps
                 .iter()
                 .map(|sweep| (sweep.mount.x, sweep.touch.is_some())),
@@ -475,23 +557,19 @@ pub(super) fn drive_truck(
                 // that does to the body. Drive and brakes at the hub too, and the sideways
                 // grip `cornering_lever` of the way down to the ground.
                 let sideways = side * tire.dot(side);
-                total +=
-                    ExternalForce::at_point(normal * load + tire - sideways, hub, center_of_mass);
-                // And what it stands on takes the same back, where the tire meets it.
-                if let Ok((_, at, mass, Some(mut impulse))) = surfaces.get_mut(touch.surface) {
-                    let centre = at.transform_point(
-                        mass.map_or(Vec3::ZERO, |mass| mass.get().local_center_of_mass),
-                    );
-                    *impulse += ExternalImpulse::at_point(
-                        -(normal * load + tire) * dt,
-                        hub - normal * config.wheel_radius,
-                        centre,
-                    );
+                forces.apply_force_at_point(normal * load + tire - sideways, hub);
+                // And what it stands on takes the same back, where the tire meets it. The
+                // ground and fixed scenery take nothing.
+                if let Some(Ok((mut surface, mass))) =
+                    touch.moves.then(|| surfaces.get_mut(touch.surface))
+                {
+                    let push =
+                        pushed_back(-(normal * load + tire) * dt, mass.value(), hub_velocity, dt);
+                    surface.apply_linear_impulse_at_point(push, hub - normal * config.wheel_radius);
                 }
-                total += ExternalForce::at_point(
+                forces.apply_force_at_point(
                     sideways,
                     hub - normal * config.wheel_radius * config.cornering_lever,
-                    center_of_mass,
                 );
             }
 
@@ -509,26 +587,37 @@ pub(super) fn drive_truck(
             wheel_transform.translation = wheel.mount - Vec3::Y * sweep.length;
             // The wheel is a pivot whose axle lies along X. What is drawn hangs from it.
             wheel_transform.rotation = tire_rotation * Quat::from_rotation_x(wheel.spin);
-            // And the collider goes with it. A cylinder needs no spin. It also carries
-            // whether the springs are shut, which is what tells `contacts` to stop
-            // dropping this wheel's ground contact and let the tire be solid.
+            // And the collider goes with it, and its core, which is its child. A cylinder
+            // needs no spin. It also carries whether the springs are shut, which is what
+            // tells `contacts` to stop dropping this wheel's ground contact and let the
+            // tire be solid.
             if let Ok((mut collider_transform, mut wheel_collider)) =
                 wheel_colliders.get_mut(sweep.collider)
             {
                 collider_transform.translation = wheel_transform.translation;
                 collider_transform.rotation = tire_rotation * AXLE_ALONG_X;
                 wheel_collider.bottomed = bottomed;
-                // The core rides at the hub with it.
-                if let Ok(mut core_transform) = wheel_cores.get_mut(wheel_collider.core) {
-                    core_transform.translation = wheel_transform.translation;
-                }
             }
         }
-
-        *external_force = total;
     }
+}
 
-    Ok(())
+/// The impulse with which a tire pushes back on a body it stands on, in N·s, from the
+/// `impulse` that would take the whole of the tire's load and grip, for a body of `mass`
+/// kilograms under a hub going at `hub_velocity` against it, over a step of `dt` seconds.
+///
+/// A tire cannot drive what it stands on away faster than it is itself going that way, and
+/// what holds a light object up is the ground under it, not the tire. Given the whole of
+/// the tire's load, a 1.4 kg cone under a wheel of a truck doing 20 m/s was pushed into the
+/// ground at 77 m/s in a step, came back out of it as fast, and threw the truck into the air
+/// at 51 m/s; a 45 kg crate met at 10 m/s was fired off at 1 194 m/s; and a 227 kg rock was
+/// pressed down through the ground, stood there as a kerb, and flipped the truck. So the push
+/// changes the body's speed by no more than the hub closes on it along the push, and what
+/// gravity adds in the step. A tire rolling over the top of a body hardly closes on it at
+/// all, and presses it down with about its own weight; a heavy body takes the whole push.
+fn pushed_back(impulse: Vec3, mass: f32, hub_velocity: Vec3, dt: f32) -> Vec3 {
+    let closing = hub_velocity.dot(impulse.normalize_or_zero()).max(0.0);
+    impulse.clamp_length_max(mass * (closing + GRAVITY * dt))
 }
 
 /// Whether a truck is in a sharp turn with an inside wheel off the ground and an outside one
@@ -588,8 +677,22 @@ struct Touch {
     normal: Vec3,
     /// How much of the touch is on the tread rather than the sidewall, from 0 to 1.
     on_the_tread: f32,
-    /// The collider it touches.
+    /// The body it touches.
     surface: Entity,
+    /// Whether that body can move: not the ground or fixed scenery, which neither move
+    /// nor can be pushed, and which are not looked into.
+    moves: bool,
+}
+
+/// What is known of a wheel before its tire is swept.
+#[derive(Clone, Copy)]
+struct Planned {
+    /// Which of the sweeps is its.
+    cast: usize,
+    steer_rotation: Quat,
+    /// The top of its travel, in the truck's axes and in the world.
+    mount: Vec3,
+    mount_in_world: Vec3,
 }
 
 /// One wheel's sweep, kept until its axle's springs are known.
@@ -715,6 +818,23 @@ mod tests {
         let after_a_second = spin_for(1.0, 20.0, 0.0, false);
         assert!(after_a_second > 10.0 && after_a_second < 20.0);
         assert!(spin_for(10.0, 20.0, 0.0, false).abs() < 0.2);
+    }
+
+    #[test]
+    fn a_tire_pushes_a_light_body_no_faster_than_it_closes_on_it() {
+        let dt = 1.0 / 120.0;
+        let load = Vec3::NEG_Y * 13_000.0 * dt;
+        // Rolling over a cone at 20 m/s, and coming down onto it at 2 m/s: the cone is
+        // pressed down at 2 m/s and a step of gravity, not 77 m/s.
+        let cone = pushed_back(load, 1.4, Vec3::new(0.0, -2.0, -20.0), dt);
+        assert!((cone.length() / 1.4 - (2.0 + GRAVITY * dt)).abs() < 1e-3);
+        assert_eq!(cone.normalize(), Vec3::NEG_Y);
+        // Going away from it, with gravity's step alone.
+        let cone = pushed_back(load, 1.4, Vec3::new(0.0, 1.0, -20.0), dt);
+        assert!((cone.length() / 1.4 - GRAVITY * dt).abs() < 1e-3);
+        // A heavy body takes the whole of it.
+        let heavy = Vec3::new(0.0, -2.0, -20.0);
+        assert_eq!(pushed_back(load, 20_000.0, heavy, dt), load);
     }
 
     #[test]

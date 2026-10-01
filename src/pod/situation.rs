@@ -15,6 +15,9 @@ pub mod box_type {
     pub const CHECKPOINT: i32 = 6;
     /// Moves along its `velocity` ("moving - use bvel" in the Traxx editor's notes).
     pub const MOVING: i32 = 10;
+    /// A ramp, from the Ramps section, which writes no type of its own. 99 is the Traxx
+    /// editor's `BOXTYPE_RAMP` (its `TrackPODBox.h`, quoted by JSTrackViewer).
+    pub const RAMP: i32 = 99;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -24,7 +27,8 @@ pub struct Situation {
     pub name: String,
     /// The starting grid, pole position first.
     pub vehicles: Vec<Vehicle>,
-    /// Scenery, obstacles and checkpoints.
+    /// Scenery, obstacles, checkpoints and ramps, in the file's order: the Ramps section
+    /// comes before the Boxes section.
     pub boxes: Vec<SituationBox>,
     /// The first course that computer trucks follow: straight pieces, without the
     /// corners that join them.
@@ -93,10 +97,8 @@ impl Situation {
         let end = lines.len();
 
         let vehicles_start = lines.section("Vehicles").unwrap_or(end);
-        let boxes_start = lines.section("Boxes").unwrap_or(end);
         let course_start = lines.section("Course").unwrap_or(end);
         let vehicles_end = lines.next_section(vehicles_start);
-        let boxes_end = lines.next_section(boxes_start);
         // The extra courses that follow the first repeat its labels.
         let course_end = (course_start..end)
             .find(|&index| lines.text(index).contains("Extended Course Definitions"))
@@ -116,29 +118,10 @@ impl Situation {
         }
 
         let mut boxes = Vec::new();
-        for start in lines.labelled("ipos", boxes_start, boxes_end) {
-            let block_end = lines
-                .labelled("ipos", start + 1, boxes_end)
-                .next()
-                .unwrap_or(boxes_end);
-            let shape = match lines.after("model", start, block_end) {
-                Ok(model_line) => BoxShape::Model(lines.text(model_line).to_string()),
-                Err(_) => BoxShape::Dimensions(lines.floats_after(
-                    "length,width,height",
-                    start,
-                    block_end,
-                )?),
-            };
-            let [kind, flags] = lines.floats_after("type,flags", start, block_end)?;
-            boxes.push(SituationBox {
-                position: lines.floats_after("ipos", start, block_end)?,
-                angles: lines.floats_after("theta,phi,psi", start, block_end)?,
-                shape,
-                kind: kind as i32,
-                flags: flags as i32,
-                mass: lines.floats_or_zero::<1>("mass", start, block_end)?[0],
-                velocity: lines.floats_or_zero("bvel", start, block_end)?,
-            });
+        for (section, kind) in [("Ramps", Some(box_type::RAMP)), ("Boxes", None)] {
+            if let Some(start) = lines.section(section) {
+                read_boxes(&lines, start, kind, &mut boxes)?;
+            }
         }
 
         let mut course = Vec::new();
@@ -172,6 +155,43 @@ impl Situation {
             .iter()
             .filter(|situation_box| situation_box.kind == box_type::CHECKPOINT)
     }
+}
+
+/// The boxes of the section that opens at line `start`. A ramp is laid out as a box is,
+/// without the `type,flags` line, and takes `ramp_kind` for its type.
+fn read_boxes(
+    lines: &Lines,
+    start: usize,
+    ramp_kind: Option<i32>,
+    boxes: &mut Vec<SituationBox>,
+) -> Result<(), PodError> {
+    let end = lines.next_section(start);
+    for start in lines.labelled("ipos", start, end) {
+        let block_end = lines.labelled("ipos", start + 1, end).next().unwrap_or(end);
+        let shape = match lines.after("model", start, block_end) {
+            Ok(model_line) => BoxShape::Model(lines.text(model_line).to_string()),
+            Err(_) => {
+                BoxShape::Dimensions(lines.floats_after("length,width,height", start, block_end)?)
+            }
+        };
+        let (kind, flags) = match ramp_kind {
+            Some(kind) => (kind, 0),
+            None => {
+                let [kind, flags] = lines.floats_after::<2>("type,flags", start, block_end)?;
+                (kind as i32, flags as i32)
+            }
+        };
+        boxes.push(SituationBox {
+            position: lines.floats_after("ipos", start, block_end)?,
+            angles: lines.floats_after("theta,phi,psi", start, block_end)?,
+            shape,
+            kind,
+            flags,
+            mass: lines.floats_or_zero::<1>("mass", start, block_end)?[0],
+            velocity: lines.floats_or_zero("bvel", start, block_end)?,
+        });
+    }
+    Ok(())
 }
 
 /// The Backdrop section, which opens at line `start`: a count after
@@ -418,6 +438,33 @@ cs4drop1.bin\r\ncs4drop2.bin\r\n";
         assert_eq!(checkpoints[0].position, [3837.5, 136.0, 4197.0]);
         assert_eq!(checkpoints[0].angles, [0.1, 0.2, 15.5]);
         assert_eq!(checkpoints[0].flags, 1);
+    }
+
+    /// Ramps come before the boxes, as in the file, laid out as boxes are but with no
+    /// `type,flags` line. Both kinds are cut down from real tracks, with rounder numbers:
+    /// a model (Arizona) and a size alone (Sidewinder Canyon).
+    #[test]
+    fn reads_ramps_ahead_of_the_boxes() {
+        let with_ramps = TRACK.replace(
+            "*** Ramps ***\r\n0\r\n",
+            "*** Ramps ***\r\n2\r\n*********************************************\r\n\
+ipos\r\n5285.75,86.375,1439.75\r\ntheta,phi,psi\r\n0.0,0.0,32.98\r\n\
+model\r\nRAMP.BIN\r\nmass\r\n0.000000\r\nbvel\r\n0.0,0.0,0.0\r\np,q,r\r\n0.0,0.0,0.0\r\n\
+*********************************************\r\n\
+ipos\r\n6721.617188,360.0,2832.648438\r\ntheta,phi,psi\r\n0.0,0.0,-0.722505\r\n\
+length,width,height\r\n38.0,18.0,10.0\r\nmass\r\n0.0\r\nbvel\r\n0.0,0.0,0.0\r\np,q,r\r\n0.0,0.0,0.0\r\n",
+        );
+        let situation = Situation::parse(&with_ramps).unwrap();
+        assert_eq!(situation.boxes.len(), 5);
+        let (ramps, boxes) = situation.boxes.split_at(2);
+        assert_eq!(ramps[0].shape, BoxShape::Model("RAMP.BIN".into()));
+        assert_eq!(ramps[0].position, [5285.75, 86.375, 1439.75]);
+        assert_eq!(ramps[0].angles, [0.0, 0.0, 32.98]);
+        assert_eq!(ramps[1].shape, BoxShape::Dimensions([38.0, 18.0, 10.0]));
+        for ramp in ramps {
+            assert_eq!((ramp.kind, ramp.flags), (box_type::RAMP, 0));
+        }
+        assert_eq!(boxes, Situation::parse(TRACK).unwrap().boxes);
     }
 
     #[test]

@@ -3,8 +3,7 @@
 A truck is a truck file, `TRUCK\NAME.TRK`, and the models and textures it names. A
 community truck comes as an archive of its own holding those.
 
-**Measured** on the two archives in `trucks/`, and pinned by
-`tests/pod_real_trucks.rs`:
+**Measured** on the two archives in `trucks/`:
 
 | Archive | What it is | Contents |
 | --- | --- | --- |
@@ -168,7 +167,7 @@ times the PNG's alpha.
 After `Number of Lights` and its count, each light is six labelled lines, each followed by
 its value. The labels name the fields and give their units. **Measured** on the 33 truck
 files of the user's archives and of the base game's `TRUCK2.POD` (206 lights): every light
-that a file counts reads (`tests/pod_real_trucks.rs`).
+that a file counts reads.
 
 | Label | Value |
 | --- | --- |

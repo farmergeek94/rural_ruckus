@@ -30,14 +30,14 @@ mod reset;
 mod spawn;
 mod speedometer;
 
+use avian3d::prelude::{Collider, PhysicsSystems};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 
 pub use config::{TruckConfig, TruckSetup};
-pub use contacts::TireContacts;
+pub use contacts::{TireContacts, decide_tire_contacts};
 pub use data::{
     AxleLink, AxleLinks, Beam, Dashboard, DashboardPicture, Dial, NormalMap, SteeringWheel,
     TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel, TruckTexture, TruckTextureCycle,
@@ -96,15 +96,12 @@ impl Plugin for TruckPlugin {
                     looks::cycle_textures,
                 ),
             )
-            // Forces must be computed at the physics rate, right before Rapier reads them.
+            // Forces must be computed at the physics rate, before each step, which the
+            // physics takes in `FixedPostUpdate`.
+            .add_systems(FixedUpdate, drive::drive_truck.in_set(TruckSystems::Drive))
             .add_systems(
-                FixedUpdate,
-                (
-                    drive::drive_truck
-                        .in_set(TruckSystems::Drive)
-                        .before(PhysicsSet::SyncBackend),
-                    interpolate::record_poses.after(PhysicsSet::Writeback),
-                ),
+                FixedPostUpdate,
+                interpolate::record_poses.after(PhysicsSystems::Writeback),
             );
     }
 }
@@ -205,7 +202,12 @@ pub struct TruckWheels(pub(crate) Vec<Entity>);
 /// The wheels' colliders, children of the body, in the same order as `TruckWheels`. Each
 /// is moved to its hub every physics step (see `drive`).
 #[derive(Component)]
-pub(crate) struct TruckWheelColliders(pub(crate) Vec<Entity>);
+pub(crate) struct TruckWheelColliders {
+    pub(crate) colliders: Vec<Entity>,
+    /// Their shape, which all four share: what `drive` sweeps each tire down with, kept
+    /// here so that it need not look a collider up for it.
+    pub(crate) tire: Collider,
+}
 
 /// On a wheel's collider.
 #[derive(Component)]
@@ -215,8 +217,6 @@ pub(crate) struct WheelCollider {
     /// pushing and `contacts` keeps the ground contact, which is what holds the truck up
     /// and bounces it. Written by `drive` every step, read by `contacts`.
     pub(super) bottomed: bool,
-    /// The wheel's core (`WheelCore`), which `drive` keeps at the hub with the collider.
-    pub(super) core: Entity,
 }
 
 /// A solid ball inside a wheel, at its hub, that touches the ground and nothing else. The
@@ -238,8 +238,8 @@ pub enum TruckSystems {
     /// Moves every `TruckVisual` to where its truck is this frame, in `Update`. Run
     /// after this set to follow a truck on screen without judder.
     PlaceVisuals,
-    /// Works out each truck's suspension and tire forces, in `FixedUpdate`, and writes
-    /// them to its `ExternalForce` in place of the last step's. Add forces of your own
-    /// after this set and before `PhysicsSet::SyncBackend`.
+    /// Works out each truck's suspension and tire forces, in `FixedUpdate`, and hands them
+    /// to the physics for the coming step. Add forces of your own through `Forces` in
+    /// `FixedUpdate` too: they add to these, in any order.
     Drive,
 }

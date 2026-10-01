@@ -3,8 +3,9 @@
 What this project knows about MTM2's files, and how it knows it. The formats were never
 published, so every fact here is marked with where it came from:
 
-- **Measured**: read out of a real file and pinned by a test in `tests/pod_real_tracks.rs`,
-  `tests/pod_real_trucks.rs` or `tests/pod_track.rs`.
+- **Measured**: read out of a real file. The document names the files and the figures,
+  so that anyone with the files can measure them again. No committed test holds them,
+  because there is no guarantee that the files are there.
 - **Reference**: taken from one of three open-source projects by the same author. The fact
   agrees with our files, but we did not prove it independently. A reference finding names
   its source:
@@ -31,8 +32,8 @@ published, so every fact here is marked with where it came from:
 | [conventions.md](conventions.md) | Units and axes, and how the game converts them | `src/track/pod_import.rs`, `src/truck/pod_import.rs` |
 
 Real archives are copyrighted and are never committed. Put them in `tracks/`, which git
-ignores, and trucks in `trucks/`, likewise; tests that need them pass trivially when they
-are missing.
+ignores, and trucks in `trucks/`, likewise. No committed test needs them: measure them
+with a probe in the scratch directory (see AGENTS.md).
 
 Archives examined so far:
 
