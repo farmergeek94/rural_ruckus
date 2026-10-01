@@ -52,9 +52,9 @@ itself, and no slice puts its screens there.
 `src/lib.rs` only declares slices, and `src/main.rs` only configures the window and
 physics and lists one plugin per slice. Neither holds game logic. `tests/` has one
 integration test file per slice, named after it, and the modules that know nothing of the
-game have theirs beside them (`store.rs`, `camera_smoothness.rs`, `pod_real_tracks.rs`,
-`pod_real_trucks.rs`). A slice whose behaviour is physics (`truck`, `race`, `opponents`,
-`camera`) has none: see "Tests" in [CONTRIBUTING.md](CONTRIBUTING.md).
+game have theirs beside them (`store.rs`, `camera_smoothness.rs`). A slice whose
+behaviour is physics (`truck`, `race`, `opponents`, `camera`) has none: see "Tests" in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Everything is one crate. `pod`, `ui`, `store` and `camera/chase` were once crates of a
 workspace, which is why each keeps a hard edge: its submodules are private, its public

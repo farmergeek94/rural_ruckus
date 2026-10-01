@@ -48,8 +48,8 @@ the 12 user tracks name `cloudy2.raw` and `cloudy2.act`; the three whose line 1 
   one the reference below gives. Every native track's palette leaves slots 230 to 245
   black, and `METALCR2.ACT` leaves 240 to 255 black. **Reference** for the second (JSTrackViewer,
   `lvl-parser.js`, for MTM1's engine): the sky palette's colours 192 to 207 are copied
-  into slots 240 to 255. The parser scores the two for each sky (`src/pod/sky.rs`), and
-  `tests/base_game.rs` checks that every pixel of every sky falls in the slots chosen.
+  into slots 240 to 255. The parser scores the two for each sky (`src/pod/sky.rs`).
+  **Measured**: every pixel of every sky in the base game falls in the slots chosen.
 - **Which way up**: row 0 is the top of the sky and the last row is the horizon. The left
   and right edges meet; the top and bottom do not. **Measured**: `CLOUDY2` goes from
   darker blue at the top to a flat pale band at the bottom (its last 32 rows are all one
@@ -81,7 +81,7 @@ One water level covers all of the track. The course can go below it.
 ### How the scale was measured
 
 A track editor does not put the starting grid under water. It puts coral under water and
-a raft on it. `tests/pod_real_tracks.rs` examines this for each scale:
+a raft on it. **Measured** for each scale:
 
 | Value divided by | Result |
 | --- | --- |

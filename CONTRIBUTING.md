@@ -22,7 +22,6 @@ cargo run -- tracks/AlpineMtns.pod --no-backdrop   # without the distant hills r
 cargo run -- tracks/MyTrack.pod --base-game=/path/to/MTM2   # the base game's archives from this folder, for this run only
 cargo run -- tracks/AlpineMtns.pod --weather=storm  # clear, overcast, fog, rain, storm, snow or random (F7 changes it while racing)
 cargo test                         # all tests (headless, no window needed)
-cargo test --test base_game -- --ignored --nocapture   # what each track and truck borrows from the base game
 cargo test --test camera_smoothness -- --nocapture   # the camera's rules, printing every smoothness figure
 cargo test --test track            # one integration test file
 cargo test -- --ignored            # slow tests too, and ones that print figures
@@ -38,7 +37,7 @@ MTM2's files are copyrighted and are never committed. Git ignores these folders:
 | --- | --- |
 | `tracks/` | Track archives |
 | `trucks/` | Truck archives |
-| `base/` | The base game's archives, for the tests, and for the game until a folder is chosen in the front end. Its subfolders are searched too, so links to an MTM2 CD's `Shared` and `English` (or other language) folders will do: `ln -s "/media/.../Shared" base/Shared`. |
+| `base/` | The base game's archives, for the game until a folder is chosen in the front end. Its subfolders are searched too, so links to an MTM2 CD's `Shared` and `English` (or other language) folders will do: `ln -s "/media/.../Shared" base/Shared`. |
 
 The base game's archives are the ones that tracks and trucks borrow from. The game finds
 them in this order:
@@ -100,14 +99,11 @@ Add one when you add a test file.
   window or renderer. Mark a test that simulates more than a few seconds `#[ignore]`,
   with a reason.
 - `tests/` has one integration test file per slice, named after it. The modules that know
-  nothing of the game have theirs beside them (`store.rs`, `camera_smoothness.rs`,
-  `pod_real_tracks.rs`, `pod_real_trucks.rs`). A slice whose behaviour is physics
-  (`truck`, `race`, `opponents`, `camera`) has none.
-- **Real-file tests** (`tests/pod_real_tracks.rs`, `tests/pod_real_trucks.rs`,
-  `tests/pod_track.rs`, `tests/pod_truck.rs`, `tests/base_game.rs`) read `tracks/`,
-  `trucks/` and `base/`, and pass trivially when those folders are empty. All but
-  `base_game.rs` load without the base game, as their figures were measured that way. `tests/pod_track.rs` can paint a map of the
-  ground.
+  nothing of the game have theirs beside them (`store.rs`, `camera_smoothness.rs`). A
+  slice whose behaviour is physics (`truck`, `race`, `opponents`, `camera`) has none.
+- **No committed test reads `tracks/`, `trucks/` or `base/`.** There is no guarantee that
+  they hold any files. Measure real files with a probe in the scratch directory, record
+  the result in `docs/formats/`, and delete the probe (see AGENTS.md).
 - A race's entities are counted by `tests/game_state.rs`. Bevy keeps resources as
   entities too: count `Without<IsResource>`.
 

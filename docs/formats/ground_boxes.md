@@ -60,8 +60,7 @@ along X and Z and a flat top and bottom. **Measured**:
   to the ground on the course's line. So a track can have both, and the game must not
   make one rule for all boxes.
 
-`tests/pod_real_tracks.rs` asserts the deck and the score, and `tests/pod_track.rs` that
-the game's collider holds a truck on the deck.
+**Measured**: the game's collider holds a truck on the deck.
 
 ## Faces
 

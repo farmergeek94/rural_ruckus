@@ -34,10 +34,9 @@ above at once:
 | Chessboard, even cells split from (column, row) | Right for 116 of the 116 placements where the diagonals differ |
 
 With all of it right, 33 guard rails sit 3.0 ft up to within 0.1 ft, 130 trees of one kind
-11.0 ft up to within 0.6 ft. `tests/pod_real_tracks.rs` asserts the guard rails,
-among others, and `tests/pod_track.rs` asserts that the game's converted ground equals
-`Heightmap::ground_feet` at every object, which also proves the Z flip keeps the
-chessboard the right way round.
+11.0 ft up to within 0.6 ft. The game's converted ground equals `Heightmap::ground_feet`
+at every object, which also shows that the Z flip keeps the chessboard the right way
+round.
 
 This shows where the editor that made the track believed the ground to be. That the game
 itself agrees is an assumption, but a safe one: a track whose scenery floated or sank on
@@ -70,7 +69,7 @@ and how that was established.
 whose southern straight along z = 3809 ft (from the course segments in the .SIT). Roads
 are two cells wide. Road textures appear in columns 119 and 120, either side of
 3840 / 32 = 120.0, and in rows 118 and 119, either side of 3809 / 32 = 119.03. Transposed,
-the columns would have been 118 and 119. `tests/pod_real_tracks.rs` asserts this.
+the columns would have been 118 and 119.
 
 ## Open
 

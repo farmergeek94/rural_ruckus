@@ -5,7 +5,7 @@
 //! says what it is: a vertex list, then texture names and the faces that use them, up to
 //! an end marker. The Order and Jump records are stepped over by their length, and the
 //! records after them read in turn: in the one model that has them, that reads every face
-//! once (`tests/pod_real_tracks.rs`).
+//! once (see `docs/formats/model.md`).
 //!
 //! An animation control file names the models that are its keyframes: see
 //! `KeyframeAnimation`.
