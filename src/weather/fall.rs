@@ -13,7 +13,7 @@
 //! A raindrop is a thin streak along the way it falls, as long as the way it goes in
 //! `EXPOSURE`, turned about its length to face the camera. A snowflake is a soft round
 //! square turned to the camera, which sways as it falls. What is under the ground is hidden
-//! by the ground. Near the camera, both look smaller the nearer they come, so that none go
+//! by the ground, and no drop is drawn under a bridge or a roof (`cover`). Near the camera, both look smaller the nearer they come, so that none go
 //! past as big blobs. The mesh's entity is kept at the camera, so that it is sorted with
 //! what is nearest.
 //!
@@ -32,17 +32,19 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat,
 };
+use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 
 use super::WeatherSettings;
 use super::conditions::{Fall, FallKind};
+use super::cover::{COVER_CELL, COVER_CELLS, Cover};
 use crate::camera::ChaseCamera;
 use crate::game_state::GameState;
 use crate::particles::ParticleLight;
 
 /// The size of the box of rain round the camera, in metres: across, up and along. Fog
 /// hides what is further off, and a bigger box spreads the same drops thinner.
-const FALL_BOX: Vec3 = Vec3::new(40.0, 24.0, 40.0);
+pub(super) const FALL_BOX: Vec3 = Vec3::new(40.0, 24.0, 40.0);
 /// How far above the camera the middle of the box is, in metres: more falls from above
 /// than can be seen below the camera.
 const BOX_RAISED: f32 = 4.0;
@@ -83,6 +85,9 @@ pub(super) type FallMaterial = ExtendedMaterial<StandardMaterial, FallMotion>;
 pub(super) struct FallMotion {
     #[uniform(100)]
     fall: FallUniform,
+    /// What keeps the drops off, round the camera (`cover`).
+    #[storage(101, read_only)]
+    cover: Handle<ShaderBuffer>,
 }
 
 impl MaterialExtension for FallMotion {
@@ -105,6 +110,8 @@ struct FallUniform {
     flake_size: Vec2,
     sway: f32,
     sway_rate: f32,
+    cover_cells: u32,
+    cover_cell: f32,
 }
 
 impl FallUniform {
@@ -122,6 +129,8 @@ impl FallUniform {
             flake_size: Vec2::from(FLAKE_SIZE),
             sway: SWAY,
             sway_rate: SWAY_RATE,
+            cover_cells: COVER_CELLS as u32,
+            cover_cell: COVER_CELL,
         }
     }
 }
@@ -157,16 +166,18 @@ pub(super) fn start_falling(
     looks: Res<FallLooks>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FallMaterial>>,
-    falling: Query<(Entity, &Falling)>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
+    falling: Query<(Entity, &Falling, &Cover)>,
 ) {
     let wanted = settings.weather.conditions().fall;
     let mut already = false;
-    for (entity, falling) in &falling {
+    for (entity, falling, cover) in &falling {
         if Some(falling.fall) == wanted {
             already = true;
         } else {
             meshes.remove(&falling.mesh);
             materials.remove(&falling.material);
+            buffers.remove(&cover.buffer());
             commands.entity(entity).despawn();
         }
     }
@@ -178,6 +189,7 @@ pub(super) fn start_falling(
         FallKind::Snow => (looks.flake.clone(), Vec3::ONE, SNOW_OPACITY),
     };
     let color = Color::srgba(color.x, color.y, color.z, opacity);
+    let cover = Cover::new(&mut buffers);
     let material = materials.add(FallMaterial {
         base: StandardMaterial {
             base_color: color,
@@ -191,6 +203,7 @@ pub(super) fn start_falling(
         },
         extension: FallMotion {
             fall: FallUniform::new(fall),
+            cover: cover.buffer(),
         },
     });
     let mesh = meshes.add(squares(fall.count, &mut Random::default()));
@@ -201,6 +214,7 @@ pub(super) fn start_falling(
             mesh: mesh.clone(),
             material: material.clone(),
         },
+        cover,
         Mesh3d(mesh),
         MeshMaterial3d(material),
         Transform::default(),
@@ -396,6 +410,8 @@ mod tests {
             "flake_size",
             "sway",
             "sway_rate",
+            "cover_cells",
+            "cover_cell",
         ];
         let struct_start = shader.find("struct Fall {").expect("struct Fall");
         let mut from = struct_start;
