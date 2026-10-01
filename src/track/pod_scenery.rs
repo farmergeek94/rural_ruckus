@@ -65,23 +65,34 @@ pub(super) fn scenery_from_pod(
     let mut objects = Vec::new();
 
     for situation_box in &track.situation.boxes {
-        let BoxShape::Model(name) = &situation_box.shape else {
-            continue;
+        let (number, visible) = match &situation_box.shape {
+            BoxShape::Model(name) => {
+                let name = name.to_ascii_uppercase();
+                let Some(model) = track.models.get(&name) else {
+                    continue;
+                };
+                let is_checkpoint = situation_box.kind == box_type::CHECKPOINT;
+                if is_checkpoint && name.starts_with(INVISIBLE_MODEL_PREFIX) {
+                    continue;
+                }
+                let number = *model_numbers.entry(name.clone()).or_insert_with(|| {
+                    let animated = track.animated_models.get(&name);
+                    models.push(convert_model(&name, model, animated, &mut tiles));
+                    models.len() - 1
+                });
+                (number, true)
+            }
+            BoxShape::Dimensions(size) if situation_box.kind == box_type::RAMP => {
+                let [length, width, height] = size;
+                let name = format!("RAMP {length} x {width} x {height} FT");
+                let number = *model_numbers.entry(name.clone()).or_insert_with(|| {
+                    models.push(wedge(name, *size));
+                    models.len() - 1
+                });
+                (number, false)
+            }
+            BoxShape::Dimensions(_) => continue,
         };
-        let name = name.to_ascii_uppercase();
-        let Some(model) = track.models.get(&name) else {
-            continue;
-        };
-        let is_checkpoint = situation_box.kind == box_type::CHECKPOINT;
-        if is_checkpoint && name.starts_with(INVISIBLE_MODEL_PREFIX) {
-            continue;
-        }
-
-        let number = *model_numbers.entry(name.clone()).or_insert_with(|| {
-            let animated = track.animated_models.get(&name);
-            models.push(convert_model(&name, model, animated, &mut tiles));
-            models.len() - 1
-        });
         let [x, height, z] = situation_box.position;
         let solid = !NOT_SOLID.contains(&situation_box.kind);
         objects.push(SceneryObject {
@@ -92,6 +103,7 @@ pub(super) fn scenery_from_pod(
             solid,
             motion: motion(situation_box, solid),
             faces_camera: situation_box.kind == FACES_CAMERA,
+            visible,
         });
     }
 
@@ -233,6 +245,57 @@ fn convert_model(
 }
 
 /// A position in a model's own axes, in feet, in the game's axes and metres.
+/// A ramp that the track gives by its size alone (`length,width,height`, in feet): a wedge,
+/// which is never drawn. **Measured** (`docs/formats/situation.md`, "Ramps"): the sizes are
+/// whole sizes, `ipos` is at the middle of its foot's level, the length lies along the
+/// heading (the model's Z), and the slope rises towards the heading.
+fn wedge(name: String, [length, width, height]: [f32; 3]) -> SceneryModel {
+    let (x, z) = (width / 2.0, length / 2.0);
+    // In MTM2's axes, in feet: the foot's two corners, the back's two bottom corners, and
+    // the lip's two corners above them.
+    let corners = [
+        [-x, 0.0, -z],
+        [x, 0.0, -z],
+        [-x, 0.0, z],
+        [x, 0.0, z],
+        [-x, height, z],
+        [x, height, z],
+    ]
+    .map(to_game);
+    // Bottom, slope, back and the two sides.
+    let faces: [&[u32]; 5] = [
+        &[0, 1, 3, 2],
+        &[0, 1, 5, 4],
+        &[2, 3, 5, 4],
+        &[0, 2, 4],
+        &[1, 3, 5],
+    ];
+    // A wedge is convex, so a triangle faces out when it faces away from the middle.
+    let middle = corners.iter().sum::<Vec3>() / corners.len() as f32;
+    let mut model = SceneryModel { name, ..default() };
+    for face in faces {
+        for pair in face[1..].windows(2) {
+            let [a, b, c] = [face[0], pair[0], pair[1]].map(|corner| corners[corner as usize]);
+            let normal = (b - a).cross(c - a).normalize_or_zero();
+            let (triangle, normal) = if normal.dot(a + b + c - 3.0 * middle) > 0.0 {
+                ([a, b, c], normal)
+            } else {
+                ([a, c, b], -normal)
+            };
+            for corner in triangle {
+                model.indices.push(model.positions.len() as u32);
+                model.positions.push(corner.to_array());
+                model.normals.push(normal.to_array());
+            }
+        }
+    }
+    // Never drawn, so it needs no texture of its own.
+    let count = model.positions.len();
+    model.uvs = vec![[0.0; 2]; count];
+    model.tiles = vec![0; count];
+    model
+}
+
 fn to_game([x, up, z]: [f32; 3]) -> Vec3 {
     Vec3::new(x, up, -z) * METRES_PER_FOOT
 }
@@ -546,6 +609,40 @@ mod tests {
         let lone = model(vec![square([0, 1, 2, 3])]);
         let face = &lone.faces[0];
         assert!(!written_faces(&lone).contains(&corners_of(&lone, face.corners.iter().rev())));
+    }
+
+    /// Sidewinder Canyon's skeleton ramp, 38 ft long, 18 wide and 10 high.
+    #[test]
+    fn a_ramp_given_by_its_size_is_a_wedge_rising_along_the_heading() {
+        let ramp = wedge("RAMP".into(), [38.0, 18.0, 10.0]);
+        let corners: Vec<Vec3> = ramp.positions.iter().copied().map(Vec3::from).collect();
+        let along = |corner: &Vec3| corner.z / -METRES_PER_FOOT; // MTM2's Z, in feet
+        let lowest = corners.iter().map(|c| c.y).fold(f32::MAX, f32::min);
+        let highest = corners.iter().map(|c| c.y).fold(f32::MIN, f32::max);
+        assert_eq!(lowest, 0.0);
+        assert!((highest - 10.0 * METRES_PER_FOOT).abs() < 1e-5);
+        for corner in &corners {
+            assert!((along(corner).abs() - 19.0).abs() < 1e-3, "{corner}");
+            assert!(
+                (corner.x.abs() / METRES_PER_FOOT - 9.0).abs() < 1e-3,
+                "{corner}"
+            );
+            // The top is at the far end along the heading, and nowhere else.
+            if corner.y > 0.0 {
+                assert!(along(corner) > 0.0, "{corner}");
+            }
+        }
+
+        // Five faces in eight triangles, each wound counter-clockwise seen from outside.
+        assert_eq!(ramp.indices.len(), 8 * 3);
+        let middle = corners.iter().sum::<Vec3>() / corners.len() as f32;
+        for triangle in ramp.indices.chunks(3) {
+            let [a, b, c] = [0, 1, 2].map(|i| corners[triangle[i] as usize]);
+            let normal = (b - a).cross(c - a);
+            assert!(normal.dot((a + b + c) / 3.0 - middle) > 0.0, "{a} {b} {c}");
+            let given = Vec3::from(ramp.normals[triangle[0] as usize]);
+            assert!(given.dot(normal.normalize()) > 0.999);
+        }
     }
 
     #[test]
