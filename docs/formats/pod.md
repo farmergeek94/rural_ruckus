@@ -67,7 +67,7 @@ models, palettes, tires and axles. MTM2 finds them in its own archives.
   that the texture came from. `AlpineMtns.pod` carries `ROTOR1.RAW` without a
   `ROTOR1.ACT`, and `STARTUP.POD` has a `ROTOR1.ACT`. That palette was measured to go with
   a texture beside it, not with one in another archive.
-- What the tracks and trucks examined borrow: `tests/base_game.rs` prints it. MyTrack
+- What the tracks and trucks examined borrow (**measured**): MyTrack
   gets all of its 241 ground textures, 4 models and its backdrop from 4 base archives.
   Monte Carlo gets 34 ground textures, 3 models and their 3 textures from 6. `MPNW.pod`
   gets its tires, its axle and 6 textures from `TRUCK2.POD` and `SOUND.POD`. 10 of the 12

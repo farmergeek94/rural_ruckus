@@ -4,7 +4,8 @@
 // rain (its position, as a share of the box across, up and along), which of the four
 // corners it is (`uv`), and a number of its own (`uv_b.x`) that sets its speed, size and
 // sway. From those, the time and the camera, this works out where the corner is, as
-// `fall.rs` explains. What is under the ground is hidden by the ground, as anything is.
+// `fall.rs` explains. What is under the ground is hidden by the ground, as anything is,
+// and a drop under the cover round the camera (`cover.rs`) is not drawn.
 //
 // The rest is the standard material's: the picture, the colour, and the fog.
 
@@ -37,9 +38,24 @@ struct Fall {
     flake_size: vec2<f32>,
     sway: f32,
     sway_rate: f32,
+    // The cover's ring: how many squares along each side, and their side, in metres.
+    cover_cells: u32,
+    cover_cell: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> fall: Fall;
+// For each place of the ring: the height of the cover, in metres, the world square that it
+// holds (X, Z), and 1 if it is found, 0 if not.
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> cover: array<vec4<f32>>;
+
+// Whether a drop at `at` is under cover: below the highest solid above its square.
+fn under_cover(at: vec3<f32>) -> bool {
+    let square = floor(at.xz / fall.cover_cell);
+    let ring = f32(fall.cover_cells);
+    let place = square - ring * floor(square / ring);
+    let held = cover[u32(place.y) * fall.cover_cells + u32(place.x)];
+    return held.w > 0.5 && all(held.yz == square) && at.y < held.x;
+}
 
 @vertex
 fn vertex(mesh_vertex: Vertex) -> VertexOutput {
@@ -82,6 +98,10 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
 
     out.world_position = vec4(world_position, 1.0);
     out.position = position_world_to_clip(world_position);
+    if under_cover(eye + from_eye) {
+        // Outside the view, all four corners at one point: nothing is drawn.
+        out.position = vec4(2.0, 2.0, 0.5, 1.0);
+    }
     out.world_normal = vec3(0.0, 1.0, 0.0);
 #ifdef VERTEX_UVS_A
     out.uv = mesh_vertex.uv;

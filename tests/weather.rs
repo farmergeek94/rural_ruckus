@@ -5,10 +5,10 @@
 //! How the weather looks, and how a wet truck drives, is checked by driving (see AGENTS.md).
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
+use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, builtin_track};
 use monster_truck_rural_ruckus::truck::{
-    ComputerTrucks, TireContacts, TruckConfig, TruckData, TruckLamps, TruckPlugin,
+    ComputerTrucks, TruckConfig, TruckData, TruckLamps, TruckPlugin,
 };
 use monster_truck_rural_ruckus::weather::{TimeOfDay, Weather, WeatherPlugin, WeatherSettings};
 
@@ -28,12 +28,16 @@ fn headless_app_with(settings: WeatherSettings) -> App {
             MinimalPlugins,
             TransformPlugin,
             AssetPlugin::default(),
-            RapierPhysicsPlugin::<TireContacts>::default().in_fixed_schedule(),
+            GamePhysicsPlugin,
         ))
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
         .init_resource::<ButtonInput<KeyCode>>()
         .add_plugins((TrackPlugin, TruckPlugin, WeatherPlugin));
+    // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
+    // calls (see `physics`).
+    app.finish();
+    app.cleanup();
     for _ in 0..3 {
         app.update();
     }

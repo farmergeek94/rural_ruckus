@@ -5,7 +5,7 @@
 //!
 //! This is the game's side of the camera, and the only part of it that knows the slices.
 //! `chase` (with `rig` and `spring`) is the camera by itself: fastened to nothing, it
-//! follows whatever it is told about smoothly and knows nothing of trucks, tracks, Rapier
+//! follows whatever it is told about smoothly and knows nothing of trucks, tracks, the physics
 //! or `GameState`. Here it is told about the truck each frame, where the truck is drawn
 //! and how fast its body is going, and about the ground under where the eye wants to be,
 //! which it then keeps clear of.
@@ -18,11 +18,11 @@ mod rig;
 mod spring;
 mod views;
 
+use avian3d::prelude::LinearVelocity;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 use crate::track::Track;
@@ -228,7 +228,7 @@ fn apply_settings(
 /// The player's truck: where it is drawn, which moves smoothly from frame to frame, and
 /// how fast its body is really going, which a difference of drawn positions wouldn't say.
 fn follow_truck(
-    player: Single<(Entity, &Velocity), Player>,
+    player: Single<(Entity, &LinearVelocity), Player>,
     visuals: Query<(&TruckVisual, &Transform)>,
     mut camera: Single<&mut ChaseCamera>,
 ) {
@@ -237,7 +237,7 @@ fn follow_truck(
     let Some((_, transform)) = visuals.iter().find(|(visual, _)| visual.truck == player) else {
         return;
     };
-    let velocity = velocity.linear;
+    let velocity = velocity.0;
     camera.target = Some(Target {
         position: transform.translation,
         velocity,

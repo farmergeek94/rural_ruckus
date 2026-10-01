@@ -28,12 +28,12 @@
 //! that cannot draw. The values are the game's own: Monster Truck
 //! Madness 2's dirt has not been measured.
 
+use avian3d::prelude::{AngularVelocity, LinearVelocity};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::entity::EntityHashMap;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 use crate::particles::{self, Air, Motion, Particle, Particles};
@@ -270,7 +270,12 @@ fn throw_dirt(
     settings: Res<DirtSettings>,
     weather: Option<Res<WeatherSettings>>,
     trucks: Query<(Entity, &Transform, &TruckVisual)>,
-    bodies: Query<(&Velocity, &TruckConfig, Option<&TruckInput>)>,
+    bodies: Query<(
+        &LinearVelocity,
+        &AngularVelocity,
+        &TruckConfig,
+        Option<&TruckInput>,
+    )>,
     mut clods: Query<&mut Particles, (With<Clods>, Without<Dust>)>,
     mut dust: Query<&mut Particles, (With<Dust>, Without<Clods>)>,
     mut owed: Local<EntityHashMap<Owed>>,
@@ -291,7 +296,7 @@ fn throw_dirt(
     owed.retain(|visual, _| trucks.contains(*visual));
 
     for (visual, transform, truck) in &trucks {
-        let Ok((velocity, config, input)) = bodies.get(truck.truck) else {
+        let Ok((linear, angular, config, input)) = bodies.get(truck.truck) else {
             continue;
         };
         let throttle = input.map_or(0.0, |input| input.throttle);
@@ -309,7 +314,7 @@ fn throw_dirt(
                 owed.0[index] = 0.0;
                 continue;
             }
-            let moving = velocity.linear + velocity.angular.cross(hub - transform.translation);
+            let moving = linear.0 + angular.0.cross(hub - transform.translation);
             let speed = moving.xz().length();
             let slide = moving.dot(right).abs();
             owed.0[index] += clod_rate(speed, slide, throttle) * dt;

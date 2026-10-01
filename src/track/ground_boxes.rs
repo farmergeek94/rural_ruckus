@@ -7,10 +7,10 @@
 
 use std::collections::HashMap;
 
+use avian3d::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::{GroundBox, GroundCell};
 
@@ -23,16 +23,17 @@ const CHUNK_METRES: f32 = 160.0;
 
 /// One collider for all of a track's ground boxes. `None` for a track with none.
 pub(super) fn build_collider(boxes: &[GroundBox]) -> Option<Collider> {
-    let blocks: Vec<(Vec3, Rot, Collider)> = merged(boxes)
+    let blocks: Vec<(Vec3, Quat, Collider)> = merged(boxes)
         .into_iter()
         .map(|block| {
             let middle = (block.min + block.max) / 2.0;
-            let half = (block.max - block.min) / 2.0;
-            let half_height = (block.top - block.bottom) / 2.0;
+            let size = block.max - block.min;
+            let height = block.top - block.bottom;
             (
-                Vec3::new(middle.x, block.bottom + half_height, middle.y),
+                Vec3::new(middle.x, block.bottom + height / 2.0, middle.y),
                 Quat::IDENTITY,
-                Collider::cuboid(half.x, half_height, half.y),
+                // Avian's cuboid takes whole lengths, not half ones.
+                Collider::cuboid(size.x, height, size.y),
             )
         })
         .collect();

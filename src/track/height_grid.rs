@@ -1,6 +1,6 @@
 //! The shape of the ground: a square grid of heights, centred on the world origin.
 //!
-//! The render mesh, the Rapier heightfield and `height_at` all split each cell into
+//! The render mesh, the physics heightfield and `height_at` all split each cell into
 //! the same two triangles, so they agree between vertices as well as on them. Which two
 //! is up to the grid's `Diagonals`.
 

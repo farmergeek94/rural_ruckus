@@ -34,7 +34,6 @@ mod wind;
 use bevy::asset::embedded_asset;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::game_state::GameState;
 use crate::track::TrackSystems;
@@ -52,6 +51,7 @@ impl Plugin for WaterPlugin {
             )
             .add_systems(
                 FixedUpdate,
+                // Before the physics step, which is in `FixedPostUpdate`.
                 (
                     ice::freeze_or_thaw
                         .before(TruckSystems::Drive)
@@ -59,8 +59,7 @@ impl Plugin for WaterPlugin {
                     forces::push_trucks
                         .after(TruckSystems::Drive)
                         .run_if(not(ice::frozen)),
-                )
-                    .before(PhysicsSet::SyncBackend),
+                ),
             );
 
         // Only an app that draws things can use a material. A headless one has neither

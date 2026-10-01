@@ -3,14 +3,20 @@
 //!
 //! A loose object is a body with its track's mass. It is put to sleep, so that it stands
 //! where it was put, whatever the ground under it does, until something wakes it by
-//! touching it. Not at once: bevy_rapier wakes a body as it first applies its
-//! `ExternalImpulse`, a step or two after the body is made, so it is put to sleep after
-//! that (`settle`). For the same reason it carries no `Velocity`, which bevy_rapier would
-//! see changed as the body comes to rest, and would wake it again with. Its collider is the hull round its model, since it must meet fixed scenery
-//! as well as the ground and the trucks, and Rapier finds no contacts between two triangle
-//! meshes. It can be moved fast by a heavy truck, so it is swept (CCD) to keep it from
-//! going through the ground in one step. It carries an `ExternalImpulse`, which a tire that
-//! stands on it pushes it back through (see `truck/drive.rs`).
+//! touching it. Not at once: the physics puts a body in with the others it touches (its
+//! island) in its first step, and one made asleep is never put in; two such that touch
+//! each other stop the game (measured: two of a track's rocks, in Avian 0.7). So it is put
+//! to sleep a few steps after it is made (`settle`), and until then it is held where it was
+//! put: it neither turns nor moves. Its collider is the hull round its model, since it must
+//! meet fixed scenery as well as the ground and the trucks, and no contacts are found
+//! between two triangle meshes. A tire that stands on it pushes it back (see
+//! `truck/drive.rs`).
+//!
+//! Every loose object that is awake costs its contacts in every step, so one must never be
+//! left awake by mistake. It is not swept (CCD) either: the physics already makes a contact
+//! with whatever a body will reach in the coming step, which keeps one knocked fast from
+//! going through the ground, and a sweep on every awake object each step cost 4 to 5 ms a
+//! step on Scrapyard Run, unoptimised.
 //!
 //! A moving object is kinematic: nothing pushes it, and what is in its way is pushed. It
 //! keeps its height, because every one found goes along a level line of ground and bridges
@@ -18,8 +24,8 @@
 //! one side of the map it comes back on the other, as the map's own edges do. Whether MTM2
 //! does that too is open.
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::{SceneryObject, bouncy};
 use crate::game_state::GameState;
@@ -39,10 +45,18 @@ pub(super) struct Moving;
 pub(super) struct Loose;
 
 /// How many physics steps a loose object is left before it is put to sleep: past the
-/// steps in which bevy_rapier makes the body and applies its first impulse.
+/// first, in which the physics puts it in with what it touches.
 const SETTLE_STEPS: u8 = 3;
 
-/// A loose object that is still to be put to sleep, in so many more physics steps.
+/// A loose object that is still to be put to sleep, in so many more physics steps. It is
+/// held where it was put until then (`LockedAxes`). Left free, it moved in those steps, and
+/// slept where it had got to. Some fell over: on The Graveyard (JUNK.POD) the fences and
+/// the gates are panels 1 cm thick and 5.5 to 7.3 m high, standing on edge on uneven
+/// ground, and after 30 free steps two gates lay at 80° and fences leaned at up to 47°.
+/// Some did not meet: after 3 free steps the tires stacked on Scrapyard Run had yet to
+/// meet each other, woke as they did, and rocked on their stacks for the whole race, which
+/// ran at 3 frames a second. Held, every loose object on every base and community track
+/// sleeps upright, where it was put.
 #[derive(Component)]
 pub(super) struct Settling(u8);
 
@@ -60,14 +74,13 @@ pub(super) fn loose(
             DespawnOnExit(GameState::Racing),
             transform,
             RigidBody::Dynamic,
+            // The density that gives the hull the track's mass, so that it turns as a
+            // solid of that shape and mass would.
+            ColliderDensity(mass / hull.mass(1.0).max(f32::EPSILON)),
             hull,
-            ColliderMassProperties::Mass(mass),
             bouncy(),
-            Sleeping::default(),
             Settling(SETTLE_STEPS),
-            Ccd::enabled(),
-            ReadMassProperties::default(),
-            ExternalImpulse::default(),
+            LockedAxes::ALL_LOCKED,
         ))
         .id()
 }
@@ -85,24 +98,24 @@ pub(super) fn moving(
             Moving,
             DespawnOnExit(GameState::Racing),
             transform,
-            RigidBody::KinematicVelocityBased,
+            RigidBody::Kinematic,
             collider,
             bouncy(),
-            Velocity::linear(velocity),
+            LinearVelocity(velocity),
         ))
         .id()
 }
 
-/// Puts loose objects to sleep once bevy_rapier has done waking them.
-pub(super) fn settle(
-    mut commands: Commands,
-    mut objects: Query<(Entity, &mut Settling, &mut Sleeping)>,
-) {
-    for (entity, mut settling, mut sleeping) in &mut objects {
+/// Puts loose objects to sleep once the physics has them in its islands, and lets them
+/// turn from then on: whatever wakes one can knock it over.
+pub(super) fn settle(mut commands: Commands, mut objects: Query<(Entity, &mut Settling)>) {
+    for (entity, mut settling) in &mut objects {
         settling.0 = settling.0.saturating_sub(1);
         if settling.0 == 0 {
-            sleeping.sleeping = true;
-            commands.entity(entity).remove::<Settling>();
+            commands.queue(SleepBody(entity));
+            commands
+                .entity(entity)
+                .remove::<(Settling, LockedAxes)>();
         }
     }
 }

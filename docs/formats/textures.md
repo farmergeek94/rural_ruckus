@@ -30,7 +30,7 @@ texture, and nothing overrides it. Otherwise the track's palette does.
 
 **Measured** on backdrop textures, the 6 of them in 5 archives that have a palette of their
 own: through it, the mean difference between neighbouring pixels is 3 to 27; through the
-track's palette, 69 to 177, which is coloured noise (`tests/pod_real_tracks.rs`).
+track's palette, 69 to 177, which is coloured noise.
 
 **Measured** on ground and scenery textures too. Lands Between, Route 77, Rute 756 jam,
 tground and The Tight Corners give every ground texture a palette of its own. Through it,
@@ -117,9 +117,8 @@ bits (2) and order of mirroring and turning (2) were scored on the 14784 cell ed
 
 For scale, neighbouring rows of pixels inside a single tile differ by 18, and many of the
 scored edges are between tiles that were never meant to match, such as road against
-grass. `tests/pod_real_tracks.rs` holds the winner against its rivals, and
-`tests/pod_track.rs` can paint a map of the converted ground to look at, on which roads
-and their curved edges run unbroken.
+grass. On a painted map of the converted ground, roads and their curved edges run
+unbroken.
 
 Only 117 of the 65536 cells are mirrored, 62 of them also turned, so the order of
 mirroring and turning rests on the least evidence.

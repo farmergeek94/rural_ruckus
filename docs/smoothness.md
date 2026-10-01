@@ -125,9 +125,9 @@ the machine: measure headless where you can.
 Draw a separate entity placed
 between the last two physics poses (`TruckVisual` follows `Truck`), and order systems
 that follow it `.after(TruckSystems::PlaceVisuals)`. Do not move the body itself for
-looks (Rapier takes that for a teleport), and do not use bevy_rapier's
-`TransformInterpolation`: it needs a timestep mode that runs outside the fixed
-schedule our forces are computed in. Gameplay (race progress, tests) reads the body.
+looks (the physics takes that for a teleport), and do not add Avian's
+`TransformInterpolation` to a body: it moves the body's own `Transform` between steps,
+which gameplay (race progress, tests) reads. `TruckVisual` is what is interpolated.
 
 ## Measure performance; don't guess
 

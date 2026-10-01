@@ -37,14 +37,21 @@ fn assert_collider_matches(grid: &HeightGrid) {
                 grid.coord(col) + dx * grid.cell(),
                 grid.coord(row) + dz * grid.cell(),
             );
-            let hit = collider
-                .cast_local_ray_and_get_normal(Vec3::new(x, 100.0, z), Vec3::NEG_Y, 200.0, true)
+            let (distance, _) = collider
+                .cast_ray(
+                    Vec3::ZERO,
+                    Quat::IDENTITY,
+                    Vec3::new(x, 100.0, z),
+                    Vec3::NEG_Y,
+                    200.0,
+                    true,
+                )
                 .expect("ray should hit the terrain");
+            let hit = 100.0 - distance;
             let expected = grid.height_at(x, z);
             assert!(
-                (hit.point.y - expected).abs() < 1e-3,
-                "at ({x}, {z}): collider {} vs height_at {expected}",
-                hit.point.y
+                (hit - expected).abs() < 1e-3,
+                "at ({x}, {z}): collider {hit} vs height_at {expected}",
             );
         }
     }

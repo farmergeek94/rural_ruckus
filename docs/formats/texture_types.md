@@ -108,8 +108,8 @@ asphalt is often not in the list: Route 77's highway (`COTK023`, `COTK038`, `COT
 347,281 have a texture that is not in the list.
 
 All five textures with a type from 800 to 999 are ice. No texture that we looked at with
-another type is ice. `tests/pod_real_tracks.rs` checks this: it fails if a new track has a texture of
-these types that nobody looked at. The game takes 800 to 999 as ice
+another type is ice. Look again at any new track with a texture of these types. The game
+takes 800 to 999 as ice
 (`track/pod_import.rs`). Alpine has 1,408 cells of ice.
 
 ## What the game does with the types
@@ -147,7 +147,7 @@ Colour cannot tell Route 77's warm grey asphalt (red, green and blue about 85, 7
 from Lands Between's grey-green ground (about 76, 74 and 65) completely: at 12, a third
 of that ground throws dirt, and a tenth of that asphalt. Yellow lines on road are
 coloured, and throw dirt. With the rule, Baja Beach's ground is all loose, and the whole
-starting grids of Tight Corners and Route 77, on asphalt, are not (`tests/pod_track.rs`).
+starting grids of Tight Corners and Route 77, on asphalt, are not.
 
 ## Open
 

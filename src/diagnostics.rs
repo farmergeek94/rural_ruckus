@@ -8,12 +8,12 @@
 
 use std::time::{Duration, Instant};
 
+use avian3d::prelude::LinearVelocity;
 use bevy::diagnostic::{
     Diagnostic, DiagnosticPath, Diagnostics, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin,
     RegisterDiagnostic,
 };
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use crate::scenery::SceneryObject;
 use crate::track::Track;
@@ -222,7 +222,7 @@ const CRUISE_SPEED: f32 = 18.0;
 
 fn drive_the_course(
     track: Res<Track>,
-    truck: Single<(&Transform, &Velocity), Player>,
+    truck: Single<(&Transform, &LinearVelocity), Player>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
 ) {
     let Some(course) = &track.course else {
@@ -242,7 +242,7 @@ fn drive_the_course(
     for key in [KeyCode::ArrowUp, KeyCode::ArrowLeft, KeyCode::ArrowRight] {
         keys.release(key);
     }
-    if velocity.linear.length() < CRUISE_SPEED {
+    if velocity.0.length() < CRUISE_SPEED {
         keys.press(KeyCode::ArrowUp);
     }
     if turn > 0.04 {

@@ -1,7 +1,7 @@
 # Monster Truck Rural Ruckus
 
 A modern replacement for *Monster Truck Madness 2* (MTM2, Terminal Reality / Microsoft,
-1998), written in Rust on Bevy and Rapier. Trucks race laps around a track and must pass
+1998), written in Rust on Bevy and Avian. Trucks race laps around a track and must pass
 its checkpoints in order. The game loads MTM2's `.POD` archives directly: the original
 tracks and trucks, and community-made ones.
 

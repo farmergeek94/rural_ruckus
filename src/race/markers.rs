@@ -1,8 +1,8 @@
 //! What a checkpoint looks like: two solid poles with a banner between them. The
 //! banner of the gate to drive through next is lit up.
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 
 use super::Racer;
 use crate::game_state::GameState;
@@ -64,8 +64,8 @@ pub(super) fn spawn_gate_markers(
                 Mesh3d(meshes.add(Cylinder::new(POLE_RADIUS, height))),
                 MeshMaterial3d(pole_material.clone()),
                 Transform::from_translation(base.with_y(base.y + height / 2.0)),
-                RigidBody::Fixed,
-                Collider::cylinder(height / 2.0, POLE_RADIUS),
+                RigidBody::Static,
+                Collider::cylinder(POLE_RADIUS, height),
             ));
         }
 
