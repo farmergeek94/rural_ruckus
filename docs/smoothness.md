@@ -148,6 +148,19 @@ entity, like each scenery object, is already culled. Check with `--log-fps`, whi
 prints `meshes_in_view`: parked at Alpine's start, 104 of 583 meshes and 34 of 322
 scenery objects are drawn. What defeats culling is one big entity.
 
+Culling to the view is not enough on a track with thousands of objects: on Snake River
+Canyon (TDSNAKE.POD, 4567 meshes) 1400 to 1900 were in view, most of them hundreds of
+metres off and a few pixels big. `TrackSettings::scenery_distance` gives each drawn
+object a `VisibilityRange`. Measured on an i5-7200U with HD Graphics 620 at 1366 x 768,
+release build, no shadows, three opponents, `--log-fps --autopilot`: at 300 m, 290 to
+310 meshes in view, the main pass's vertices from 1.1 million to 155 thousand, the GPU's
+time from 15.2 to 10.6 ms, and the frame rate from 40 to 55 under vsync. On that machine
+the physics step (`avian/total_step_time` from Avian's `PhysicsTotalDiagnosticsPlugin`)
+averaged 1.1 to 1.5 ms on every track, about 3 ms of a 20 ms frame: the frame there is
+mostly the graphics processor's. A `trace_chrome` build puts the fixed-step schedules at
+most of the main thread, but its spans cost more than the many small systems they time,
+so believe Avian's own figure.
+
 ## Large static geometry goes in chunks
 
 Put each chunk in one mesh, so that Bevy's culling can

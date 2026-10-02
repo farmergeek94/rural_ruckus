@@ -87,6 +87,11 @@ pub struct TrackSettings {
     /// shallow angle, where a plain mipmap turns it to mush a few truck lengths ahead.
     /// Costs texture reads for every pixel of ground. May be changed while racing.
     pub anisotropy: u16,
+    /// How far from the camera scenery is drawn, in metres, or `f32::INFINITY` for all of
+    /// it. A track can have thousands of objects, and each one drawn costs the CPU and the
+    /// graphics processor every frame, however small it is on screen. Solid ones stay solid
+    /// beyond it. May be changed while racing.
+    pub scenery_distance: f32,
 }
 
 impl Default for TrackSettings {
@@ -95,6 +100,7 @@ impl Default for TrackSettings {
             smooth_terrain: false,
             mipmaps: true,
             anisotropy: 16,
+            scenery_distance: f32::INFINITY,
         }
     }
 }

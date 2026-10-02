@@ -464,6 +464,7 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
                 smooth_terrain: true,
                 mipmaps: false,
                 anisotropy: 4,
+                scenery_distance: f32::INFINITY,
             }
         );
         assert_eq!(*world.resource::<SpeedUnits>(), SpeedUnits::Mph);

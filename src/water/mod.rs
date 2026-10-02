@@ -70,10 +70,19 @@ impl Plugin for WaterPlugin {
             app.add_plugins(MaterialPlugin::<surface::WaterMaterial>::default())
                 .init_resource::<ripples::Ripples>()
                 .init_resource::<wind::Wind>()
-                .add_systems(Startup, splash::make_droplet_looks)
+                // On entering the first race, for one begun before `Startup` (see `dirt`).
                 .add_systems(
                     OnEnter(GameState::Racing),
-                    (shore::find_shore, splash::spawn_spray).after(TrackSystems::Prepare),
+                    (
+                        shore::find_shore,
+                        (
+                            splash::make_droplet_looks
+                                .run_if(not(resource_exists::<splash::DropletLooks>)),
+                            splash::spawn_spray,
+                        )
+                            .chain(),
+                    )
+                        .after(TrackSystems::Prepare),
                 )
                 .add_systems(
                     Update,
