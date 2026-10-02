@@ -76,6 +76,26 @@ const LOCK_GRIP: f32 = 4.0;
 /// For `holdable_lock`: what the tires' grip is measured against, in m/s².
 const GRAVITY: f32 = 9.81;
 
+/// How much of the fore-and-aft lean of what a tire touches its tread takes up, from 0 to 1.
+/// A monster truck's tire is big and soft and wraps around an edge it rolls into, so the
+/// edge pushes it up more than back. The suspension's load goes along what the tire
+/// touches (see `drive_truck`), and on the front of a step or a log that points mostly
+/// backwards: at 60 degrees from up, 87% of the load pushes the truck back, and past about
+/// 48 degrees full throttle at `grip` 1.1 cannot pull the tire up it. At 0 the tire is
+/// rigid and does exactly that. Higher climbs edges quicker and loses less speed to them;
+/// at 1 an edge pushes straight up and takes no speed at all. Sideways lean is left alone,
+/// so that a bank met side-on still pushes the truck off it. A first guess, not measured:
+/// it wants driving over steps and logs.
+const TIRE_WRAP: f32 = 0.6;
+
+/// What a tire's tread is pushed along when it touches something whose outward normal is
+/// `normal`, heading along `heading`, on a truck whose up is `up`: the normal with
+/// `TIRE_WRAP` of its lean along the heading taken out.
+fn wrapped(normal: Vec3, heading: Vec3, up: Vec3) -> Vec3 {
+    let along = heading.reject_from_normalized(up).normalize_or_zero();
+    (normal - along * normal.dot(along) * TIRE_WRAP).normalize_or(normal)
+}
+
 /// How much of a surface's push must be along the truck's up for the suspension to carry
 /// it, as the cosine of the angle between the two. 0.1 is 84° from up; below it the
 /// surface is nearly a wall, and at or under zero it is on the wrong side of the wheel
@@ -505,10 +525,10 @@ pub(super) fn drive_truck(
                     0.0
                 };
                 let load = (spring + bump_stop).max(0.0) * touch.on_the_tread;
-                let normal = touch.normal;
+                let heading = transform.rotation * steer_rotation * Vec3::NEG_Z;
+                let normal = wrapped(touch.normal, heading, up);
 
                 // Tire axes, flattened onto the ground plane.
-                let heading = transform.rotation * steer_rotation * Vec3::NEG_Z;
                 let forward = heading.reject_from_normalized(normal).normalize_or_zero();
                 let side = forward.cross(normal);
                 let forward_speed = hub_velocity.dot(forward);
