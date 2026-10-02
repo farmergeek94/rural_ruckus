@@ -136,7 +136,7 @@ which gameplay (race progress, tests) reads. `TruckVisual` is what is interpolat
 well as parked: the budget at 60 Hz is 16.7 ms and a frame that misses it is a visible
 stutter. Reference figures on the development machine (integrated GPU, debug build),
 parked at Alpine's start: about 9.5 ms, of which the sun's shadows are about 2 ms.
-The INTEGRATED GRAPHICS preset (`front_end::integrated_graphics`, `--integrated-graphics`)
+The Balanced level of Quality (`front_end::integrated_graphics`, `--integrated-graphics`)
 turns down what costs most on such a GPU; its values are chosen, not measured, so measure
 it the same way before changing them.
 

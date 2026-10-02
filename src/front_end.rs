@@ -21,10 +21,11 @@
 //! browser. `BaseGame` is opened again from the folders chosen, and the lists are made
 //! again from it.
 //!
-//! The options screen shows settings that belong to other slices: the window's
-//! (`display`), the graphics (`camera`, `environment`, `track`, `water`, `dirt`, `backdrop`), the
-//! `weather`, and a few more. Each line
-//! of `OPTIONS` says which value of which slice's settings resource it stands for. A change
+//! The options screen, and the ADVANCED screen beside it, show settings that belong to
+//! other slices: the window's (`display`), the graphics (`camera`, `environment`, `track`,
+//! `water`, `dirt`, `backdrop`), the `weather`, and a few more. The options screen's
+//! Quality line stands for the graphics that cost most, which are on the ADVANCED screen
+//! with the physics, and sets them all at once. Each line of `OPTIONS` says which value of which slice's settings resource it stands for. A change
 //! goes to that resource at once, and to the store, and what the store holds is set when
 //! the game starts. A setting changed elsewhere (by F2 in a race, or on the command line)
 //! is shown as it is, and is only written over when the player changes that line.
@@ -224,7 +225,6 @@ impl Plugin for FrontEndPlugin {
             .insert_resource(dials_for(&setup))
             .insert_resource(setup)
             .insert_resource(option_lines)
-            .insert_resource(ui::Presets(presets_for()))
             .insert_resource(Saves(store))
             .insert_resource(browser)
             .insert_resource(browsing)
@@ -478,6 +478,8 @@ fn base_folder_line(which: BaseFolder, chosen: &BaseGameChoice) -> Setting {
         detail,
         keys: Vec::new(),
         opens: true,
+        advanced: false,
+        levels: Vec::new(),
     }
 }
 
@@ -881,6 +883,11 @@ const RACE: &str = "RACE";
 const CAMERA: &str = "CAMERA";
 const GAME_KEYS: &str = "GAME";
 const FILES: &str = "FILES";
+/// These sections are on the ADVANCED screen, out of the way of the Quality line, which
+/// sets the graphics all at once.
+fn is_advanced(line: &OptionLine) -> bool {
+    matches!(line.section, GRAPHICS | PHYSICS)
+}
 /// Only these lines' values are keys: a GAME section of the options screen has none.
 fn binds_a_key(line: &OptionLine) -> bool {
     line.values == KEY_NAMES
@@ -971,6 +978,18 @@ const OPTIONS: &[OptionLine] = &[
         values: &["Off", "On", "Strict"],
         get: |options| place(&VSYNCS, &options.display.vsync),
         set: |options, value| options.display.vsync = VSYNCS[value],
+    },
+    OptionLine {
+        key: QUALITY,
+        section: DISPLAY,
+        label: "Quality",
+        detail: "Every graphics setting at once, from the fastest to the finest. Balanced suits graphics built into the processor. ADVANCED sets them one by one.",
+        // One for each of `QUALITY_LEVELS`, and Custom where the graphics match none.
+        values: &["Fastest", "Fast", "Balanced", "High", "Best", "Custom"],
+        get: quality_of,
+        // The ui module sets the lines a level names, as their own changes, and keeps this
+        // line at the level they match: it stands for them, and holds nothing itself.
+        set: |_, _| {},
     },
     OptionLine {
         key: "option.physics_rate",
@@ -1223,8 +1242,8 @@ const OPTIONS: &[OptionLine] = &[
 /// River Canyon (`--no-vsync`, no shadows, HD Graphics 620 at 1366 x 768) took the
 /// meshes drawn from about 1400 to 290 and the frame from 21 ms to the screen's 16.7.
 /// The rest are chosen, not measured: measure with the F2 panel and `--no-vsync` (see
-/// `docs/smoothness.md`) before changing them. The options screen offers it as INTEGRATED GRAPHICS, and
-/// `--integrated-graphics` starts a race with it.
+/// `docs/smoothness.md`) before changing them. It is the Balanced level of the options
+/// screen's Quality line, and `--integrated-graphics` starts a race with it.
 pub fn integrated_graphics(
     camera: &mut CameraSettings,
     environment: &mut EnvironmentSettings,
@@ -1238,27 +1257,99 @@ pub fn integrated_graphics(
     track.scenery_distance = 300.0;
 }
 
-/// The presets the options screen offers beside "restore defaults". Each names only the
-/// lines it changes from the defaults, and leaves the rest as the player had them.
-fn presets_for() -> Vec<ui::Preset> {
-    let defaults = Options::defaults();
-    let mut integrated = defaults.clone();
-    integrated_graphics(
-        &mut integrated.camera,
-        &mut integrated.environment,
-        &mut integrated.track,
-    );
-    let preset = |label: &str, options: &Options| ui::Preset {
-        label: label.into(),
-        values: OPTIONS
-            .iter()
-            .map(|line| {
-                let value = (line.get)(options);
-                (value != (line.get)(&defaults)).then_some(value)
-            })
-            .collect(),
-    };
-    vec![preset("INTEGRATED GRAPHICS", &integrated)]
+/// The options screen's Quality line, which stands for the graphics lines that cost most.
+const QUALITY: &str = "option.quality";
+
+/// The lines each level of Quality sets: those that cost time on every frame. The rest of
+/// the graphics (mipmaps, which save time, and the trucks' shine, which is a look) and the
+/// physics are left as the player has them.
+const QUALITY_LINES: [&str; 10] = [
+    "option.antialiasing",
+    "option.bloom",
+    "option.shadows",
+    "option.shadow_distance",
+    "option.anisotropy",
+    "option.scenery_distance",
+    "option.decorations",
+    "option.splashes",
+    "option.dirt",
+    "option.backdrop",
+];
+
+/// Quality's levels, fastest first, each as it changes the defaults. Balanced is
+/// `integrated_graphics`, and Best is the defaults.
+const QUALITY_LEVELS: [fn(&mut Options); 5] = [
+    // Fastest: everything that can go, goes.
+    |options| {
+        options.camera.antialiasing = Antialiasing::Off;
+        options.camera.bloom = false;
+        options.environment.shadow_cascades = 0;
+        options.environment.shadow_distance = 50.0;
+        options.track.anisotropy = 1;
+        options.track.scenery_distance = 150.0;
+        options.track.decorations = false;
+        options.water.splashes = false;
+        options.dirt.on = false;
+        options.backdrop.on = false;
+    },
+    // Fast: one shadow map near the truck, and the dirt and the hills back.
+    |options| {
+        options.camera.antialiasing = Antialiasing::Fxaa;
+        options.camera.bloom = false;
+        options.environment.shadow_cascades = 1;
+        options.environment.shadow_distance = 50.0;
+        options.track.anisotropy = 2;
+        options.track.scenery_distance = 150.0;
+        options.track.decorations = false;
+        options.water.splashes = false;
+    },
+    |options| {
+        integrated_graphics(
+            &mut options.camera,
+            &mut options.environment,
+            &mut options.track,
+        );
+    },
+    // High: the defaults, with the scenery drawn to 600 m and less filtering.
+    |options| {
+        options.track.anisotropy = 8;
+        options.track.scenery_distance = 600.0;
+    },
+    |_| {},
+];
+
+/// For each level of Quality, the value it sets each line of `OPTIONS` to, where it sets
+/// that line at all.
+fn quality_levels() -> Vec<Vec<Option<usize>>> {
+    QUALITY_LEVELS
+        .iter()
+        .map(|level| {
+            let mut options = Options::defaults();
+            level(&mut options);
+            OPTIONS
+                .iter()
+                .map(|line| {
+                    QUALITY_LINES
+                        .contains(&line.key)
+                        .then(|| (line.get)(&options))
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The first level of Quality whose lines all stand where `options` do, or Custom, past
+/// the levels, where none does: as the ui module works it out.
+fn quality_of(options: &Options) -> usize {
+    quality_levels()
+        .iter()
+        .position(|level| {
+            OPTIONS
+                .iter()
+                .zip(level)
+                .all(|(line, value)| value.is_none_or(|value| (line.get)(options) == value))
+        })
+        .unwrap_or(QUALITY_LEVELS.len())
 }
 
 /// The options screen's lines, standing where `options` do.
@@ -1280,6 +1371,12 @@ fn settings_for(options: &Options) -> Vec<Setting> {
             default: (line.get)(&defaults),
             detail: line.detail.into(),
             opens: false,
+            advanced: is_advanced(line),
+            levels: if line.key == QUALITY {
+                quality_levels()
+            } else {
+                Vec::new()
+            },
         })
         .collect()
 }
@@ -1919,28 +2016,43 @@ mod tests {
     }
 
     #[test]
-    fn integrated_graphics_names_only_the_lines_it_turns_down() {
-        let presets = presets_for();
-        let [preset] = presets.as_slice() else {
-            panic!("one preset, not {}", presets.len());
-        };
-        assert_eq!(preset.label, "INTEGRATED GRAPHICS");
-        let named: Vec<(&str, &str)> = OPTIONS
-            .iter()
-            .zip(&preset.values)
-            .filter_map(|(line, value)| Some((line.key, line.values[(*value)?])))
-            .collect();
-        assert_eq!(
-            named,
-            [
-                ("option.antialiasing", "FXAA"),
-                ("option.bloom", "Off"),
-                ("option.shadows", "Medium"),
-                ("option.shadow_distance", "100 m"),
-                ("option.anisotropy", "4x"),
-                ("option.scenery_distance", "300 m"),
-            ]
+    fn quality_has_a_value_for_each_level_and_custom_past_them() {
+        let line = OPTIONS.iter().find(|line| line.key == QUALITY).unwrap();
+        assert_eq!(line.values.len(), QUALITY_LEVELS.len() + 1);
+        assert_eq!(line.values[QUALITY_LEVELS.len()], "Custom");
+        assert!(!is_advanced(line));
+        // Every line it sets is a graphics line, on the advanced screen, and each is there.
+        for key in QUALITY_LINES {
+            let line = OPTIONS.iter().find(|line| line.key == key).unwrap();
+            assert_eq!(line.section, GRAPHICS, "{key}");
+        }
+    }
+
+    #[test]
+    fn the_defaults_are_the_best_quality_and_integrated_graphics_balanced() {
+        let defaults = Options::defaults();
+        assert_eq!(QUALITY_LEVELS.len() - 1, quality_of(&defaults));
+        let mut integrated = defaults.clone();
+        integrated_graphics(
+            &mut integrated.camera,
+            &mut integrated.environment,
+            &mut integrated.track,
         );
+        assert_eq!(quality_of(&integrated), 2);
+        // A line changed by hand is no level.
+        integrated.dirt.on = false;
+        assert_eq!(quality_of(&integrated), QUALITY_LEVELS.len());
+    }
+
+    #[test]
+    fn each_level_of_quality_is_its_own() {
+        let levels = quality_levels();
+        for (index, level) in levels.iter().enumerate() {
+            let mut options = Options::defaults();
+            QUALITY_LEVELS[index](&mut options);
+            assert_eq!(quality_of(&options), index);
+            assert!(levels[..index].iter().all(|earlier| earlier != level));
+        }
     }
 
     #[test]

@@ -16,16 +16,19 @@ pub enum Screen {
     Options,
     /// The key bindings: the settings that wait for a key.
     Controls,
+    /// The settings that `Setting::advanced` puts out of the way of the options screen.
+    Advanced,
 }
 
 impl Screen {
     /// In the order of their tabs.
-    pub const ALL: [Screen; 5] = [
+    pub const ALL: [Screen; 6] = [
         Screen::Truck,
         Screen::Race,
         Screen::Garage,
         Screen::Options,
         Screen::Controls,
+        Screen::Advanced,
     ];
     /// The screens that lead to GO, in order, which `Accept` walks. The options are aside
     /// from them.
@@ -38,13 +41,20 @@ impl Screen {
             Screen::Garage => "GARAGE",
             Screen::Options => "OPTIONS",
             Screen::Controls => "CONTROLS",
+            Screen::Advanced => "ADVANCED",
         }
     }
 
     /// Whether the settings are on this screen: the key bindings on the controls screen,
-    /// and the rest on the options screen.
+    /// the advanced ones on the advanced screen, and the rest on the options screen.
     pub fn shows_settings(self) -> bool {
-        matches!(self, Screen::Options | Screen::Controls)
+        matches!(self, Screen::Options | Screen::Controls | Screen::Advanced)
+    }
+
+    /// Whether Less and More step through the values of the setting in hand here, rather
+    /// than waiting for a key.
+    fn steps_settings(self) -> bool {
+        matches!(self, Screen::Options | Screen::Advanced)
     }
 }
 
@@ -240,7 +250,7 @@ pub struct DialSteps {
 
 /// A setting as the model sees it: how many values it has, which one is chosen, and which
 /// one is its default.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingValues {
     pub values: usize,
     pub chosen: usize,
@@ -249,6 +259,13 @@ pub struct SettingValues {
     pub listens: bool,
     /// Rather than stepping through its values, it opens something.
     pub opens: bool,
+    /// On the advanced screen rather than the options screen.
+    pub advanced: bool,
+    /// A setting that stands for others: value `i` sets each of them to what `levels[i]`
+    /// names (`None` leaves it), as a preset does. It stands at the first level that the
+    /// others match, and at its last value, past the levels, where they match none. Empty
+    /// for any other setting. See `ui::Setting::levels`.
+    pub levels: Vec<Vec<Option<usize>>>,
 }
 
 /// A folder being browsed, as the model sees it: its subfolders, and what can be done in it.
@@ -347,8 +364,7 @@ impl FrontEnd {
                         values,
                         chosen: setting.chosen.min(values - 1),
                         default: setting.default.min(values - 1),
-                        listens: setting.listens,
-                        opens: setting.opens,
+                        ..setting
                     }
                 })
                 .collect(),
@@ -404,7 +420,7 @@ impl FrontEnd {
                     }
                     Screen::Garage => self.dial_in_hand = self.dial_in_hand.saturating_sub(1),
                     // Nor do settings, for the same reason.
-                    Screen::Options | Screen::Controls => {
+                    Screen::Options | Screen::Controls | Screen::Advanced => {
                         if let Some(next) = self.next_on_screen(down) {
                             self.setting_in_hand = next;
                         }
@@ -426,9 +442,11 @@ impl FrontEnd {
                             self.set_dial(self.dial_in_hand, step, &mut happened);
                         }
                     }
-                    Screen::Options => {
+                    Screen::Options | Screen::Advanced => {
                         if let Some(setting) = self.settings.get(self.setting_in_hand) {
-                            let chosen = step_within(setting.chosen, more, setting.values);
+                            // Levels stop at the first and the last: from the value past
+                            // them, either way is the last.
+                            let chosen = step_within(setting.chosen, more, setting.choosable());
                             self.set_setting(self.setting_in_hand, chosen, &mut happened);
                         }
                     }
@@ -516,7 +534,7 @@ impl FrontEnd {
             }
             // On a line that opens something, Enter and a gamepad's "yes" open it.
             Action::Accept | Action::Go
-                if self.screen == Screen::Options
+                if self.screen.steps_settings()
                     && self
                         .settings
                         .get(self.setting_in_hand)
@@ -524,9 +542,9 @@ impl FrontEnd {
             {
                 self.open_setting(self.setting_in_hand, &mut happened);
             }
-            Action::Accept if self.screen == Screen::Options => {
+            Action::Accept if self.screen.steps_settings() => {
                 if let Some(setting) = self.settings.get(self.setting_in_hand) {
-                    let chosen = (setting.chosen + 1) % setting.values;
+                    let chosen = (setting.chosen + 1) % setting.choosable();
                     self.set_setting(self.setting_in_hand, chosen, &mut happened);
                 }
             }
@@ -565,11 +583,14 @@ impl FrontEnd {
     /// Whether setting `index` is on the screen that is up.
     pub fn on_screen(&self, index: usize) -> bool {
         self.settings.get(index).is_some_and(|setting| {
-            if setting.listens {
-                self.screen == Screen::Controls
-            } else {
-                self.screen == Screen::Options
-            }
+            self.screen
+                == if setting.listens {
+                    Screen::Controls
+                } else if setting.advanced {
+                    Screen::Advanced
+                } else {
+                    Screen::Options
+                }
         })
     }
 
@@ -675,9 +696,68 @@ fn step_within(at: usize, up: bool, len: usize) -> usize {
     }
 }
 
+impl SettingValues {
+    /// How many of its values can be chosen: all of them, or for a setting with levels,
+    /// one for each level.
+    pub fn choosable(&self) -> usize {
+        if self.levels.is_empty() {
+            self.values
+        } else {
+            self.levels.len().min(self.values)
+        }
+    }
+}
+
 impl FrontEnd {
-    /// A setting stops at its ends.
+    /// A setting stops at its ends. One with levels sets the settings its level names, and
+    /// can't be set to the value past its levels: that is where it stands when the others
+    /// match no level. Whatever changed, each setting with levels then stands at the level
+    /// the others match.
     fn set_setting(&mut self, index: usize, chosen: usize, happened: &mut Vec<Happened>) {
+        let Some(setting) = self.settings.get(index) else {
+            return;
+        };
+        if !setting.levels.is_empty() {
+            let Some(level) = setting.levels.get(chosen).cloned() else {
+                return;
+            };
+            for (other, value) in level.into_iter().enumerate() {
+                if let Some(value) = value
+                    && other != index
+                {
+                    self.set_one(other, value, happened);
+                }
+            }
+        }
+        self.set_one(index, chosen, happened);
+        self.match_levels(happened);
+    }
+
+    /// Each setting with levels, at the first level that the other settings match, or past
+    /// them where they match none.
+    fn match_levels(&mut self, happened: &mut Vec<Happened>) {
+        for index in 0..self.settings.len() {
+            let levels = &self.settings[index].levels;
+            if levels.is_empty() {
+                continue;
+            }
+            let matches = |level: &Vec<Option<usize>>| {
+                level.iter().enumerate().all(|(other, value)| {
+                    other == index
+                        || value.is_none_or(|value| {
+                            self.settings
+                                .get(other)
+                                .is_none_or(|setting| setting.chosen == value)
+                        })
+                })
+            };
+            let level = levels.iter().position(matches).unwrap_or(levels.len());
+            self.set_one(index, level, happened);
+        }
+    }
+
+    /// Setting `index` to `chosen`, or its last value, and nothing else.
+    fn set_one(&mut self, index: usize, chosen: usize, happened: &mut Vec<Happened>) {
         let Some(setting) = self.settings.get_mut(index) else {
             return;
         };
@@ -734,15 +814,13 @@ mod tests {
                     values: 2,
                     chosen: 1,
                     default: 1,
-                    listens: false,
-                    opens: false,
+                    ..SettingValues::default()
                 },
                 SettingValues {
                     values: 4,
                     chosen: 3,
                     default: 3,
-                    listens: false,
-                    opens: false,
+                    ..SettingValues::default()
                 },
             ],
         )
@@ -755,19 +833,19 @@ mod tests {
             model.apply(Action::NextScreen),
             [Happened::ScreenChanged(Screen::Race)]
         );
-        model.apply(Action::NextScreen);
-        model.apply(Action::NextScreen);
-        model.apply(Action::NextScreen);
+        for _ in 0..4 {
+            model.apply(Action::NextScreen);
+        }
         assert_eq!(
             model.apply(Action::NextScreen),
             [Happened::ScreenChanged(Screen::Truck)]
         );
         assert_eq!(
             model.apply(Action::PreviousScreen),
-            [Happened::ScreenChanged(Screen::Controls)]
+            [Happened::ScreenChanged(Screen::Advanced)]
         );
         // Showing the screen that is already up is nothing happening.
-        assert_eq!(model.apply(Action::Show(Screen::Controls)), []);
+        assert_eq!(model.apply(Action::Show(Screen::Advanced)), []);
     }
 
     #[test]
@@ -1117,6 +1195,108 @@ mod tests {
         model.browsing = Some(Browsing::default());
         assert_eq!(model.apply(Action::FolderUp), []);
         assert_eq!(model.apply(Action::Accept), []);
+    }
+
+    #[test]
+    fn an_advanced_setting_is_on_the_advanced_screen_and_only_it() {
+        let mut model = front_end(1, 1);
+        model.settings[1].advanced = true;
+        model.apply(Action::Show(Screen::Options));
+        assert!(model.on_screen(0) && !model.on_screen(1));
+        model.apply(Action::Down);
+        assert_eq!(model.setting_in_hand, 0);
+
+        model.apply(Action::Show(Screen::Advanced));
+        assert_eq!(model.setting_in_hand, 1);
+        // Less, More and Accept change it as they do on the options screen.
+        assert_eq!(model.apply(Action::Less), [Happened::SettingChanged(1, 2)]);
+        assert_eq!(
+            model.apply(Action::Accept),
+            [Happened::SettingChanged(1, 3)]
+        );
+        // Restoring the defaults there leaves the options screen's alone.
+        model.settings[0].chosen = 0;
+        model.apply(Action::Less);
+        assert_eq!(
+            model.apply(Action::RestoreDefaults),
+            [Happened::SettingChanged(1, 3)]
+        );
+        assert_eq!(model.settings[0].chosen, 0);
+    }
+
+    /// A quality setting with two levels and a value past them, standing for the two
+    /// settings of `front_end`, which are advanced.
+    fn with_quality() -> FrontEnd {
+        let mut model = front_end(1, 1);
+        for setting in &mut model.settings {
+            setting.advanced = true;
+        }
+        model.settings.push(SettingValues {
+            values: 3,
+            chosen: 1,
+            default: 1,
+            levels: vec![vec![Some(0), Some(0)], vec![Some(1), Some(3)]],
+            ..SettingValues::default()
+        });
+        model.apply(Action::Show(Screen::Options));
+        model
+    }
+
+    #[test]
+    fn a_level_sets_the_settings_it_stands_for() {
+        let mut model = with_quality();
+        assert_eq!(model.setting_in_hand, 2);
+        assert_eq!(
+            model.apply(Action::Less),
+            [
+                Happened::SettingChanged(0, 0),
+                Happened::SettingChanged(1, 0),
+                Happened::SettingChanged(2, 0)
+            ]
+        );
+        // The levels stop at their ends, and the value past them can't be chosen.
+        assert_eq!(model.apply(Action::Less), []);
+        model.apply(Action::More);
+        assert_eq!(model.apply(Action::More), []);
+        assert_eq!(model.apply(Action::SetSetting(2, 2)), []);
+        // Accept goes round the levels alone.
+        assert_eq!(
+            model.apply(Action::Accept).last(),
+            Some(&Happened::SettingChanged(2, 0))
+        );
+        assert_eq!(
+            model.apply(Action::Accept).last(),
+            Some(&Happened::SettingChanged(2, 1))
+        );
+    }
+
+    #[test]
+    fn a_setting_with_levels_follows_the_settings_it_stands_for() {
+        let mut model = with_quality();
+        // One of them changed on its own matches no level.
+        assert_eq!(
+            model.apply(Action::SetSetting(1, 2)),
+            [
+                Happened::SettingChanged(1, 2),
+                Happened::SettingChanged(2, 2)
+            ]
+        );
+        // From there, either way is the last level.
+        model.apply(Action::Show(Screen::Options));
+        model.setting_in_hand = 2;
+        assert_eq!(
+            model.apply(Action::More).last(),
+            Some(&Happened::SettingChanged(2, 1))
+        );
+        // Matching a level again is standing at it.
+        model.apply(Action::SetSetting(0, 0));
+        assert_eq!(
+            model.apply(Action::SetSetting(1, 0)),
+            [
+                Happened::SettingChanged(1, 0),
+                Happened::SettingChanged(2, 0)
+            ]
+        );
     }
 
     fn searchable(names: &[&str]) -> List {

@@ -8,7 +8,7 @@
 //! | `Catalogue` | in | The trucks and tracks to list. |
 //! | `Dials` | in and out | The garage's dials. The module draws and moves them, and doesn't know what they do. |
 //! | `Choices` | in and out | Which truck and track, how many laps, and how many trucks the computer drives. |
-//! | `Settings` | in and out | The options screen's settings, each a few named values. The module draws and changes them, and doesn't know what they do. |
+//! | `Settings` | in and out | The options and advanced screens' settings, each a few named values. The module draws and changes them, and doesn't know what they do. |
 //! | `TrackPreview` | in | A picture of the highlighted track. |
 //! | `Turntable` | in | On the entity the module spawns and turns. Parent to it whatever is to be shown. |
 //! | `FolderBrowser` | in and out | A folder the player is browsing, shown in place of the screens. The module writes which subfolder is highlighted. |
@@ -196,6 +196,14 @@ pub struct Setting {
     /// A line that shows its one value, and that Enter or a click opens: the module says so
     /// with `SettingOpened`, and doesn't know what it opens.
     pub opens: bool,
+    /// Shown on the ADVANCED screen rather than the options screen.
+    pub advanced: bool,
+    /// A line that stands for other settings, drawn as a slider: choosing value `i` sets
+    /// each other setting to the value `levels[i]` names for it, in order (`None` leaves
+    /// it), as a `Preset` does. The module keeps it at the first level that the others
+    /// match, and at its last value, which is past the levels and can't be chosen, where
+    /// they match none. Empty for any other line.
+    pub levels: Vec<Vec<Option<usize>>>,
 }
 
 impl Setting {
@@ -372,6 +380,8 @@ fn read_what_to_show(
                 default: setting.default,
                 listens: !setting.keys.is_empty(),
                 opens: setting.opens,
+                advanced: setting.advanced,
+                levels: setting.levels.clone(),
             })
             .collect(),
     );

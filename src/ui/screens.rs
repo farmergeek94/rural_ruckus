@@ -6,8 +6,9 @@
 //! change is a key press, and one function that draws the model as it stands cannot get
 //! out of step with it. Lists show a window of rows around the highlight instead of
 //! scrolling, so a list can be walked with a stick and there is no scroll position to lose.
-//! The options screen, which has more lines than fit, scrolls: with the mouse wheel, and by
-//! itself to bring the line in hand into view. Where it was scrolled to is kept
+//! The options screen's first column, which has more lines than fit, scrolls: with the
+//! mouse wheel, and by itself to bring the line in hand into view. The second, with the
+//! buttons that put everything back, stays where it is. Where it was scrolled to is kept
 //! (`OptionsScrolled`), so that building the tree again doesn't lose it.
 //!
 //! Text keeps to ASCII while Bevy's built-in font, which has little else, stands in.
@@ -254,7 +255,7 @@ impl Drawing<'_> {
                     self.race(middle);
                 }
                 Screen::Garage => self.garage(middle),
-                Screen::Options | Screen::Controls => self.options(middle),
+                Screen::Options | Screen::Controls | Screen::Advanced => self.options(middle),
             });
     }
 
@@ -748,97 +749,111 @@ impl Drawing<'_> {
             .iter()
             .rposition(|column| !column.is_empty())
             .unwrap_or(0);
-        parent
-            .spawn((
-                OptionsScroll,
-                ScrollPosition(Vec2::new(0.0, self.scrolled)),
-                layout(Node {
-                    height: percent(100),
-                    align_items: AlignItems::FlexStart,
-                    column_gap: px(theme.margin),
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                }),
-            ))
-            .with_children(|parent| self.option_columns(parent, &sections, columns, last));
-    }
-
-    fn option_columns(
-        &self,
-        parent: Parent,
-        sections: &[(&str, Vec<usize>)],
-        columns: [&[(&str, Vec<usize>)]; 2],
-        last: usize,
-    ) {
-        let theme = self.theme;
         for (number, column) in columns.into_iter().enumerate() {
             if column.is_empty() && number != last {
                 continue;
             }
-            parent
-                .spawn(self.panel(theme.panel_width))
-                .with_children(|panel| {
-                    for (place, (section, members)) in column.iter().enumerate() {
-                        if place > 0 {
-                            panel.spawn(Node {
-                                height: px(16),
-                                ..default()
-                            });
-                        }
-                        self.heading(panel, section);
-                        for &index in members {
-                            self.setting(panel, index);
-                        }
-                    }
-                    if number != last {
-                        return;
-                    }
-                    if sections.is_empty() {
-                        panel.spawn((
-                            Text::new("Nothing to set"),
-                            theme.body(theme.text_size),
-                            TextColor(theme.text_dim),
-                        ));
-                        return;
-                    }
-                    panel.spawn(Node {
-                        height: px(16),
-                        ..default()
+            if number > 0 {
+                parent
+                    .spawn(self.panel(theme.panel_width))
+                    .with_children(|panel| {
+                        self.option_column(panel, &sections, column, number == last);
                     });
-                    self.button(
-                        panel,
-                        "RESTORE DEFAULTS",
-                        theme.text_size,
-                        Action::RestoreDefaults,
-                        false,
-                        Node {
-                            height: px(theme.row_height),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                    );
-                    // The presets, under it: each a set of values chosen at once.
-                    for (index, preset) in self.presets.iter().enumerate() {
-                        panel.spawn(Node {
-                            height: px(8),
-                            ..default()
+                continue;
+            }
+            // The first column scrolls when it is taller than the room it has; the second,
+            // with the buttons that put everything back, stays where it is.
+            parent
+                .spawn((
+                    OptionsScroll,
+                    ScrollPosition(Vec2::new(0.0, self.scrolled)),
+                    layout(Node {
+                        height: percent(100),
+                        flex_shrink: 0.0,
+                        align_items: AlignItems::FlexStart,
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    }),
+                ))
+                .with_children(|scroll| {
+                    scroll
+                        .spawn(self.panel(theme.panel_width))
+                        .with_children(|panel| {
+                            self.option_column(panel, &sections, column, number == last);
                         });
-                        self.button(
-                            panel,
-                            &preset.label,
-                            theme.text_size,
-                            Action::ApplyPreset(index),
-                            false,
-                            Node {
-                                height: px(theme.row_height),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                        );
-                    }
                 });
+        }
+    }
+
+    /// One column of the options: its sections, and under the last column the buttons that
+    /// put everything back.
+    fn option_column(
+        &self,
+        panel: Parent,
+        sections: &[(&str, Vec<usize>)],
+        column: &[(&str, Vec<usize>)],
+        last: bool,
+    ) {
+        let theme = self.theme;
+        for (place, (section, members)) in column.iter().enumerate() {
+            if place > 0 {
+                panel.spawn(Node {
+                    height: px(16),
+                    ..default()
+                });
+            }
+            self.heading(panel, section);
+            for &index in members {
+                self.setting(panel, index);
+            }
+        }
+        if !last {
+            return;
+        }
+        if sections.is_empty() {
+            panel.spawn((
+                Text::new("Nothing to set"),
+                theme.body(theme.text_size),
+                TextColor(theme.text_dim),
+            ));
+            return;
+        }
+        panel.spawn(Node {
+            height: px(16),
+            ..default()
+        });
+        self.button(
+            panel,
+            "RESTORE DEFAULTS",
+            theme.text_size,
+            Action::RestoreDefaults,
+            false,
+            Node {
+                height: px(theme.row_height),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        );
+        // The presets, under it: each a set of values chosen at once.
+        for (index, preset) in self.presets.iter().enumerate() {
+            panel.spawn(Node {
+                height: px(8),
+                ..default()
+            });
+            self.button(
+                panel,
+                &preset.label,
+                theme.text_size,
+                Action::ApplyPreset(index),
+                false,
+                Node {
+                    height: px(theme.row_height),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+            );
         }
     }
 
@@ -885,6 +900,10 @@ impl Drawing<'_> {
                     self.open_button(line, index);
                     return;
                 }
+                if !setting.levels.is_empty() {
+                    self.level_slider(line, index);
+                    return;
+                }
                 if setting.values.len() > theme.most_setting_buttons {
                     self.value_stepper(line, index);
                     return;
@@ -911,6 +930,73 @@ impl Drawing<'_> {
                     );
                 }
             });
+    }
+
+    /// A line that stands for others: a bar of one segment for each level, lit up to the
+    /// level chosen, with the first and the last level's names at its ends and the chosen
+    /// value's under its middle. Where the others match no level, none is lit.
+    fn level_slider(&self, line: Parent, index: usize) {
+        let theme = self.theme;
+        let setting = &self.settings[index];
+        let levels = setting.levels.len().min(setting.values.len());
+        let name = |value: usize| setting.values.get(value).map_or("", String::as_str);
+        line.spawn(Node {
+            flex_grow: 1.0,
+            min_width: px(0),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(4),
+            ..default()
+        })
+        .with_children(|slider| {
+            slider
+                .spawn(Node {
+                    column_gap: px(4),
+                    ..default()
+                })
+                .with_children(|bar| {
+                    for level in 0..levels {
+                        let lit = setting.chosen < levels && level <= setting.chosen;
+                        let (normal, hovered) = if lit {
+                            (theme.accent, theme.accent_hovered)
+                        } else {
+                            (theme.row, theme.row_hovered)
+                        };
+                        bar.spawn((
+                            Button,
+                            Does(Action::SetSetting(index, level)),
+                            Look { normal, hovered },
+                            BackgroundColor(normal),
+                            Node {
+                                flex_grow: 1.0,
+                                flex_basis: px(0),
+                                height: px(theme.row_height - 26.0),
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                        ));
+                    }
+                });
+            slider
+                .spawn(Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    ..default()
+                })
+                .with_children(|names| {
+                    for (text, color) in [
+                        (name(0), theme.text_dim),
+                        (setting.chosen_value(), theme.accent),
+                        (name(levels.saturating_sub(1)), theme.text_dim),
+                    ] {
+                        names.spawn((
+                            Text::new(text.to_uppercase()),
+                            theme.heading(theme.small_size * 0.8),
+                            TextColor(color),
+                            TextLayout::no_wrap(),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+        });
     }
 
     /// A line that opens something: one button with its value, on one line. What does not
@@ -1198,7 +1284,7 @@ impl Drawing<'_> {
             Screen::Truck => self.catalogue.trucks.get(self.model.trucks.highlighted),
             Screen::Race => self.catalogue.tracks.get(self.model.tracks.highlighted),
             Screen::Garage => None,
-            Screen::Options | Screen::Controls => {
+            Screen::Options | Screen::Controls | Screen::Advanced => {
                 return self
                     .settings
                     .get(self.model.setting_in_hand)
@@ -1301,8 +1387,9 @@ pub(super) fn scroll_options(
     }
 }
 
-/// The options' scroll, and where and how big what shows of it is.
+/// The options' scrolling column, and where and how big what shows of it is.
 type ScrollView<'a> = (
+    Entity,
     &'a mut ScrollPosition,
     &'a ComputedNode,
     &'a UiGlobalTransform,
@@ -1312,14 +1399,22 @@ type ScrollView<'a> = (
 /// that the line in hand shows, as when the arrows have moved to one out of sight. Only
 /// then, so that the wheel can scroll away from it.
 pub(super) fn keep_in_hand_in_view(
-    lines: Query<(&ComputedNode, &UiGlobalTransform), Added<InHand>>,
+    lines: Query<(Entity, &ComputedNode, &UiGlobalTransform), Added<InHand>>,
+    parents: Query<&ChildOf>,
     mut scrolls: Query<ScrollView, (With<OptionsScroll>, Without<InHand>)>,
     mut scrolled: ResMut<OptionsScrolled>,
 ) {
-    let Ok((line, line_at)) = lines.single() else {
+    let Ok((entity, line, line_at)) = lines.single() else {
         return;
     };
-    for (mut position, node, at) in &mut scrolls {
+    for (scroll, mut position, node, at) in &mut scrolls {
+        // A line of the column that doesn't scroll is always in view.
+        if !parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == scroll)
+        {
+            continue;
+        }
         let scale = node.inverse_scale_factor;
         // From the top of what shows, in logical pixels. A transform is a node's middle.
         let top_of_view = at.translation.y - node.size.y / 2.0;
