@@ -22,7 +22,8 @@ use avian3d::prelude::*;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
-use super::surface::WaterMaterial;
+use super::WaterSettings;
+use super::surface::{FlatWater, WaterMaterial};
 use crate::game_state::GameState;
 use crate::track::Track;
 use crate::weather::WeatherSettings;
@@ -106,15 +107,23 @@ pub(super) fn spawn_ice(
     ));
 }
 
+/// What draws the water: the moving water's two meshes, and the flat plane.
+type DrawnWater = (
+    Or<(With<MeshMaterial3d<WaterMaterial>>, With<FlatWater>)>,
+    Without<Ice>,
+);
+
 /// Makes the ice solid and shows it while the water is frozen, and hides it and shows the
-/// water while it is not. Only on a change, so that the physics is not told of one every step.
+/// water while it is not: the moving water, or the flat plane where `WaterSettings::flat`
+/// says. Only on a change, so that the physics is not told of one every step.
 pub(super) fn freeze_or_thaw(
     mut commands: Commands,
     weather: Option<Res<WeatherSettings>>,
+    settings: Res<WaterSettings>,
     mut ice: Query<(&mut Visibility, &Children), With<Ice>>,
     slabs: Query<Has<ColliderDisabled>, With<Collider>>,
     // Absent in a headless app, which draws no water.
-    mut water: Query<&mut Visibility, (With<MeshMaterial3d<WaterMaterial>>, Without<Ice>)>,
+    mut water: Query<(&mut Visibility, Has<FlatWater>), DrawnWater>,
 ) {
     let frozen = frozen(weather);
     for (mut visibility, children) in &mut ice {
@@ -132,8 +141,8 @@ pub(super) fn freeze_or_thaw(
         }
         visibility.set_if_neq(shown(frozen));
     }
-    for mut visibility in &mut water {
-        visibility.set_if_neq(shown(!frozen));
+    for (mut visibility, flat) in &mut water {
+        visibility.set_if_neq(shown(!frozen && flat == settings.flat));
     }
 }
 

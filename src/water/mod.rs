@@ -10,6 +10,7 @@
 //! - `splash`: the spray and splashes that trucks throw up, and the ripples they leave.
 //! - `shore`: where the water meets the land: the foam and surf that `water.wgsl` draws
 //!   there, and the spray thrown up where the swell and the trucks' ripples come in.
+//! - With `WaterSettings::flat`, `surface` draws a plain flat plane instead of both.
 //! - `ice`: in snow the water is frozen, a solid sheet of ice that trucks drive on. Then
 //!   the water neither holds trucks up nor splashes, and its surface is hidden.
 //!
@@ -107,11 +108,18 @@ pub struct WaterSettings {
     /// foam on the water are part of its surface, and stay. Spray in the air when it is
     /// turned off falls as it would.
     pub splashes: bool,
+    /// Draws the water as one flat see-through plane in its colour, with no waves, ripples
+    /// or foam: no patch of fine mesh round the camera and none of `water.wgsl`, the least
+    /// it can cost. How it holds trucks up and the splashes are as ever.
+    pub flat: bool,
 }
 
 impl Default for WaterSettings {
     fn default() -> Self {
-        Self { splashes: true }
+        Self {
+            splashes: true,
+            flat: false,
+        }
     }
 }
 

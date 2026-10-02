@@ -53,6 +53,10 @@ const SHEET_SPACING: f32 = 20.0;
 
 pub(super) type WaterMaterial = ExtendedMaterial<StandardMaterial, WaterWaves>;
 
+/// On the plain flat plane drawn instead of the moving water (`WaterSettings::flat`).
+#[derive(Component)]
+pub(super) struct FlatWater;
+
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub(super) struct WaterWaves {
     /// The ripples (`ShaderRipples`), in a buffer that both materials share.
@@ -125,6 +129,7 @@ pub(super) fn spawn_water(
     // All absent in a headless app, which has no use for looks.
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<WaterMaterial>>>,
+    flat_materials: Option<ResMut<Assets<StandardMaterial>>>,
     images: Option<ResMut<Assets<Image>>>,
     buffers: Option<ResMut<Assets<ShaderBuffer>>>,
     ripples: Option<ResMut<Ripples>>,
@@ -145,8 +150,13 @@ pub(super) fn spawn_water(
             DespawnOnExit(GameState::Racing),
         ))
         .id();
-    let (Some(mut meshes), Some(mut materials), Some(mut images), Some(mut buffers)) =
-        (meshes, materials, images, buffers)
+    let (
+        Some(mut meshes),
+        Some(mut materials),
+        Some(mut flat_materials),
+        Some(mut images),
+        Some(mut buffers),
+    ) = (meshes, materials, flat_materials, images, buffers)
     else {
         return;
     };
@@ -207,6 +217,28 @@ pub(super) fn spawn_water(
     // With a square to spare all round: see the module's notes.
     let reach = PATCH_SIZE + 2.0 * PATCH_SPACING;
     let squares = (reach / PATCH_SPACING).round() as u32;
+    // Drawn instead of both when the water is flat (`WaterSettings::flat`), which
+    // `ice::freeze_or_thaw` sees to. One square: with no patch, nothing needs the sheet's
+    // small ones.
+    commands.spawn((
+        Name::new("Flat water"),
+        FlatWater,
+        Transform::from_xyz(0.0, level, 0.0),
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(size / 2.0)).mesh())),
+        MeshMaterial3d(flat_materials.add(StandardMaterial {
+            base_color: WATER_COLOR,
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.08,
+            reflectance: 0.3,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })),
+        NotShadowCaster,
+        Visibility::Hidden,
+        DespawnOnExit(GameState::Racing),
+    ));
+
     commands.spawn((
         Name::new("Water round the camera"),
         Transform::from_xyz(0.0, level, 0.0),

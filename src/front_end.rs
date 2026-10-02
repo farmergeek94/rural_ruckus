@@ -1111,6 +1111,15 @@ const OPTIONS: &[OptionLine] = &[
         set: |options, value| options.truck_looks.reflectance = TRUCK_SHINES[value],
     },
     OptionLine {
+        key: "option.water_surface",
+        section: GRAPHICS,
+        label: "Water",
+        detail: "Flat draws the water as one plain see-through plane, with no waves, ripples or foam: much less to draw and to work out for every pixel of it.",
+        values: &["Flat", "Waves"],
+        get: |options| !options.water.flat as usize,
+        set: |options, value| options.water.flat = value == 0,
+    },
+    OptionLine {
         key: "option.splashes",
         section: GRAPHICS,
         label: "Splashes",
@@ -1274,7 +1283,7 @@ const QUALITY: &str = "option.quality";
 /// The lines each level of Quality sets: those that cost time on every frame. The rest of
 /// the graphics (mipmaps, which save time, and the trucks' shine, which is a look) and the
 /// physics are left as the player has them.
-const QUALITY_LINES: [&str; 11] = [
+const QUALITY_LINES: [&str; 12] = [
     "option.antialiasing",
     "option.bloom",
     "option.shadows",
@@ -1284,6 +1293,7 @@ const QUALITY_LINES: [&str; 11] = [
     "option.scenery_distance",
     "option.decorations",
     "option.splashes",
+    "option.water_surface",
     "option.dirt",
     "option.backdrop",
 ];
@@ -1291,8 +1301,9 @@ const QUALITY_LINES: [&str; 11] = [
 /// Quality's levels, fastest first, each as it changes the defaults. Balanced is
 /// `integrated_graphics`, and Best is the defaults.
 const QUALITY_LEVELS: [fn(&mut Options); 5] = [
-    // Fastest: everything that can go, goes, the lighting with it.
+    // Fastest: everything that can go, goes, the lighting with it, and the water is flat.
     |options| {
+        options.water.flat = true;
         options.environment.lighting = Lighting::Off;
         options.camera.antialiasing = Antialiasing::Off;
         options.camera.bloom = false;
@@ -1301,7 +1312,6 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
         options.track.anisotropy = 1;
         options.track.scenery_distance = 150.0;
         options.track.decorations = false;
-        options.water.splashes = false;
         options.dirt.on = false;
         options.backdrop.on = false;
     },
@@ -1316,7 +1326,6 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
         options.track.anisotropy = 2;
         options.track.scenery_distance = 150.0;
         options.track.decorations = false;
-        options.water.splashes = false;
     },
     |options| {
         integrated_graphics(
