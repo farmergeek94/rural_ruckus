@@ -40,3 +40,4 @@ debug = false
 opt-level = 3
 lto = "thin"          # Link-Time Optimization merges optimization across crates
 codegen-units = 1     # Allows the compiler to optimize math streams globally
+log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }

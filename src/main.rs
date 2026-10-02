@@ -28,7 +28,7 @@ fn main() {
     // `--scenery-distance=200` (in metres; all scenery is drawn without it) start with the
     // graphics settings that F2 changes while racing, and
     // `--integrated-graphics` with the set of them for a graphics processor built into the
-    // CPU (`front_end::integrated_graphics`, the options screen's INTEGRATED GRAPHICS); an
+    // CPU (`front_end::integrated_graphics`, the options screen's Quality at Balanced); an
     // option after it on the command line wins over it. `--opponents=3` races
     // against that many trucks driven by the computer, which are copies of the player's.
     // `--weather=rain` races in that weather (clear, overcast, fog, rain, storm or snow), and
