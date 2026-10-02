@@ -1,7 +1,8 @@
 //! Tools for finding out why the game misbehaves. All off unless asked for.
 //!
 //! `--log-fps` prints, once a second: frame rate, frame time, how much of the world is being
-//! drawn, and the worst frames of that second, which the averages hide.
+//! drawn, the worst frames of that second, which the averages hide, and how long each of
+//! the renderer's passes took on the CPU and on the graphics processor (`render/...`).
 //! `--autopilot` drives the truck round the course, so that a problem that only shows while
 //! driving can be reproduced and measured without anyone at the keyboard. It is a
 //! diagnostic, not an opponent: it presses the player's own keys.
@@ -41,6 +42,7 @@ impl Plugin for DiagnosticsPlugin {
                 FrameTimeDiagnosticsPlugin::default(),
                 LogDiagnosticsPlugin::default(),
             ))
+            .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
             .register_diagnostic(Diagnostic::new(MESHES_IN_VIEW))
             .register_diagnostic(Diagnostic::new(MESHES))
             .register_diagnostic(Diagnostic::new(SCENERY_IN_VIEW))

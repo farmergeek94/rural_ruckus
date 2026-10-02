@@ -59,12 +59,16 @@ const ANTIALIASING_KEY: KeyCode = KeyCode::F3;
 const SHADOW_CASCADES_KEY: KeyCode = KeyCode::F4;
 const SHADOW_DISTANCE_KEY: KeyCode = KeyCode::F5;
 const ANISOTROPY_KEY: KeyCode = KeyCode::F6;
+/// F7 and F8 change the weather and the time of day.
+const SCENERY_DISTANCE_KEY: KeyCode = KeyCode::F9;
 
 /// The values each key steps through. They include every default.
 const SHADOW_CASCADES: [usize; 4] = [0, 1, 2, 4];
 /// In metres.
 const SHADOW_DISTANCES: [f32; 4] = [50.0, 100.0, 150.0, 300.0];
 const ANISOTROPIES: [u16; 5] = [1, 2, 4, 8, 16];
+/// In metres.
+pub const SCENERY_DISTANCES: [f32; 4] = [150.0, 300.0, 600.0, f32::INFINITY];
 
 /// How often the frame time on the panel is brought up to date. Any faster and it
 /// can't be read.
@@ -144,6 +148,9 @@ fn change_settings(
     }
     if keys.just_pressed(ANISOTROPY_KEY) {
         track.anisotropy = next(&ANISOTROPIES, track.anisotropy);
+    }
+    if keys.just_pressed(SCENERY_DISTANCE_KEY) {
+        track.scenery_distance = next(&SCENERY_DISTANCES, track.scenery_distance);
     }
 }
 
@@ -238,6 +245,11 @@ fn panel_text(
     } else {
         "off (no mipmaps)".to_string()
     };
+    let scenery = if track.scenery_distance.is_finite() {
+        format!("{:.0} m", track.scenery_distance)
+    } else {
+        "all".to_string()
+    };
     let frame = match frames {
         Some(report) => format!(
             "{:.1} ms  ({:.0} fps)\n\
@@ -256,6 +268,7 @@ fn panel_text(
          F4  Shadow cascades   {cascades}\n\
          F5  Shadow distance   {:.0} m\n\
          F6  Ground sharpness  {anisotropy}\n\
+         F9  Scenery drawn     {scenery}\n\
          Frame  {frame}",
         environment.shadow_distance,
     )
@@ -279,6 +292,7 @@ mod tests {
         assert!(SHADOW_CASCADES.contains(&EnvironmentSettings::default().shadow_cascades));
         assert!(SHADOW_DISTANCES.contains(&EnvironmentSettings::default().shadow_distance));
         assert!(ANISOTROPIES.contains(&TrackSettings::default().anisotropy));
+        assert!(SCENERY_DISTANCES.contains(&TrackSettings::default().scenery_distance));
     }
 
     #[test]
@@ -303,6 +317,7 @@ mod tests {
         assert!(text.contains("no shadows"), "{text}");
         assert!(text.contains("100 m"), "{text}");
         assert!(text.contains("16x anisotropic"), "{text}");
+        assert!(text.contains("Scenery drawn     all"), "{text}");
         assert!(text.contains("10.0 ms  (100 fps)"), "{text}");
         assert!(
             text.contains("Longest  14.0 ms,  1 of 3 frames late"),

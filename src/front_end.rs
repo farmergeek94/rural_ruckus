@@ -916,6 +916,8 @@ const SHADOW_CASCADES: [f32; 4] = [0.0, 1.0, 2.0, 4.0];
 /// In metres.
 const SHADOW_DISTANCES: [f32; 4] = [50.0, 100.0, 150.0, 300.0];
 const ANISOTROPIES: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
+/// In metres, the last all of it.
+const SCENERY_DISTANCES: [f32; 4] = [150.0, 300.0, 600.0, f32::INFINITY];
 /// `TruckLooksSettings::reflectance`: none, half of Bevy's default, and Bevy's default.
 const TRUCK_SHINES: [f32; 3] = [0.0, 0.25, 0.5];
 /// How far the camera sits from the truck, and how high, as a share of how it was tuned.
@@ -1003,6 +1005,24 @@ const OPTIONS: &[OptionLine] = &[
         values: &["1x", "2x", "4x", "8x", "16x"],
         get: |options| nearest(&ANISOTROPIES, options.track.anisotropy as f32),
         set: |options, value| options.track.anisotropy = ANISOTROPIES[value] as u16,
+    },
+    OptionLine {
+        key: "option.scenery_distance",
+        section: GRAPHICS,
+        label: "Scenery distance",
+        detail: "How far away trees, signs and buildings are drawn. A track can have thousands, and each one drawn costs time on every frame, however small. Solid ones stay solid beyond it.",
+        values: &["150 m", "300 m", "600 m", "All"],
+        get: |options| {
+            // All is the last, and the nearest of the rest stands for any other distance.
+            let distance = options.track.scenery_distance;
+            let all = SCENERY_DISTANCES.len() - 1;
+            if distance.is_finite() {
+                nearest(&SCENERY_DISTANCES[..all], distance)
+            } else {
+                all
+            }
+        },
+        set: |options, value| options.track.scenery_distance = SCENERY_DISTANCES[value],
     },
     OptionLine {
         key: "option.mipmaps",
@@ -1159,9 +1179,11 @@ const OPTIONS: &[OptionLine] = &[
 /// a pixel give way to FXAA, a pass over the finished picture, and the glow goes, since
 /// it draws the picture in high dynamic range: both cost most where memory is slowest.
 /// The sun's shadows keep two of their four maps, over 100 m, and the ground's filtering
-/// keeps a quarter of its sharpness. Chosen, not
-/// measured: measure with the F2 panel and `--no-vsync` (see `docs/smoothness.md`)
-/// before changing it. The options screen offers it as INTEGRATED GRAPHICS, and
+/// keeps a quarter of its sharpness. Scenery is drawn to 300 m, which measured on Snake
+/// River Canyon (`--no-vsync`, no shadows, HD Graphics 620 at 1366 x 768) took the
+/// meshes drawn from about 1400 to 290 and the frame from 21 ms to the screen's 16.7.
+/// The rest are chosen, not measured: measure with the F2 panel and `--no-vsync` (see
+/// `docs/smoothness.md`) before changing them. The options screen offers it as INTEGRATED GRAPHICS, and
 /// `--integrated-graphics` starts a race with it.
 pub fn integrated_graphics(
     camera: &mut CameraSettings,
@@ -1173,6 +1195,7 @@ pub fn integrated_graphics(
     environment.shadow_cascades = 2;
     environment.shadow_distance = 100.0;
     track.anisotropy = 4;
+    track.scenery_distance = 300.0;
 }
 
 /// The presets the options screen offers beside "restore defaults". Each names only the
@@ -1875,6 +1898,7 @@ mod tests {
                 ("option.shadows", "Medium"),
                 ("option.shadow_distance", "100 m"),
                 ("option.anisotropy", "4x"),
+                ("option.scenery_distance", "300 m"),
             ]
         );
     }

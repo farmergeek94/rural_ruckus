@@ -117,17 +117,23 @@ impl Plugin for DirtPlugin {
             return;
         }
         particles::add(app);
-        app.add_systems(Startup, make_looks)
-            .add_systems(
-                OnEnter(GameState::Racing),
-                spawn_dirt.after(TrackSystems::Prepare),
+        // Made on entering the first race, not at `Startup`: a race begun from the command
+        // line enters `Racing` before `Startup` runs.
+        app.add_systems(
+            OnEnter(GameState::Racing),
+            (
+                make_looks.run_if(not(resource_exists::<DirtLooks>)),
+                spawn_dirt,
             )
-            .add_systems(
-                Update,
-                throw_dirt
-                    .after(TruckSystems::PlaceVisuals)
-                    .run_if(in_state(GameState::Racing)),
-            );
+                .chain()
+                .after(TrackSystems::Prepare),
+        )
+        .add_systems(
+            Update,
+            throw_dirt
+                .after(TruckSystems::PlaceVisuals)
+                .run_if(in_state(GameState::Racing)),
+        );
     }
 }
 

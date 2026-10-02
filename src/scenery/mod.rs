@@ -26,7 +26,7 @@ mod motion;
 use avian3d::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
-use bevy::camera::visibility::NoAutoAabb;
+use bevy::camera::visibility::{NoAutoAabb, VisibilityRange};
 use bevy::mesh::morph::{MeshMorphWeights, MorphWeights};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -65,6 +65,7 @@ impl Plugin for SceneryPlugin {
                 animation::cycle_textures,
                 animation::move_keyframes,
                 facing::face_the_camera.after(CameraSystems::Place),
+                keep_draw_distance,
             )
                 .run_if(in_state(GameState::Racing)),
         );
@@ -259,6 +260,34 @@ fn spawn_scenery(
             if let Some(morph) = morph {
                 commands.entity(visual).insert(morph);
             }
+        }
+    }
+}
+
+/// Gives what is drawn of the scenery the draw distance of `TrackSettings::scenery_distance`:
+/// all of it when that changes, and what is new each frame. Bevy then skips an object
+/// further than that from the camera as it skips one outside the view.
+fn keep_draw_distance(
+    mut commands: Commands,
+    settings: Res<TrackSettings>,
+    all: Query<Entity, (With<SceneryObject>, With<Mesh3d>)>,
+    new: Query<Entity, (With<SceneryObject>, Added<Mesh3d>)>,
+) {
+    let objects = if settings.is_changed() {
+        all.iter().collect::<Vec<_>>()
+    } else {
+        new.iter().collect()
+    };
+    let distance = settings.scenery_distance;
+    for object in objects {
+        if distance.is_finite() {
+            // Gone at once at the distance, rather than dithered out: a fade draws the
+            // object in both of its states while it lasts.
+            commands
+                .entity(object)
+                .insert(VisibilityRange::abrupt(0.0, distance));
+        } else {
+            commands.entity(object).remove::<VisibilityRange>();
         }
     }
 }

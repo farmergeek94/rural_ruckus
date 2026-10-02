@@ -29,8 +29,9 @@ fn main() {
     // `--log-fps` prints frame times and how much is drawn, once a second, and `--autopilot`
     // drives the course by itself. See `diagnostics.rs`. `--antialiasing=fxaa` (off, fxaa
     // or msaa; `--no-antialiasing` is off),
-    // `--shadow-cascades=2` (0 for no shadows), `--shadow-distance=100` and `--anisotropy=4`
-    // start with the graphics settings that F2 changes while racing, and
+    // `--shadow-cascades=2` (0 for no shadows), `--shadow-distance=100`, `--anisotropy=4` and
+    // `--scenery-distance=200` (in metres; all scenery is drawn without it) start with the
+    // graphics settings that F2 changes while racing, and
     // `--integrated-graphics` with the set of them for a graphics processor built into the
     // CPU (`front_end::integrated_graphics`, the options screen's INTEGRATED GRAPHICS); an
     // option after it on the command line wins over it. `--opponents=3` races
@@ -133,6 +134,9 @@ fn main() {
             Some(flag) if flag.starts_with("--anisotropy=") => {
                 settings.anisotropy = number(flag);
             }
+            Some(flag) if flag.starts_with("--scenery-distance=") => {
+                settings.scenery_distance = number(flag);
+            }
             Some(flag) if flag.starts_with("--weather=") => {
                 let name = flag.split_once('=').map_or("", |(_, name)| name);
                 if name.eq_ignore_ascii_case("random") {
@@ -163,7 +167,7 @@ fn main() {
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
                     "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-mipmaps --log-fps --no-vsync --fifo --autopilot \
-                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
+                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
             }
