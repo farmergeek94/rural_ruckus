@@ -15,12 +15,31 @@ use bevy::prelude::*;
 
 use crate::truck::decide_tire_contacts;
 
-/// How many times the solver works through each physics step. Avian's own default, and
-/// what its solver is built round: it solves each contact once for each substep, where
-/// Rapier went round each one several times in a single pass. More holds stacked and
-/// stiff things steadier and costs more. Measured on Alpine's ground with eight trucks'
-/// colliders, a step took 1.42 ms with 1 substep and 1.92 ms with 6.
-const SUBSTEPS: u32 = 6;
+/// Choices about how finely the world is simulated, which trade how the trucks handle for
+/// time on the CPU. Insert it before adding `GamePhysicsPlugin`, or change it at any time,
+/// in a race too. The defaults are what the trucks were tuned on.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct PhysicsSettings {
+    /// Physics steps per second. A short step keeps the stiff suspension springs stable.
+    /// What is drawn is interpolated between steps (see `truck/interpolate.rs`), so this
+    /// needn't match the display. Each step costs about the same, so 60 costs half of 120.
+    pub rate: f64,
+    /// How many times the solver works through each physics step. Avian's own default is
+    /// 6, and its solver is built round it: it solves each contact once for each substep,
+    /// where Rapier went round each one several times in a single pass. More holds stacked
+    /// and stiff things steadier and costs more. Measured on Alpine's ground with eight
+    /// trucks' colliders, a step took 1.42 ms with 1 substep and 1.92 ms with 6.
+    pub substeps: u32,
+}
+
+impl Default for PhysicsSettings {
+    fn default() -> Self {
+        Self {
+            rate: 120.0,
+            substeps: 6,
+        }
+    }
+}
 
 /// How fast, in m/s, the solver pushes apart two bodies that overlap. Avian's default is
 /// 4. At 0, a contact only stops two bodies from going further into each other, and never
@@ -39,10 +58,24 @@ impl Plugin for GamePhysicsPlugin {
                 PhysicsSchedule,
                 decide_tire_contacts.in_set(NarrowPhaseSystems::Last),
             )
-            .insert_resource(SubstepCount(SUBSTEPS))
             .insert_resource(SolverConfig {
                 max_overlap_solve_speed: OVERLAP_SOLVE_SPEED,
                 ..default()
-            });
+            })
+            .init_resource::<PhysicsSettings>()
+            // Before the fixed steps of the frame, which read both.
+            .add_systems(
+                First,
+                apply_settings.run_if(resource_changed::<PhysicsSettings>),
+            );
     }
+}
+
+fn apply_settings(
+    settings: Res<PhysicsSettings>,
+    mut fixed: ResMut<Time<Fixed>>,
+    mut substeps: ResMut<SubstepCount>,
+) {
+    fixed.set_timestep_hz(settings.rate);
+    substeps.0 = settings.substeps.max(1);
 }

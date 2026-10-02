@@ -64,6 +64,7 @@ impl Plugin for UiPlugin {
             .init_resource::<TrackPreview>()
             .init_resource::<FolderBrowser>()
             .init_resource::<Theme>()
+            .init_resource::<screens::OptionsScrolled>()
             .add_message::<PlayerDid>()
             .add_message::<TruckHighlighted>()
             .add_message::<TrackHighlighted>()
@@ -90,11 +91,19 @@ impl Plugin for UiPlugin {
                     read_what_to_show,
                     apply_actions,
                     screens::redraw,
+                    screens::scroll_options,
                     theme::show_hovering,
                     showroom::turn,
                 )
                     .chain()
                     .in_set(UiSystems)
+                    .run_if(in_state(FrontEndOpen::Open)),
+            )
+            // Once the line in hand has been laid out, and before it is drawn.
+            .add_systems(
+                PostUpdate,
+                screens::keep_in_hand_in_view
+                    .after(bevy::ui::UiSystems::Layout)
                     .run_if(in_state(FrontEndOpen::Open)),
             );
     }
