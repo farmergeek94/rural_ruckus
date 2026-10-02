@@ -59,6 +59,7 @@ use crate::display::{DisplaySettings, ScreenMode, Vsync};
 use crate::environment::EnvironmentSettings;
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
+use crate::physics::PhysicsSettings;
 use crate::race::{RaceCancelled, RaceSettings};
 use crate::store::{self, Store};
 use crate::track::{self, ChosenTrack, TrackData, TrackSettings};
@@ -178,6 +179,7 @@ impl Plugin for FrontEndPlugin {
             .init_resource::<DirtSettings>()
             .init_resource::<BackdropSettings>()
             .init_resource::<WeatherSettings>()
+            .init_resource::<PhysicsSettings>()
             .init_resource::<KeyBindings>();
         let mut options = Options::in_world(app.world());
         let mut store = self.store.clone();
@@ -739,6 +741,7 @@ struct Options {
     dirt: DirtSettings,
     backdrop: BackdropSettings,
     weather: WeatherSettings,
+    physics: PhysicsSettings,
     keys: KeyBindings,
 }
 
@@ -757,6 +760,7 @@ impl Options {
             dirt: default(),
             backdrop: default(),
             weather: default(),
+            physics: default(),
             keys: default(),
         }
     }
@@ -774,6 +778,7 @@ impl Options {
             dirt: *world.resource(),
             backdrop: *world.resource(),
             weather: *world.resource(),
+            physics: *world.resource(),
             keys: *world.resource(),
         }
     }
@@ -790,6 +795,7 @@ impl Options {
         world.insert_resource(self.dirt);
         world.insert_resource(self.backdrop);
         world.insert_resource(self.weather);
+        world.insert_resource(self.physics);
         world.insert_resource(self.keys);
     }
 }
@@ -808,6 +814,7 @@ struct OptionResources<'w> {
     dirt: ResMut<'w, DirtSettings>,
     backdrop: ResMut<'w, BackdropSettings>,
     weather: ResMut<'w, WeatherSettings>,
+    physics: ResMut<'w, PhysicsSettings>,
     keys: ResMut<'w, KeyBindings>,
 }
 
@@ -825,6 +832,7 @@ impl OptionResources<'_> {
             dirt: *self.dirt,
             backdrop: *self.backdrop,
             weather: *self.weather,
+            physics: *self.physics,
             keys: *self.keys,
         }
     }
@@ -842,6 +850,7 @@ impl OptionResources<'_> {
         self.dirt.set_if_neq(options.dirt);
         self.backdrop.set_if_neq(options.backdrop);
         self.weather.set_if_neq(options.weather);
+        self.physics.set_if_neq(options.physics);
         self.keys.set_if_neq(options.keys);
     }
 }
@@ -864,6 +873,7 @@ struct OptionLine {
 const DISPLAY: &str = "DISPLAY";
 const GRAPHICS: &str = "GRAPHICS";
 const GAME: &str = "GAME";
+const PHYSICS: &str = "PHYSICS";
 // The sections of the controls screen, whose lines are key bindings, which wait for a key
 // (see `ui::Setting::keys`).
 const DRIVING: &str = "DRIVING";
@@ -916,6 +926,9 @@ const SHADOW_CASCADES: [f32; 4] = [0.0, 1.0, 2.0, 4.0];
 /// In metres.
 const SHADOW_DISTANCES: [f32; 4] = [50.0, 100.0, 150.0, 300.0];
 const ANISOTROPIES: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
+/// Physics steps a second, and solver passes in each.
+const PHYSICS_RATES: [f32; 3] = [60.0, 90.0, 120.0];
+const SUBSTEPS: [f32; 2] = [4.0, 6.0];
 /// In metres, the last all of it.
 const SCENERY_DISTANCES: [f32; 4] = [150.0, 300.0, 600.0, f32::INFINITY];
 /// `TruckLooksSettings::reflectance`: none, half of Bevy's default, and Bevy's default.
@@ -1150,6 +1163,24 @@ const OPTIONS: &[OptionLine] = &[
         values: &["Hide", "Show"],
         get: |options| options.help.show as usize,
         set: |options, value| options.help.show = value == 1,
+    },
+    OptionLine {
+        key: "option.physics_rate",
+        section: PHYSICS,
+        label: "Physics rate",
+        detail: "How many times a second the trucks and the world are worked out. Lower costs less time on the CPU, but the trucks were tuned at 120, and the suspension may bounce or shake lower down.",
+        values: &["60 Hz", "90 Hz", "120 Hz"],
+        get: |options| nearest(&PHYSICS_RATES, options.physics.rate as f32),
+        set: |options, value| options.physics.rate = PHYSICS_RATES[value] as f64,
+    },
+    OptionLine {
+        key: "option.substeps",
+        section: PHYSICS,
+        label: "Substeps",
+        detail: "How many times the physics goes over each of its steps. Fewer costs less time on the CPU, and holds stiff springs and stacked things less steadily.",
+        values: &["4", "6"],
+        get: |options| nearest(&SUBSTEPS, options.physics.substeps as f32),
+        set: |options, value| options.physics.substeps = SUBSTEPS[value] as u32,
     },
     // In `Control::ALL`'s order.
     key_line!("key.throttle", DRIVING, Control::Throttle),

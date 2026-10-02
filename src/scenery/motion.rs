@@ -113,9 +113,7 @@ pub(super) fn settle(mut commands: Commands, mut objects: Query<(Entity, &mut Se
         settling.0 = settling.0.saturating_sub(1);
         if settling.0 == 0 {
             commands.queue(SleepBody(entity));
-            commands
-                .entity(entity)
-                .remove::<(Settling, LockedAxes)>();
+            commands.entity(entity).remove::<(Settling, LockedAxes)>();
         }
     }
 }

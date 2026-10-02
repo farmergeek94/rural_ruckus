@@ -9,11 +9,6 @@ use monster_truck_rural_ruckus::{
 /// `trucks/` are.
 const SAVES: &str = "saves/ruckus.redb";
 
-/// Physics steps per second. A short step keeps the stiff suspension springs stable. What
-/// is drawn is interpolated between steps (see `truck/interpolate.rs`), so this needn't
-/// match the display.
-const PHYSICS_HZ: f64 = 120.0;
-
 fn main() {
     let mut app = App::new();
 
@@ -257,7 +252,6 @@ fn main() {
         // with the frame rate.
         physics::GamePhysicsPlugin,
     ))
-    .insert_resource(Time::<Fixed>::from_hz(PHYSICS_HZ))
     // One plugin per slice.
     .add_plugins((
         display::DisplayPlugin,

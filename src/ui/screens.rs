@@ -6,10 +6,15 @@
 //! change is a key press, and one function that draws the model as it stands cannot get
 //! out of step with it. Lists show a window of rows around the highlight instead of
 //! scrolling, so a list can be walked with a stick and there is no scroll position to lose.
+//! The options screen, which has more lines than fit, scrolls: with the mouse wheel, and by
+//! itself to bring the line in hand into view. Where it was scrolled to is kept
+//! (`OptionsScrolled`), so that building the tree again doesn't lose it.
 //!
 //! Text keeps to ASCII while Bevy's built-in font, which has little else, stands in.
 
+use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
+use bevy::ui::UiGlobalTransform;
 use bevy::ui_widgets::Button;
 
 use super::input::Does;
@@ -23,6 +28,24 @@ use super::{
 /// The root of everything drawn here.
 #[derive(Component)]
 pub(super) struct ScreenRoot;
+
+/// What the options screen's lines scroll in.
+#[derive(Component)]
+pub(super) struct OptionsScroll;
+
+/// The line of the options screen that is in hand.
+#[derive(Component)]
+pub(super) struct InHand;
+
+/// How far down the options screen is scrolled, in logical pixels.
+#[derive(Resource, Default)]
+pub(super) struct OptionsScrolled(f32);
+
+/// How far one notch of a mouse wheel scrolls the options, in logical pixels.
+const SCROLL_LINE: f32 = 40.0;
+/// How much room is left above and below the line in hand when it is scrolled into view,
+/// so that the heading over the first line of a section shows with it.
+const SCROLL_MARGIN: f32 = 40.0;
 
 const TITLE: &str = "RURAL RUCKUS";
 /// How much wider than a list the folder browser is, for the long paths in it.
@@ -46,6 +69,7 @@ pub(super) fn redraw(
     browser: Res<FolderBrowser>,
     preview: Res<TrackPreview>,
     theme: Res<Theme>,
+    scrolled: Res<OptionsScrolled>,
     roots: Query<Entity, With<ScreenRoot>>,
 ) {
     let Some(model) = model else {
@@ -68,6 +92,7 @@ pub(super) fn redraw(
         folder: browser.0.as_ref().filter(|_| model.0.browsing.is_some()),
         preview: preview.0.as_ref(),
         theme: &theme,
+        scrolled: scrolled.0,
     };
     commands
         .spawn((
@@ -123,6 +148,7 @@ struct Drawing<'a> {
     folder: Option<&'a Folder>,
     preview: Option<&'a Handle<Image>>,
     theme: &'a Theme,
+    scrolled: f32,
 }
 
 type Parent<'a, 'b> = &'a mut ChildSpawnerCommands<'b>;
@@ -201,6 +227,8 @@ impl Drawing<'_> {
         parent
             .spawn(layout(Node {
                 flex_grow: 1.0,
+                // No taller than the room it is given, so that the options can scroll in it.
+                min_height: px(0),
                 align_items: AlignItems::FlexStart,
                 column_gap: px(self.theme.margin),
                 ..default()
@@ -720,6 +748,29 @@ impl Drawing<'_> {
             .iter()
             .rposition(|column| !column.is_empty())
             .unwrap_or(0);
+        parent
+            .spawn((
+                OptionsScroll,
+                ScrollPosition(Vec2::new(0.0, self.scrolled)),
+                layout(Node {
+                    height: percent(100),
+                    align_items: AlignItems::FlexStart,
+                    column_gap: px(theme.margin),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                }),
+            ))
+            .with_children(|parent| self.option_columns(parent, &sections, columns, last));
+    }
+
+    fn option_columns(
+        &self,
+        parent: Parent,
+        sections: &[(&str, Vec<usize>)],
+        columns: [&[(&str, Vec<usize>)]; 2],
+        last: usize,
+    ) {
+        let theme = self.theme;
         for (number, column) in columns.into_iter().enumerate() {
             if column.is_empty() && number != last {
                 continue;
@@ -814,6 +865,7 @@ impl Drawing<'_> {
                     Color::NONE
                 }),
             ))
+            .insert_if(InHand, || in_hand)
             .with_children(|line| {
                 line.spawn((
                     Text::new(setting.label.to_uppercase()),
@@ -1221,5 +1273,68 @@ impl Drawing<'_> {
                     ));
                 }
             });
+    }
+}
+
+/// Scrolls the options with the mouse wheel, as far as there is to scroll.
+pub(super) fn scroll_options(
+    // Absent in an app without input.
+    wheel: Option<Res<AccumulatedMouseScroll>>,
+    mut scrolled: ResMut<OptionsScrolled>,
+    mut scrolls: Query<(&mut ScrollPosition, &ComputedNode), With<OptionsScroll>>,
+) {
+    let Some(wheel) = wheel else {
+        return;
+    };
+    if wheel.delta.y == 0.0 {
+        return;
+    }
+    let by = match wheel.unit {
+        MouseScrollUnit::Line => wheel.delta.y * SCROLL_LINE,
+        MouseScrollUnit::Pixel => wheel.delta.y,
+    };
+    for (mut position, node) in &mut scrolls {
+        // The wheel turned towards the player scrolls down, which shows what is lower.
+        let most = (node.content_size.y - node.size.y).max(0.0) * node.inverse_scale_factor;
+        scrolled.0 = (position.y - by).clamp(0.0, most);
+        position.y = scrolled.0;
+    }
+}
+
+/// The options' scroll, and where and how big what shows of it is.
+type ScrollView<'a> = (
+    &'a mut ScrollPosition,
+    &'a ComputedNode,
+    &'a UiGlobalTransform,
+);
+
+/// Once the tree has been built again and laid out, scrolls the options just far enough
+/// that the line in hand shows, as when the arrows have moved to one out of sight. Only
+/// then, so that the wheel can scroll away from it.
+pub(super) fn keep_in_hand_in_view(
+    lines: Query<(&ComputedNode, &UiGlobalTransform), Added<InHand>>,
+    mut scrolls: Query<ScrollView, (With<OptionsScroll>, Without<InHand>)>,
+    mut scrolled: ResMut<OptionsScrolled>,
+) {
+    let Ok((line, line_at)) = lines.single() else {
+        return;
+    };
+    for (mut position, node, at) in &mut scrolls {
+        let scale = node.inverse_scale_factor;
+        // From the top of what shows, in logical pixels. A transform is a node's middle.
+        let top_of_view = at.translation.y - node.size.y / 2.0;
+        let top = (line_at.translation.y - line.size.y / 2.0 - top_of_view) * scale;
+        let bottom = top + line.size.y * scale;
+        let height = node.size.y * scale;
+        let by = if top < SCROLL_MARGIN {
+            top - SCROLL_MARGIN
+        } else if bottom > height - SCROLL_MARGIN {
+            bottom - (height - SCROLL_MARGIN)
+        } else {
+            continue;
+        };
+        let most = (node.content_size.y - node.size.y).max(0.0) * scale;
+        scrolled.0 = (position.y + by).clamp(0.0, most);
+        position.y = scrolled.0;
     }
 }
