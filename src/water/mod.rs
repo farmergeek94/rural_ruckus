@@ -11,6 +11,7 @@
 //! - `shore`: where the water meets the land: the foam and surf that `water.wgsl` draws
 //!   there, and the spray thrown up where the swell and the trucks' ripples come in.
 //! - With `WaterSettings::flat`, `surface` draws a plain flat plane instead of both.
+//! - `underwater`: the tint over the picture while the camera is under the surface.
 //! - `ice`: in snow the water is frozen, a solid sheet of ice that trucks drive on. Then
 //!   the water neither holds trucks up nor splashes, and its surface is hidden.
 //!
@@ -30,6 +31,7 @@ mod ripples;
 mod shore;
 mod splash;
 mod surface;
+mod underwater;
 mod wind;
 
 use bevy::asset::embedded_asset;
@@ -76,6 +78,7 @@ impl Plugin for WaterPlugin {
                     OnEnter(GameState::Racing),
                     (
                         shore::find_shore,
+                        underwater::spawn_tint,
                         (
                             splash::make_droplet_looks
                                 .run_if(not(resource_exists::<splash::DropletLooks>)),
@@ -91,6 +94,7 @@ impl Plugin for WaterPlugin {
                         (splash::make_waves, shore::splash_shore).run_if(not(ice::frozen)),
                         splash::spread_rings,
                         surface::show_waves,
+                        underwater::tint_under_water,
                     )
                         .chain()
                         .after(TruckSystems::PlaceVisuals)
