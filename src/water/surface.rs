@@ -33,10 +33,13 @@ use crate::game_state::GameState;
 use crate::track::Track;
 
 /// What the water's surface looks like. Monster Truck Madness 2's tracks do not say, so
-/// it is a deep teal, see-through looking down into it, so that the ground under shallow
-/// water shows and a road through a ford can still be followed. `water.wgsl` makes it
-/// less see-through at a glancing angle.
-const WATER_COLOR: Color = Color::srgba(0.04, 0.26, 0.34, 0.55);
+/// it is a deep teal, a little see-through looking down into it, so that the ground under
+/// shallow water shows faintly and a road through a ford can still be followed.
+/// `water.wgsl` makes it less see-through at a glancing angle.
+const WATER_COLOR: Color = Color::srgba(0.04, 0.26, 0.34, 0.75);
+/// The flat water's (`WaterSettings::flat`) alpha, which has no glancing angle to make it
+/// less see-through, so is a little less see-through everywhere.
+const FLAT_WATER_ALPHA: f32 = 0.85;
 
 /// How far the patch of moving water round the camera reaches, in metres along a side,
 /// and how far apart its vertices are. Closer vertices shape shorter waves; the shortest
@@ -226,7 +229,7 @@ pub(super) fn spawn_water(
         Transform::from_xyz(0.0, level, 0.0),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(size / 2.0)).mesh())),
         MeshMaterial3d(flat_materials.add(StandardMaterial {
-            base_color: WATER_COLOR,
+            base_color: WATER_COLOR.with_alpha(FLAT_WATER_ALPHA),
             alpha_mode: AlphaMode::Blend,
             perceptual_roughness: 0.08,
             reflectance: 0.3,
