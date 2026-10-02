@@ -50,6 +50,25 @@ pub struct EnvironmentSettings {
     /// How far from the camera shadows reach, in metres. Further takes in more to draw,
     /// and spreads the same shadow maps thinner.
     pub shadow_distance: f32,
+    /// How what is drawn is lit (see `lighting`). May be changed while racing.
+    pub lighting: Lighting,
+}
+
+/// How what is drawn is lit, from the cheapest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lighting {
+    /// Not at all: each material that can be is drawn as its plain colour and texture.
+    Off,
+    /// The ground, the scenery and the backdrop lit by the sun, its shadows and the light
+    /// from all round, as matte surfaces, and by nothing else. The rest as `Full`.
+    Simple,
+    /// Bevy's own lighting, everything included.
+    #[default]
+    Full,
+}
+
+impl Lighting {
+    pub const ALL: [Lighting; 3] = [Lighting::Off, Lighting::Simple, Lighting::Full];
 }
 
 impl Default for EnvironmentSettings {
@@ -58,6 +77,7 @@ impl Default for EnvironmentSettings {
         Self {
             shadow_cascades: 4,
             shadow_distance: 150.0,
+            lighting: Lighting::Full,
         }
     }
 }
@@ -119,6 +139,7 @@ mod tests {
         let settings = EnvironmentSettings {
             shadow_cascades: 2,
             shadow_distance: 80.0,
+            ..default()
         };
         assert!(settings.shadows());
         let bounds = settings.cascades().bounds;
@@ -132,6 +153,7 @@ mod tests {
         let settings = EnvironmentSettings {
             shadow_cascades: 0,
             shadow_distance: 0.0,
+            ..default()
         };
         assert!(!settings.shadows());
         assert_eq!(settings.cascades().bounds.len(), 1);

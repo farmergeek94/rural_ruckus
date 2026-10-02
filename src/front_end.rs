@@ -57,7 +57,7 @@ use crate::camera::{Antialiasing, CameraSettings};
 use crate::controls_help::ControlsHelpSettings;
 use crate::dirt::DirtSettings;
 use crate::display::{DisplaySettings, ScreenMode, Vsync};
-use crate::environment::EnvironmentSettings;
+use crate::environment::{EnvironmentSettings, Lighting};
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
 use crate::physics::PhysicsSettings;
@@ -1048,6 +1048,15 @@ const OPTIONS: &[OptionLine] = &[
         set: |options, value| options.environment.shadow_distance = SHADOW_DISTANCES[value],
     },
     OptionLine {
+        key: "option.lighting",
+        section: GRAPHICS,
+        label: "Lighting",
+        detail: "How the world is lit. Off draws everything in its plain colours, with no light, shade or shadow: the least each pixel can cost. Simple lights the ground and the scenery by the sun, its shadows and the sky alone, with no shine and no lamps. Full is all of it.",
+        values: &["Off", "Simple", "Full"],
+        get: |options| place(&Lighting::ALL, &options.environment.lighting),
+        set: |options, value| options.environment.lighting = Lighting::ALL[value],
+    },
+    OptionLine {
         key: "option.anisotropy",
         section: GRAPHICS,
         label: "Filtering",
@@ -1238,7 +1247,8 @@ const OPTIONS: &[OptionLine] = &[
 /// a pixel give way to FXAA, a pass over the finished picture, and the glow goes, since
 /// it draws the picture in high dynamic range: both cost most where memory is slowest.
 /// The sun's shadows keep two of their four maps, over 100 m, and the ground's filtering
-/// keeps a quarter of its sharpness. Scenery is drawn to 300 m, which measured on Snake
+/// keeps a quarter of its sharpness. The ground and the scenery are lit the simple way
+/// (`lighting.rs`): drawing them unlit was measured to save a great deal on such a GPU. Scenery is drawn to 300 m, which measured on Snake
 /// River Canyon (`--no-vsync`, no shadows, HD Graphics 620 at 1366 x 768) took the
 /// meshes drawn from about 1400 to 290 and the frame from 21 ms to the screen's 16.7.
 /// The rest are chosen, not measured: measure with the F2 panel and `--no-vsync` (see
@@ -1253,6 +1263,7 @@ pub fn integrated_graphics(
     camera.bloom = false;
     environment.shadow_cascades = 2;
     environment.shadow_distance = 100.0;
+    environment.lighting = Lighting::Simple;
     track.anisotropy = 4;
     track.scenery_distance = 300.0;
 }
@@ -1263,11 +1274,12 @@ const QUALITY: &str = "option.quality";
 /// The lines each level of Quality sets: those that cost time on every frame. The rest of
 /// the graphics (mipmaps, which save time, and the trucks' shine, which is a look) and the
 /// physics are left as the player has them.
-const QUALITY_LINES: [&str; 10] = [
+const QUALITY_LINES: [&str; 11] = [
     "option.antialiasing",
     "option.bloom",
     "option.shadows",
     "option.shadow_distance",
+    "option.lighting",
     "option.anisotropy",
     "option.scenery_distance",
     "option.decorations",
@@ -1279,8 +1291,9 @@ const QUALITY_LINES: [&str; 10] = [
 /// Quality's levels, fastest first, each as it changes the defaults. Balanced is
 /// `integrated_graphics`, and Best is the defaults.
 const QUALITY_LEVELS: [fn(&mut Options); 5] = [
-    // Fastest: everything that can go, goes.
+    // Fastest: everything that can go, goes, the lighting with it.
     |options| {
+        options.environment.lighting = Lighting::Off;
         options.camera.antialiasing = Antialiasing::Off;
         options.camera.bloom = false;
         options.environment.shadow_cascades = 0;
@@ -1292,8 +1305,10 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
         options.dirt.on = false;
         options.backdrop.on = false;
     },
-    // Fast: one shadow map near the truck, and the dirt and the hills back.
+    // Fast: the simple lighting, one shadow map near the truck, and the dirt and the hills
+    // back.
     |options| {
+        options.environment.lighting = Lighting::Simple;
         options.camera.antialiasing = Antialiasing::Fxaa;
         options.camera.bloom = false;
         options.environment.shadow_cascades = 1;

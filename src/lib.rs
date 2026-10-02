@@ -30,6 +30,7 @@ pub mod game_state;
 pub mod graphics_debug;
 pub mod hd_texture;
 pub mod keys;
+pub mod lighting;
 pub mod mipmaps;
 pub mod opponents;
 pub mod particles;

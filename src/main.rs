@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use monster_truck_rural_ruckus::{
     backdrop, base_game, camera, controls_help, diagnostics, dirt, display, environment, footing,
-    frame_pacing, front_end, game_state, graphics_debug, opponents, physics, physics_debug, race,
-    scenery, sky, store, track, truck, water, weather,
+    frame_pacing, front_end, game_state, graphics_debug, lighting, opponents, physics,
+    physics_debug, race, scenery, sky, store, track, truck, water, weather,
 };
 
 /// Where what the player chose is remembered, beside the working directory as `tracks/` and
@@ -22,7 +22,8 @@ fn main() {
     // lights the ground as if it were rounded off,
     // `--no-mipmaps` draws textures without their smaller copies,
     // `--log-fps` prints frame times and how much is drawn, once a second, and `--autopilot`
-    // drives the course by itself. See `diagnostics.rs`. `--antialiasing=fxaa` (off, fxaa
+    // drives the course by itself. See `diagnostics.rs`. `--unlit` draws without lighting,
+    // and `--simple-lighting` with the cheap lighting (`lighting.rs`). `--antialiasing=fxaa` (off, fxaa
     // or msaa; `--no-antialiasing` is off),
     // `--shadow-cascades=2` (0 for no shadows), `--shadow-distance=100`, `--anisotropy=4` and
     // `--scenery-distance=200` (in metres; all scenery is drawn without it) start with the
@@ -101,6 +102,10 @@ fn main() {
             Some("--no-mipmaps") => settings.mipmaps = false,
             Some("--log-fps") => log_fps = true,
             Some("--autopilot") => autopilot = true,
+            Some("--unlit") => environment_settings.lighting = environment::Lighting::Off,
+            Some("--simple-lighting") => {
+                environment_settings.lighting = environment::Lighting::Simple;
+            }
             Some("--no-vsync") => vsync = false,
             Some("--fifo") => fifo = true,
             Some("--race") => race_at_once = true,
@@ -163,7 +168,7 @@ fn main() {
             }
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
-                    "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-mipmaps --log-fps --no-vsync --fifo --autopilot \
+                    "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
                      --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
@@ -257,7 +262,7 @@ fn main() {
     // One plugin per slice.
     .add_plugins((
         display::DisplayPlugin,
-        environment::EnvironmentPlugin,
+        (environment::EnvironmentPlugin, lighting::LightingPlugin),
         track::TrackPlugin,
         scenery::SceneryPlugin,
         (backdrop::BackdropPlugin, sky::SkyPlugin),

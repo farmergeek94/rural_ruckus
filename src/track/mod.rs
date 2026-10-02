@@ -39,7 +39,8 @@ pub use height_grid::{Diagonals, HeightGrid};
 pub use map::{MAP_COURSE, MAP_GATE, MAP_START, map_image};
 pub use pod_import::{BaseTrack, load_base, load_pod, peek_base, peek_pod, track_from_pod};
 pub use tile_material::{
-    GroundShading, MAX_TEXTURE_CYCLES, TileCycles, TileMaterial, TileTextures, tile_array,
+    GroundShading, MAX_TEXTURE_CYCLES, TileCycles, TileLighting, TileMaterial, TileTextures,
+    tile_array,
 };
 
 /// The track in use, as it is raced on. Insert one before adding `TrackPlugin` to choose

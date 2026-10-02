@@ -50,6 +50,17 @@ pub struct TileTextures {
     /// Which frame each animated texture is on. All 0 for a material with none.
     #[uniform(105)]
     pub cycles: TileCycles,
+    /// How a lit material is lit. Set by the `lighting` slice.
+    #[uniform(106)]
+    pub lighting: TileLighting,
+}
+
+/// How `tiles.wgsl` lights a lit material, as it declares it.
+#[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
+pub struct TileLighting {
+    /// 1 for the cheap way: the sun, its shadows and the ambient light on a matte surface,
+    /// and nothing else. 0 for Bevy's own.
+    pub simple: u32,
 }
 
 /// How many animated textures one material can show. Past that many, a texture shows its
