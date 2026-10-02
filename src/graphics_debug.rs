@@ -305,6 +305,7 @@ mod tests {
             &EnvironmentSettings {
                 shadow_cascades: 0,
                 shadow_distance: 100.0,
+                ..default()
             },
             &TrackSettings::default(),
             FrameReport::of(&[

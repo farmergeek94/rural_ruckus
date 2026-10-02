@@ -11,6 +11,10 @@
 // The ground's material can also carry a normal map of the smooth surface through its
 // heights (`track/shading.rs`), covering the whole track. With `ground.lit_smoothly` set, each
 // pixel is lit by the normal there instead of by its flat triangle's.
+//
+// With `lighting.simple` set, a lit material is lit the cheap way (`simple_lighting`): the
+// sun, its shadows and the light from all round, on a plain matte surface. No shine, no
+// lamps, no environment map. See `lighting.rs`.
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -27,7 +31,13 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+    pbr_types::PbrInput,
+    mesh_view_bindings as view_bindings,
+    mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT,
+    mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
+    shadows::fetch_directional_shadow,
 }
+#import bevy_render::maths::PI
 #endif
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var tiles: texture_2d_array<f32>;
@@ -49,6 +59,51 @@ struct TileCycles {
     offsets: array<vec4<u32>, 8>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<uniform> cycles: TileCycles;
+
+// `track::TileLighting`.
+struct TileLighting {
+    // 1 to light the cheap way.
+    simple: u32,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(106) var<uniform> lighting: TileLighting;
+
+#ifndef PREPASS_PIPELINE
+// A matte surface lit by each directional light, through its shadows, and by the ambient
+// light: Bevy's own diffuse terms with the shine and everything else left out. Lambert's
+// 1/pi stands in for Burley's, which it equals on a rough surface seen square on.
+fn simple_lighting(in: PbrInput) -> vec4<f32> {
+    let diffuse_color = in.material.base_color.rgb * (1.0 - in.material.metallic);
+    let view_z = dot(vec4<f32>(
+        view_bindings::view.view_from_world[0].z,
+        view_bindings::view.view_from_world[1].z,
+        view_bindings::view.view_from_world[2].z,
+        view_bindings::view.view_from_world[3].z
+    ), in.world_position);
+
+    var light = view_bindings::lights.ambient_color.rgb * in.diffuse_occlusion;
+    let receives_shadows = (in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u;
+    for (var i: u32 = 0u; i < view_bindings::lights.n_directional_lights; i = i + 1u) {
+        let sun = &view_bindings::lights.directional_lights[i];
+        let n_dot_l = dot(in.N, (*sun).direction_to_light);
+        // Facing away, it is in its own shade, and no shadow map need be read.
+        if n_dot_l <= 0.0 {
+            continue;
+        }
+        var shadow = 1.0;
+        if receives_shadows && ((*sun).flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+            shadow = fetch_directional_shadow(i, in.world_position, in.world_normal, view_z, in.frag_coord.xy);
+        }
+        light += (*sun).color.rgb * (n_dot_l * shadow / PI);
+    }
+
+    let emissive = in.material.emissive;
+    let emissive_light = emissive.rgb * mix(1.0, view_bindings::view.exposure, emissive.a);
+    return vec4<f32>(
+        view_bindings::view.exposure * diffuse_color * light + emissive_light,
+        in.material.base_color.a,
+    );
+}
+#endif
 
 @fragment
 fn fragment(
@@ -84,10 +139,12 @@ fn fragment(
     let out = deferred_output(in, pbr_input);
 #else
     var out: FragmentOutput;
-    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
-        out.color = apply_pbr_lighting(pbr_input);
-    } else {
+    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u {
         out.color = pbr_input.material.base_color;
+    } else if lighting.simple != 0u {
+        out.color = simple_lighting(pbr_input);
+    } else {
+        out.color = apply_pbr_lighting(pbr_input);
     }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 #endif
