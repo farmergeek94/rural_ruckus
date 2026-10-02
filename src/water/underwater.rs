@@ -11,8 +11,9 @@ use crate::game_state::GameState;
 use crate::track::Track;
 use crate::weather::WeatherSettings;
 
-/// The tint, over everything the camera sees under the water.
-const UNDERWATER_TINT: Color = Color::srgba(0.02, 0.2, 0.32, 0.6);
+/// The tint, over everything the camera sees under the water. A higher alpha hides the
+/// scene more; a darker colour makes the picture darker.
+const UNDERWATER_TINT: Color = Color::srgba(0.1, 0.45, 0.6, 0.55);
 
 /// On the layer that tints the picture under water.
 #[derive(Component)]
