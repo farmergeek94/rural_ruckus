@@ -66,6 +66,7 @@ impl Plugin for SceneryPlugin {
                 animation::move_keyframes,
                 facing::face_the_camera.after(CameraSystems::Place),
                 keep_draw_distance,
+                show_decorations,
             )
                 .run_if(in_state(GameState::Racing)),
         );
@@ -75,6 +76,11 @@ impl Plugin for SceneryPlugin {
 /// Every entity of the scenery: the objects, and the drawn copies of those that move.
 #[derive(Component)]
 pub struct SceneryObject;
+
+/// On a drawn object that trucks go through: a bush, a tree or a sign that isn't solid.
+/// Hiding one changes nothing but the look (`TrackSettings::decorations`).
+#[derive(Component)]
+struct Decoration;
 
 fn spawn_scenery(
     mut commands: Commands,
@@ -248,6 +254,9 @@ fn spawn_scenery(
                 if object.faces_camera && collider.is_none() {
                     entity.insert(facing::FacesCamera);
                 }
+                if collider.is_none() && looks_of_object.is_some() {
+                    entity.insert(Decoration);
+                }
                 if let Some(collider) = collider {
                     entity.insert((RigidBody::Static, collider.clone(), bouncy()));
                 }
@@ -267,6 +276,24 @@ fn spawn_scenery(
 /// Gives what is drawn of the scenery the draw distance of `TrackSettings::scenery_distance`:
 /// all of it when that changes, and what is new each frame. Bevy then skips an object
 /// further than that from the camera as it skips one outside the view.
+/// Shows or hides the decorations as `TrackSettings::decorations` says: all of them when
+/// that changes, and each new one.
+fn show_decorations(
+    settings: Res<TrackSettings>,
+    mut decorations: Query<(Ref<Decoration>, &mut Visibility)>,
+) {
+    let shown = if settings.decorations {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for (decoration, mut visibility) in &mut decorations {
+        if settings.is_changed() || decoration.is_added() {
+            visibility.set_if_neq(shown);
+        }
+    }
+}
+
 fn keep_draw_distance(
     mut commands: Commands,
     settings: Res<TrackSettings>,
