@@ -92,6 +92,10 @@ pub struct TrackSettings {
     /// graphics processor every frame, however small it is on screen. Solid ones stay solid
     /// beyond it. May be changed while racing.
     pub scenery_distance: f32,
+    /// Whether the scenery that trucks go through, such as most bushes and trees, is drawn.
+    /// What is solid is drawn either way, so that nothing unseen stands in the way. May be
+    /// changed while racing.
+    pub decorations: bool,
 }
 
 impl Default for TrackSettings {
@@ -101,6 +105,7 @@ impl Default for TrackSettings {
             mipmaps: true,
             anisotropy: 16,
             scenery_distance: f32::INFINITY,
+            decorations: true,
         }
     }
 }

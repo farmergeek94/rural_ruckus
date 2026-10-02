@@ -34,7 +34,8 @@ fn main() {
     // `--weather=rain` races in that weather (clear, overcast, fog, rain, storm or snow), and
     // `--weather=random` in one picked at random, and `--time=night` at that time of day
     // (day, dusk or night). `--no-backdrop` leaves out the distant
-    // hills a track draws round its horizon. `--base-game=FOLDER` looks for the base game's
+    // hills a track draws round its horizon, and `--no-decorations` the scenery that trucks
+    // drive through. `--base-game=FOLDER` looks for the base game's
     // archives, which tracks and trucks borrow from, in FOLDER and its subfolders, in place
     // of the Shared and language folders chosen in the front end (or `base/`, if none was);
     // it may be given more than once.
@@ -119,6 +120,7 @@ fn main() {
                 &mut settings,
             ),
             Some("--no-backdrop") => backdrop_settings.on = false,
+            Some("--no-decorations") => settings.decorations = false,
             Some(flag) if flag.starts_with("--base-game=") => {}
             Some(flag) if flag.starts_with("--shadow-cascades=") => {
                 environment_settings.shadow_cascades = number(flag);
@@ -162,7 +164,7 @@ fn main() {
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
                     "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-mipmaps --log-fps --no-vsync --fifo --autopilot \
-                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
+                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
             }
