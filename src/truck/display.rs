@@ -9,6 +9,7 @@ use bevy::prelude::*;
 
 use super::axle::{Axle, LinkToAxle};
 use super::config::FRONT_WHEELS;
+use super::interpolate::WheelPose;
 use super::looks::{Models, Paintwork, Part};
 use super::{TruckConfig, TruckData, TruckLooksSettings, Wheel};
 
@@ -130,6 +131,7 @@ pub(super) fn build(
                     tread_speed: 0.0,
                     tilt: 0.0,
                 },
+                WheelPose::at(Transform::from_translation(rest)),
                 Transform::from_translation(rest),
                 Visibility::default(),
                 ChildOf(parent),

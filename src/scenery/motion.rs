@@ -9,8 +9,8 @@
 //! to sleep a few steps after it is made (`settle`), and until then it is held where it was
 //! put: it neither turns nor moves. Its collider is the hull round its model, since it must
 //! meet fixed scenery as well as the ground and the trucks, and no contacts are found
-//! between two triangle meshes. A tire that stands on it pushes it back (see
-//! `truck/drive.rs`).
+//! between two triangle meshes. A tire knocks a light one aside, and climbs a
+//! heavy one (see `truck/drive.rs`).
 //!
 //! Every loose object that is awake costs its contacts in every step, so one must never be
 //! left awake by mistake. It is not swept (CCD) either: the physics already makes a contact

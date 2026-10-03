@@ -52,14 +52,16 @@ pub struct TruckConfig {
     /// below its upper limit, or nearer, is pressing into it. Longer firms up big hits
     /// sooner, and leaves less of the travel soft.
     pub bump_stop_travel: f32,
-    /// Stiffness of the bump stop, in N/m, per wheel, on top of the spring's. It is rubber:
-    /// what it stores as a wheel presses into it, it gives back as the wheel comes out, so
-    /// a wheel driven hard into it comes back off it with a little upward push instead of
-    /// stopping dead. Higher stops a wheel sooner, and pushes it back harder.
+    /// Stiffness of the bump stop, in N/m, per wheel, on top of the spring's, at the top of
+    /// the travel: it comes in from nothing where the stop begins, and stiffens to this. It
+    /// is rubber: what it stores as a wheel presses into it, it gives back as the wheel
+    /// comes out, so a wheel driven hard into it comes back off it with a little upward push
+    /// instead of stopping dead. Higher stops a wheel sooner, and pushes it back harder.
     pub bump_stop_spring: f32,
-    /// How much of a hit the bump stop soaks up, in N·s/m, per wheel. It acts only while a
-    /// wheel presses into the stop, not while it comes back out, which is what lets the
-    /// stop give a little back. Lower and the truck bounces off its stops.
+    /// How much of a hit the bump stop soaks up, in N·s/m, per wheel, at the top of the
+    /// travel, coming in from nothing as the spring does. It acts only while a wheel presses
+    /// into the stop, not while it comes back out, which is what lets the stop give a little
+    /// back. Lower and the truck bounces off its stops.
     pub bump_stop_damper: f32,
 
     /// Peak drive force in N, per wheel.

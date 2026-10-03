@@ -41,6 +41,21 @@
 //! same truck rose 1.15 m onto the other. Seven computer trucks racing on Alpine for two
 //! minutes were tipped past 60 degrees in 3 of 1912 samples, where they had been in 61.
 //!
+//! Light loose scenery -- a cone, a sign, a small rock (`drive::LIGHT_LOOSE`) -- is met as
+//! another truck is, and for the same reason: `drive` does not sweep onto it (see its
+//! notes), so every contact a tire has with it is kept, and one low on the tire is made a
+//! ramp, which the tire rides up while pushing the object down and on. Left to the sweep,
+//! the contact under the tread was dropped here, and a cone ended up inside the tire.
+//! Heavy loose scenery, such as a parked car, is climbed as fixed scenery is.
+//!
+//! A wall a tire is driven into -- a face too steep for the suspension to roll up, such as
+//! a ledge, the side of a parked car, or the side of another truck above where a tire
+//! rides up it -- it climbs by its grip, as a monster truck's
+//! front tires walk up a car (`climb`). The contact is given the tire's grip, and told
+//! that the tire's tread is turning up the face, so that friction carries the tire up it
+//! as hard as the truck pushes it in. Only under throttle, and less as the nose points up,
+//! so that a truck tries a building and falls back rather than going over on its back.
+//!
 //! `physics::GamePhysicsPlugin` runs `decide_tire_contacts`. An app that sets up the
 //! physics without it keeps every contact, and its trucks bump into each other rather
 //! than climb.
@@ -52,8 +67,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, TaskPool};
 
-use super::drive::{AXLE_ALONG_X, SIDEWALL, UPWARD, below_the_axle};
-use super::{Truck, WheelCollider, WheelCore};
+use super::drive::{AXLE_ALONG_X, LIGHT_LOOSE, SIDEWALL, UPWARD, below_the_axle};
+use super::{Truck, TruckConfig, TruckInput, WheelCollider, WheelCore};
 use crate::collision_groups::GROUND;
 
 #[derive(SystemParam)]
@@ -84,23 +99,48 @@ pub struct TireContacts<'w, 's> {
     layers: Query<'w, 's, &'static CollisionLayers>,
     /// A core is its wheel collider's child, and so the truck's through the physics.
     cores: Query<'w, 's, &'static ColliderOf, With<WheelCore>>,
+    /// The body each collider is part of, and what kind of body that is.
+    bodies: Query<'w, 's, &'static ColliderOf>,
+    kinds: Query<'w, 's, (&'static RigidBody, &'static ComputedMass)>,
+    /// What each truck's driver asks of it, and its tires' grip, for `climb`.
+    drivers: Query<'w, 's, (&'static TruckInput, &'static TruckConfig), With<Truck>>,
 }
 
 /// How steeply a tire rides up another truck that it is driven into, in radians above
 /// level: the push that holds it back is turned up at least this far. Steeper lifts it
 /// sooner and takes less of its speed, and pushes the other truck down harder.
-const RAMP: f32 = 25.0 * std::f32::consts::PI / 180.0;
+const RAMP: f32 = 35.0 * std::f32::consts::PI / 180.0;
 
 /// How high above its own axle a tire may meet another truck and still ride up it, as a
 /// fraction of the tire's radius. Higher, the other truck is a wall taller than the tire,
 /// which no tire climbs.
 const RAMP_REACH: f32 = 0.3;
 
+
+
+/// How fast a tire driven into a wall walks up it under full throttle, in m/s. It is also
+/// the most a hit on a wall can throw the tire up by, since friction only carries the tire
+/// up to this speed. Higher climbs quicker, and pops up more off a wall met at speed.
+/// A first guess, which wants driving.
+const CLIMB_SPEED: f32 = 3.0;
+
+/// How squarely a face must stand against the way a tire is driven for the tire to climb
+/// it, as the cosine of the angle between them: 0.5 is 60 degrees. Lower climbs walls met
+/// more at a glance, and scrapes along fewer.
+const WALL_FACING: f32 = 0.5;
+
+/// How far up the way the truck is driven may point for a tire to climb at full strength,
+/// and where the climb has faded to nothing, in radians. Between them it fades evenly.
+/// Higher lets a truck go up taller walls, and go over on its back from one sooner.
+const CLIMB_PITCH_FULL: f32 = 35.0 * std::f32::consts::PI / 180.0;
+const CLIMB_PITCH_NONE: f32 = 55.0 * std::f32::consts::PI / 180.0;
+
 impl TireContacts<'_, '_> {
     /// Whether a wheel collider that is `pushed` this way, in the world, at these points
     /// of its own cylinder (whose axis is Y), would rather be carried by its suspension.
     ///
-    /// Against another truck, never: the cast does not see it (see the module's notes).
+    /// Against another truck or light loose scenery, never: the cast does not see either
+    /// (see the module's notes).
     /// Against anything else but the ground -- a wall, a rail, a rock -- it is the tread
     /// pushed up the truck, and nothing else: the cast climbs that, and the rest should
     /// bump.
@@ -145,7 +185,21 @@ impl TireContacts<'_, '_> {
                     .any(|&point| on_the_tread(point) && !below_the_axle(steer, point));
             return !lying_on_it;
         }
-        !self.is_truck_part(other) && upward && at.iter().copied().any(on_the_tread)
+        !self.is_truck_part(other)
+            && !self.is_loose(other)
+            && upward
+            && at.iter().copied().any(on_the_tread)
+    }
+
+    /// Whether this collider is part of light loose scenery: a body that can be knocked
+    /// about, lighter than `LIGHT_LOOSE`, and not a truck.
+    fn is_loose(&self, collider: Entity) -> bool {
+        let body = self.bodies.get(collider).map_or(collider, |of| of.body);
+        !self.trucks.contains(body)
+            && self
+                .kinds
+                .get(body)
+                .is_ok_and(|(kind, mass)| kind.is_dynamic() && mass.value() < LIGHT_LOOSE)
     }
 
     /// Whether this collider is part of a truck: its body, a wheel collider or a core.
@@ -164,9 +218,10 @@ impl TireContacts<'_, '_> {
         }
     }
 
-    /// If a wheel collider is driven into another truck low enough on the tire to ride up
-    /// it, that wheel and the way it is pushed, in the world. Where two tires meet, both may
-    /// be low enough, and the one driven into the other the faster is the one that rides up.
+    /// If a wheel collider is driven into another truck, or into light loose scenery, low
+    /// enough on the tire to ride up it, front on or sideways, that wheel and the way it is
+    /// pushed, in the world. Where two tires meet, both may be low enough, and the one
+    /// driven into the other the faster is the one that rides up.
     fn riding_up(
         &self,
         candidates: [(Entity, Entity, Vec3, &[Vec3]); 2],
@@ -177,20 +232,165 @@ impl TireContacts<'_, '_> {
                 let (collider, wheel_at, child_of, _) = self.wheels.get(wheel).ok()?;
                 let cylinder = collider.shape().as_cylinder()?;
                 let truck = child_of.0;
-                if !self.is_truck_part(other) || self.truck_owning(other) == Some(truck) {
+                let climbable = self.is_truck_part(other) || self.is_loose(other);
+                if !climbable || self.truck_owning(other) == Some(truck) {
                     return None;
                 }
-                let low_enough = at.iter().any(|&point| {
-                    let on_the_tread = point.xz().length() / cylinder.radius > SIDEWALL;
-                    let above_the_axle = (wheel_at.rotation * point).y;
-                    on_the_tread && above_the_axle <= RAMP_REACH * cylinder.radius
-                });
+                // On the tread or on the side of the tire alike, so that a truck sliding
+                // sideways into another rides up it as one driven into it nose first does.
+                // Met only on the tread, the side of a tire was a wall: measured, a truck
+                // sliding sideways into a parked one at 10 m/s never rose onto it, and end
+                // on it bounced off and was thrown 18 m away.
+                let low_enough = at
+                    .iter()
+                    .any(|&point| (wheel_at.rotation * point).y <= RAMP_REACH * cylinder.radius);
                 let (_, _, velocity, ..) = self.trucks.get(truck).ok()?;
                 let driven_in = velocity.0.dot(-pushed);
                 low_enough.then_some((wheel, pushed, driven_in))
             })
             .max_by(|a, b| a.2.total_cmp(&b.2))
             .map(|(wheel, pushed, _)| (wheel, pushed))
+    }
+
+    /// Make a wheel collider that is driven into a face it cannot roll onto walk up it by
+    /// its grip (see the module's notes), and say whether it was. `pushed` is the way the
+    /// face pushes the wheel, in the world, `at` where it touches the wheel, in the wheel's
+    /// own frame, and `wheel_first` whether the wheel is the manifold's first collider.
+    ///
+    /// Not against light loose scenery, which a tire rides up instead (`riding_up`):
+    /// gripped, a 146 kg cone was pulled down under the tire and the truck thrown up off it
+    /// at 4 m/s. Against another truck only with `trucks_too`, which is asked once
+    /// `riding_up` has not taken the contact: what is too high on the tire to ride up, such
+    /// as the side of its body, a tire climbs. Nor with the side of the tire: a sidewall
+    /// against a bank has nothing to climb with.
+    #[allow(clippy::too_many_arguments)]
+    fn climb(
+        &self,
+        wheel: Entity,
+        other: Entity,
+        pushed: Vec3,
+        at: &[Vec3],
+        wheel_first: bool,
+        trucks_too: bool,
+        manifold: &mut ContactManifold,
+    ) -> bool {
+        let Ok((collider, wheel_at, child_of, _)) = self.wheels.get(wheel) else {
+            return false;
+        };
+        let Some(cylinder) = collider.shape().as_cylinder() else {
+            return false;
+        };
+        let truck = child_of.0;
+        let (Ok((_, rotation, ..)), Ok((input, config))) =
+            (self.trucks.get(truck), self.drivers.get(truck))
+        else {
+            return false;
+        };
+        let on_the_tread = |point: &Vec3| point.xz().length() / cylinder.radius > SIDEWALL;
+        let other_truck = self.truck_owning(other);
+        let rides_up = self.is_loose(other)
+            || (other_truck.is_some() && !trucks_too)
+            || other_truck == Some(truck);
+        if rides_up || input.throttle == 0.0 || !at.iter().any(on_the_tread) {
+            return false;
+        }
+        // The way the tire is driven: where it points, or behind it in reverse.
+        let steer = wheel_at.rotation * AXLE_ALONG_X.inverse();
+        let driven = rotation.0 * steer * Vec3::NEG_Z * input.throttle.signum();
+        // Only a leading wheel fades as the nose comes up: it is what lifts the nose further.
+        // A trailing one lowers it again by climbing, and it must, for the truck to get its
+        // back wheels up after its front ones.
+        let leading = wheel_at.translation.z * input.throttle.signum() < 0.0;
+        let pitch = driven.y.clamp(-1.0, 1.0).asin();
+        let fade = if leading {
+            ((CLIMB_PITCH_NONE - pitch) / (CLIMB_PITCH_NONE - CLIMB_PITCH_FULL)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        // Up the face, as the world has it.
+        let up_the_face = Vec3::Y.reject_from_normalized(pushed).normalize_or_zero();
+        // Only a wall: a face within `UPWARD` of upright, as the world stands. One that
+        // holds the tire up at all is a slope, which the suspension rolls up, and gripped
+        // here it was a kerb that stopped the truck (see `stand_it_up`). Nor the underside
+        // of something, which pushes the tire down.
+        let wall = pushed.y.abs() <= UPWARD;
+        if pushed.dot(-driven) < WALL_FACING || !wall || fade == 0.0 || up_the_face == Vec3::ZERO {
+            return false;
+        }
+        let Some(point) = mean_point(manifold) else {
+            return false;
+        };
+        let Some(moving) = self.truck_moving_at(wheel, point) else {
+            return false;
+        };
+        // Against the face, which is another truck's going its own way.
+        let face_moving = other_truck
+            .and_then(|other| self.moving_at(other, point))
+            .unwrap_or(Vec3::ZERO);
+        // Up at the climbing speed, and along the face as the tire already goes, so that it
+        // does not scrub.
+        let along = (moving - face_moving)
+            .reject_from_normalized(pushed)
+            .reject_from_normalized(up_the_face);
+        let sliding = up_the_face * CLIMB_SPEED * input.throttle.abs() * fade + along;
+        manifold.tangent_velocity = if wheel_first { sliding } else { -sliding };
+        manifold.friction = config.grip;
+        // A tire that climbs is not thrown back off the face.
+        manifold.restitution = 0.0;
+        true
+    }
+
+    /// Let a wheel collider standing on top of another truck drive on it under throttle, as
+    /// it would on the ground. `pushed` is the way the other truck holds it up, in the
+    /// world, and `wheel_first` whether the wheel is the manifold's first collider.
+    ///
+    /// The suspension does not see another truck (see `drive`), so nothing else drives a
+    /// tire on one, and a contact that a tire rides up is frictionless. Without this a
+    /// truck driven broadside into another got its front wheels up onto it and stuck there
+    /// at 38 degrees, its back wheels unable to push it up alone. The tire is carried
+    /// forward at no less than `CLIMB_SPEED`, and as fast as it already goes if that is
+    /// faster, so that the grip never brakes it; sideways it slides as it already does.
+    fn drive_on_top(
+        &self,
+        wheel: Entity,
+        other: Entity,
+        pushed: Vec3,
+        wheel_first: bool,
+        manifold: &mut ContactManifold,
+    ) {
+        let Ok((_, wheel_at, child_of, _)) = self.wheels.get(wheel) else {
+            return;
+        };
+        let truck = child_of.0;
+        let (Ok((_, rotation, ..)), Ok((input, config)), Some(other_truck)) = (
+            self.trucks.get(truck),
+            self.drivers.get(truck),
+            self.truck_owning(other),
+        ) else {
+            return;
+        };
+        let Some(point) = mean_point(manifold) else {
+            return;
+        };
+        let (Some(moving), Some(under)) = (
+            self.moving_at(truck, point),
+            self.moving_at(other_truck, point),
+        ) else {
+            return;
+        };
+        let steer = wheel_at.rotation * AXLE_ALONG_X.inverse();
+        let driven = (rotation.0 * steer * Vec3::NEG_Z * input.throttle.signum())
+            .reject_from_normalized(pushed)
+            .normalize_or_zero();
+        if input.throttle == 0.0 || driven == Vec3::ZERO {
+            return;
+        }
+        let sliding = (moving - under).reject_from_normalized(pushed);
+        let going = sliding.dot(driven);
+        let wanted = going.max(CLIMB_SPEED * input.throttle.abs());
+        let sliding = sliding + driven * (wanted - going);
+        manifold.tangent_velocity = if wheel_first { sliding } else { -sliding };
+        manifold.friction = config.grip;
     }
 
     /// The truck a wheel's collider or core is part of.
@@ -241,9 +441,13 @@ impl TireContacts<'_, '_> {
     }
 
     /// How fast a wheel's truck goes at `point`, in the world.
-    fn truck_moving_at(&self, wheel: Entity, point: Vec3) -> Option<Vec3> {
-        let (position, rotation, linear, angular, centre) =
-            self.trucks.get(self.truck_of(wheel)?).ok()?;
+    fn truck_moving_at(&self, part: Entity, point: Vec3) -> Option<Vec3> {
+        self.moving_at(self.truck_owning(part)?, point)
+    }
+
+    /// How fast `truck` goes at `point`, in the world.
+    fn moving_at(&self, truck: Entity, point: Vec3) -> Option<Vec3> {
+        let (position, rotation, linear, angular, centre) = self.trucks.get(truck).ok()?;
         let centre = position.0 + rotation.0 * centre.0;
         Some(linear.0 + angular.0.cross(point - centre))
     }
@@ -363,25 +567,41 @@ impl TireContacts<'_, '_> {
         {
             return false;
         }
-        // A tire driven into another truck low down rides up it (see the module's notes).
+        // A tire driven into a wall climbs it under throttle (see the module's notes).
+        if self.climb(first, second, -normal, &on_first, true, false, manifold)
+            || self.climb(second, first, normal, &on_second, false, false, manifold)
+        {
+            return true;
+        }
+        // A tire driven into another truck or light loose scenery low down rides up it (see
+        // the module's notes).
         if let Some((rider, pushed)) = self.riding_up([
             (first, second, -normal, &on_first),
             (second, first, normal, &on_second),
         ]) {
-            let Some(truck) = self.truck_of(rider) else {
-                return true;
-            };
-            let Ok((_, rotation, ..)) = self.trucks.get(truck) else {
-                return true;
-            };
-            let up = rotation.0 * Vec3::Y;
+            // Up as the world stands, not as the truck does: a truck with its nose up on
+            // another, its back tires against the other's, took their level push for one
+            // already turned up, and could not get them up after its front ones.
+            let up = Vec3::Y;
             let level = pushed.reject_from_normalized(up).normalize_or_zero();
-            if pushed.dot(up) < RAMP.sin() && level != Vec3::ZERO {
+            let on_top = pushed.dot(up) >= RAMP.sin();
+            if !on_top && level != Vec3::ZERO {
                 let ramp = level * RAMP.cos() + up * RAMP.sin();
                 manifold.normal = if rider == first { -ramp } else { ramp };
             }
             manifold.friction = 0.0;
             manifold.restitution = 0.0;
+            let other = if rider == first { second } else { first };
+            if on_top {
+                self.drive_on_top(rider, other, pushed, rider == first, manifold);
+            }
+            return true;
+        }
+        // And one driven into another truck too high on the tire to ride up climbs it, as a
+        // wall (see the module's notes).
+        if self.climb(first, second, -normal, &on_first, true, true, manifold)
+            || self.climb(second, first, normal, &on_second, false, true, manifold)
+        {
             return true;
         }
         // A tire with its springs shut pushes straight up off the ground, not back along
@@ -389,7 +609,9 @@ impl TireContacts<'_, '_> {
         // it, which is often a bank beside the wheel, and it must push the wheel back out
         // of the bank. Pushed straight up it slid into the bank and rode up inside it: an
         // axle was under the ground for 1 164 wheel-steps on Alpine in two minutes of 7
-        // trucks, and for none pushed along the ground's own face.
+        // trucks, and for none pushed along the ground's own face. Nor where the core meets
+        // a steep slope ahead: turned up there too, a truck driven head on into a bank of
+        // 50 degrees or more at 10 to 30 m/s went through it, nearly every time.
         if self.bottomed(first) && self.is_ground(second) {
             self.stand_it_up(first, true, manifold);
         } else if self.bottomed(second) && self.is_ground(first) {

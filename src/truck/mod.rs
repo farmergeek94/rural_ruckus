@@ -84,9 +84,10 @@ impl Plugin for TruckPlugin {
                     reset::reset_truck,
                     reset::place_trucks.in_set(TruckSystems::Place),
                     speedometer::update_speedometer,
-                    interpolate::place_visuals.in_set(TruckSystems::PlaceVisuals),
-                    axle::place_axles,
-                    axle::place_axle_links,
+                    (interpolate::place_visuals, interpolate::place_wheels)
+                        .in_set(TruckSystems::PlaceVisuals),
+                    // After the wheels they hang from have been placed for this frame.
+                    (axle::place_axles, axle::place_axle_links).after(TruckSystems::PlaceVisuals),
                     display::build_displays,
                     lamps::dress_lamps,
                     lamps::light_lamps,

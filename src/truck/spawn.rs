@@ -151,8 +151,13 @@ fn spawn_truck(
             ),
             Friction::new(0.4),
             // Bodywork that springs back off whatever it hits, the ground included: a
-            // truck that lands on its roof bounces rather than sticking.
-            Restitution::new(BODY_BOUNCE).with_combine_rule(CoefficientCombine::Max),
+            // truck that lands on its roof bounces rather than sticking. `Min`, as the
+            // tires have: scenery names a bounce of 1 so as to leave the tires theirs (see
+            // `scenery::bouncy`), and `Max` wins over every other rule, so under it the
+            // body bounced off scenery with all of its speed. Measured with a truck at 20
+            // m/s whose body struck a car-sized mesh as it climbed over it: thrown up by
+            // 2.2 m/s in one step at 1, and by 1.3 m/s at this.
+            Restitution::new(BODY_BOUNCE).with_combine_rule(CoefficientCombine::Min),
             GroundGrip::default(),
             LinearDamping(0.02),
             AngularDamping(0.4),

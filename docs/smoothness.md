@@ -129,6 +129,13 @@ looks (the physics takes that for a teleport), and do not add Avian's
 `TransformInterpolation` to a body: it moves the body's own `Transform` between steps,
 which gameplay (race progress, tests) reads. `TruckVisual` is what is interpolated.
 
+The same holds for anything else that the physics step sets and that is drawn. The
+wheels' suspension, steering and spin change once a step, and each wheel is drawn between
+its last two poses (`WheelPose`). Measured on Alpine, one computer truck, frames at
+144 Hz against 120 Hz physics: a drawn wheel's frame-to-frame movement was uneven by
+5.1 mm RMS, and in 25% of frames it did not move at all, when it was set straight from
+each step. Interpolated, it was uneven by 1.5 mm, and still in 4.5% of frames.
+
 ## Measure performance; don't guess
 
 `--log-fps --no-vsync` shows the real frame time

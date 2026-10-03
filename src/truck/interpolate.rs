@@ -7,6 +7,10 @@
 //! each frame between the last two physics poses by how far the frame falls between steps.
 //! It is at most one step (8 ms) behind the physics, which nobody can see.
 //!
+//! The wheels hang from the drawn truck, and are placed the same way between their last two
+//! poses (`WheelPose`): their suspension, steering and spin also move only at each physics
+//! step.
+//!
 //! The physics body itself must not be moved for the sake of looks: the physics would take
 //! that for a teleport.
 
@@ -60,6 +64,48 @@ pub(super) fn place_visuals(
                 rotation: from.rotation.slerp(to.rotation, between),
                 scale: to.scale,
             }
+        };
+    }
+}
+
+/// Where a wheel's pivot was in its drawn truck at the end of the last two physics steps:
+/// `drive` sets it each step, and `place_wheels` draws the wheel between the two. Set
+/// straight from each step, the suspension, steering and spin moved in steps that frames
+/// caught unevenly, and the wheels, and the axles and shocks that follow them, shook
+/// against a body that glided. On Alpine at 24 m/s a hub moves up and down by about 7 cm
+/// faster than four times a second.
+#[derive(Component)]
+pub(super) struct WheelPose {
+    previous: Transform,
+    current: Transform,
+}
+
+impl WheelPose {
+    pub(super) fn at(transform: Transform) -> Self {
+        Self {
+            previous: transform,
+            current: transform,
+        }
+    }
+
+    /// This step's pose, the last one becoming the one before.
+    pub(super) fn step(&mut self, transform: Transform) {
+        self.previous = self.current;
+        self.current = transform;
+    }
+}
+
+pub(super) fn place_wheels(
+    time: Res<Time<Fixed>>,
+    mut wheels: Query<(&WheelPose, &mut Transform)>,
+) {
+    let between = time.overstep_fraction();
+    for (pose, mut transform) in &mut wheels {
+        let (from, to) = (pose.previous, pose.current);
+        *transform = Transform {
+            translation: from.translation.lerp(to.translation, between),
+            rotation: from.rotation.slerp(to.rotation, between),
+            scale: to.scale,
         };
     }
 }
