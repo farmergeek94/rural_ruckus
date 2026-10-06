@@ -37,7 +37,9 @@
 //! checkpoint, as the player does with a key (`race::BackToCheckpoint`). So does one that
 //! gets nowhere for a few seconds without ever stopping (on its roof, off down a
 //! mountainside). So does one that has gone past its next
-//! checkpoint without driving through it. A track with no course has nothing to follow,
+//! checkpoint without driving through it. Put back, it takes another line, and until it has
+//! driven through its next checkpoint it cuts no corners (`Style::careful`): a corner it
+//! cut is often what caught it. A track with no course has nothing to follow,
 //! and its computer trucks stand still.
 //!
 //! Once the player's truck has finished, a driver takes its wheel as well
@@ -118,6 +120,15 @@ const AIM_AHEAD: std::ops::RangeInclusive<f32> = 20.0..=50.0;
 /// five Monster Truck Madness 2 tracks: at 16, 4 m; at 10, 2.5 m, but then it turned in late
 /// and ran wide off the outside of more bends than before. Smaller cuts less of every bend.
 const BEND_CUT: f32 = 16.0;
+/// `BEND_CUT` for a driver that has been put back, until it drives through its next
+/// checkpoint (`Style::careful`), and the nearest it then steers at, in metres. A bend of
+/// radius `R` cuts about `BEND_CUT / 4` metres inside the line, so at 2 it keeps within half a
+/// metre of it, where at 16 it was 4 m inside. The inside of a bend is where a truck that was
+/// put back was caught: on a tree, in a ditch, or past a checkpoint that stands on the road
+/// round the bend. Smaller cuts less, and weaves more, since it steers at a nearer point.
+/// Not measured in a race yet.
+const CAREFUL_BEND_CUT: f32 = 2.0;
+const CAREFUL_NEAREST: f32 = 8.0;
 /// Full lock is used when the aim point is this far off straight ahead, in radians. Smaller
 /// is a driver that turns sooner and harder for the same aim point, and weaves more on a
 /// straight; at 0.3 it is at full lock 17 degrees off.
@@ -276,6 +287,10 @@ pub struct ComputerDriver {
     settling: f32,
     /// Getting unstuck, by backing up and turning round (`Recovery`).
     recovery: Recovery,
+    /// Where it was in the race when it was last put back, as the lap and the checkpoint it
+    /// had to drive through next: until it has driven through that one, it is careful
+    /// (`Style::careful`). `None` when it has not been put back since its last checkpoint.
+    careful_until: Option<(u32, usize)>,
     /// Its truck's own engine, before `CHASING_POWER` is added: its pull in newtons and the
     /// speed where that runs out in m/s. Taken the first time the driver drives.
     engine: Option<(f32, f32)>,
@@ -295,6 +310,7 @@ impl ComputerDriver {
             getting_nowhere: 0.0,
             settling: 0.0,
             recovery: Recovery::default(),
+            careful_until: None,
             engine: None,
         }
     }
@@ -379,6 +395,7 @@ pub fn lead_driver(
         chasing: 0.0,
         reach_across: reach(config).x,
         gate: None,
+        careful: false,
     };
     let forward = transform.forward().xz().normalize_or_zero();
     let speed = velocity.dot(transform.forward().as_vec3());
@@ -475,6 +492,9 @@ struct Style {
     /// The checkpoint it has to drive through next, if it has one: near it, it steers
     /// through it (`Ahead::aim`).
     gate: Option<NextGate>,
+    /// Whether it has been put back and not yet driven through its next checkpoint: then it
+    /// cuts no corners, and keeps to its line round every bend (`CAREFUL_BEND_CUT`).
+    careful: bool,
 }
 
 /// The checkpoint gate a driver has to drive through next, as `Ahead::aim` steers for it.
@@ -519,7 +539,7 @@ fn plan(
     let ahead = Ahead::of(course, along, style.reach_across);
     // Nothing nearer than this is steered at: further when going faster.
     let reach = (speed * AIM_AHEAD_SECONDS).clamp(*AIM_AHEAD.start(), *AIM_AHEAD.end());
-    let aim = ahead.aim(course, ahead.steering_reach(reach), style);
+    let aim = ahead.aim(course, ahead.steering_reach(reach, style.careful), style);
     let to_aim = (aim - position).normalize_or_zero();
     // Positive when the aim point is to the left.
     let off_straight = (-forward.perp_dot(to_aim)).atan2(forward.dot(to_aim));
@@ -928,8 +948,14 @@ impl Ahead {
     }
 
     /// How far up its line a driver steers at, in metres: `reach`, or nearer where a bend
-    /// within it would take the truck far across the inside of it (`BEND_CUT`).
-    fn steering_reach(&self, reach: f32) -> f32 {
+    /// within it would take the truck far across the inside of it (`BEND_CUT`). A `careful`
+    /// driver cuts almost none of it (`CAREFUL_BEND_CUT`).
+    fn steering_reach(&self, reach: f32, careful: bool) -> f32 {
+        let (cut, nearest_allowed) = if careful {
+            (CAREFUL_BEND_CUT, CAREFUL_NEAREST)
+        } else {
+            (BEND_CUT, *AIM_AHEAD.start())
+        };
         let mut nearest = reach;
         for i in 0..self.bends() {
             if self.distance(i) > reach {
@@ -938,10 +964,10 @@ impl Ahead {
             let bend = self.bend(i).abs();
             if bend > 1e-3 {
                 let radius = BEND_SPAN / bend;
-                nearest = nearest.min((2.0 * radius * BEND_CUT).sqrt());
+                nearest = nearest.min((2.0 * radius * cut).sqrt());
             }
         }
-        nearest.max(*AIM_AHEAD.start()).min(reach)
+        nearest.max(nearest_allowed).min(reach)
     }
 
     /// Where a driver of this `style` steers at: the point of its line `reach` metres up the
@@ -1121,6 +1147,16 @@ fn drive(
         let boost = 1.0 + CHASING_POWER * chasing;
         config.engine_force = pull * boost;
         config.top_speed = top_speed * boost;
+        // Careful from being put back until it drives through its next checkpoint, which
+        // moves the race on from where it was then.
+        let careful = racer.is_some_and(|racer| {
+            let progress = &racer.progress;
+            progress.finished.is_none()
+                && driver.careful_until == Some((progress.lap, progress.next_gate))
+        });
+        if !careful {
+            driver.careful_until = None;
+        }
         // Once it has finished, no checkpoint counts for it any more.
         let gate = racer
             .filter(|racer| racer.progress.finished.is_none())
@@ -1138,6 +1174,7 @@ fn drive(
             chasing,
             reach_across: me.reach.x,
             gate,
+            careful,
         };
         let controls = plan(course, me.along, position, forward, speed, style);
         // Whichever asks for less: the bends ahead, or the truck in front.
@@ -1251,6 +1288,8 @@ fn ask_to_be_put_back(
             // a jump or a bend that caught it once catches it every time after.
             driver.home = next_line(driver.home);
             driver.lane = driver.home;
+            // And on that line round every bend, to the checkpoint it has to drive through.
+            driver.careful_until = Some((racer.progress.lap, racer.progress.next_gate));
         }
     }
 }
@@ -1321,6 +1360,7 @@ mod tests {
             chasing: 0.0,
             reach_across: built_in().x,
             gate: None,
+            careful: false,
         }
     }
 
@@ -1439,14 +1479,54 @@ mod tests {
         let reach = *AIM_AHEAD.end();
         // A plain straight ahead: as far up the road as its speed has it.
         let straight = Ahead::of(&course, FAR_FROM_THE_CORNER, built_in().x);
-        assert_eq!(straight.steering_reach(reach), reach);
+        assert_eq!(straight.steering_reach(reach, false), reach);
         // The corner at (300, 0) is a right angle: within reach of it, nearer, but never
         // nearer than the start of `AIM_AHEAD`.
-        let near = Ahead::of(&course, 270.0, built_in().x).steering_reach(reach);
+        let near = Ahead::of(&course, 270.0, built_in().x).steering_reach(reach, false);
         assert!(near < reach && near >= *AIM_AHEAD.start(), "{near}");
         // At a speed that steers at no more than that already, nothing changes.
         let slow = Ahead::of(&course, 270.0, built_in().x);
-        assert_eq!(slow.steering_reach(*AIM_AHEAD.start()), *AIM_AHEAD.start());
+        assert_eq!(
+            slow.steering_reach(*AIM_AHEAD.start(), false),
+            *AIM_AHEAD.start()
+        );
+    }
+
+    #[test]
+    fn a_driver_that_was_put_back_cuts_no_corner() {
+        let course = course();
+        let reach = *AIM_AHEAD.end();
+        // On a straight it steers as far up the road as any driver.
+        let straight = Ahead::of(&course, FAR_FROM_THE_CORNER, built_in().x);
+        assert_eq!(straight.steering_reach(reach, true), reach);
+        // Near the right angle at (300, 0) it steers at a nearer point of its line than any
+        // other driver may, and so keeps to that line round the corner.
+        let near = Ahead::of(&course, 270.0, built_in().x);
+        let careful = near.steering_reach(reach, true);
+        assert!(careful < *AIM_AHEAD.start(), "{careful}");
+        assert!(careful >= CAREFUL_NEAREST, "{careful}");
+        // 5 m before the corner, on its line, it steers at a point of the next side: the
+        // straight way there passes inside the corner, and less far inside when careful.
+        let at = Vec2::new(295.0, 0.0);
+        let corner = Vec2::new(300.0, 0.0);
+        let inside_by = |careful: bool| {
+            let ahead = Ahead::of(&course, at.x, built_in().x);
+            let aim = ahead.aim(
+                &course,
+                ahead.steering_reach(reach, careful),
+                Style {
+                    careful,
+                    ..steady()
+                },
+            );
+            (corner - at).perp_dot((aim - at).normalize()).abs()
+        };
+        assert!(
+            inside_by(true) < inside_by(false) - 1.0,
+            "{} {}",
+            inside_by(true),
+            inside_by(false)
+        );
     }
 
     #[test]
