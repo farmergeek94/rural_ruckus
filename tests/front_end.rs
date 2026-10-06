@@ -433,6 +433,7 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
     set_option(&mut first, "option.mipmaps", "Off");
     set_option(&mut first, "option.camera", "Far");
     set_option(&mut first, "option.smooth_terrain", "On");
+    set_option(&mut first, "option.blend_ground", "Off");
     set_option(&mut first, "option.speed_units", "mph");
     set_option(&mut first, "option.controls_help", "Hide");
     set_option(&mut first, "option.splashes", "Off");
@@ -462,6 +463,7 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
             *world.resource::<TrackSettings>(),
             TrackSettings {
                 smooth_terrain: true,
+                blend_ground: false,
                 mipmaps: false,
                 anisotropy: 4,
                 scenery_distance: f32::INFINITY,

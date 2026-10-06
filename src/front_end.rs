@@ -1102,6 +1102,15 @@ const OPTIONS: &[OptionLine] = &[
         set: |options, value| options.track.mipmaps = value == 1,
     },
     OptionLine {
+        key: "option.blend_ground",
+        section: GRAPHICS,
+        label: "Blended ground",
+        detail: "Fades and softens the ground's textures where they meet, instead of the hard edges that Monster Truck Madness 2 has. Costs time on the graphics card. On at Best quality. From the next race.",
+        values: &["Off", "On"],
+        get: |options| options.track.blend_ground as usize,
+        set: |options, value| options.track.blend_ground = value == 1,
+    },
+    OptionLine {
         key: "option.truck_shine",
         section: GRAPHICS,
         label: "Truck shine",
@@ -1276,6 +1285,7 @@ pub fn integrated_graphics(
     environment.lighting = Lighting::Simple;
     track.anisotropy = 4;
     track.scenery_distance = 300.0;
+    track.blend_ground = false;
 }
 
 /// The options screen's Quality line, which stands for the graphics lines that cost most.
@@ -1284,7 +1294,7 @@ const QUALITY: &str = "option.quality";
 /// The lines each level of Quality sets: those that cost time on every frame. The rest of
 /// the graphics (mipmaps, which save time, and the trucks' shine, which is a look) and the
 /// physics are left as the player has them.
-const QUALITY_LINES: [&str; 12] = [
+const QUALITY_LINES: [&str; 13] = [
     "option.antialiasing",
     "option.bloom",
     "option.shadows",
@@ -1297,6 +1307,7 @@ const QUALITY_LINES: [&str; 12] = [
     "option.water_surface",
     "option.dirt",
     "option.backdrop",
+    "option.blend_ground",
 ];
 
 /// Quality's levels, fastest first, each as it changes the defaults. Balanced is
@@ -1315,6 +1326,7 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
         options.track.decorations = false;
         options.dirt.on = false;
         options.backdrop.on = false;
+        options.track.blend_ground = false;
     },
     // Fast: the simple lighting, one shadow map near the truck, and the dirt and the hills
     // back.
@@ -1327,6 +1339,7 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
         options.track.anisotropy = 2;
         options.track.scenery_distance = 150.0;
         options.track.decorations = false;
+        options.track.blend_ground = false;
     },
     |options| {
         integrated_graphics(
@@ -1335,10 +1348,12 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
             &mut options.track,
         );
     },
-    // High: the defaults, with the scenery drawn to 600 m and less filtering.
+    // High: the defaults, with the scenery drawn to 600 m, less filtering, and the ground's
+    // textures meeting edge to edge.
     |options| {
         options.track.anisotropy = 8;
         options.track.scenery_distance = 600.0;
+        options.track.blend_ground = false;
     },
     |_| {},
 ];

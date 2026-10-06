@@ -5,6 +5,7 @@
 //! resource and builds the terrain from it: one height grid feeds both the render mesh
 //! and the physics heightfield collider, so the two can never disagree.
 
+mod blend;
 mod collider;
 mod course;
 mod data;
@@ -79,6 +80,13 @@ pub struct TrackSettings {
     /// Creases too sharp to round off, such as the lip of a ramp over a cliff, stay sharp.
     /// Read as each race begins.
     pub smooth_terrain: bool,
+    /// Fades the textures of neighbouring ground cells into each other where they meet,
+    /// blurred a little (`blend`), where Monster Truck Madness 2 draws each cell's texture
+    /// edge to edge with a hard line between. Costs more texture reads for the pixels of
+    /// ground near the edge of a cell, and no time on the CPU while racing. On by default,
+    /// as part of the front end's Best quality; every lower level turns it off. Read as each
+    /// race begins.
+    pub blend_ground: bool,
     /// Gives the textures of the ground and the scenery smaller copies of themselves to
     /// be drawn from at a distance, which stops them shimmering. On unless there is a
     /// reason to see the game without them.
@@ -103,6 +111,7 @@ impl Default for TrackSettings {
     fn default() -> Self {
         Self {
             smooth_terrain: false,
+            blend_ground: true,
             mipmaps: true,
             anisotropy: 16,
             scenery_distance: f32::INFINITY,
@@ -233,9 +242,10 @@ fn spawn_terrain(
     }
 
     info!(
-        "track \"{}\": smooth shading {}, texture mipmaps {}",
+        "track \"{}\": smooth shading {}, blended ground {}, texture mipmaps {}",
         track.name,
         if settings.smooth_terrain { "on" } else { "off" },
+        if settings.blend_ground { "on" } else { "off" },
         if settings.mipmaps {
             "on"
         } else {
@@ -252,6 +262,7 @@ fn spawn_terrain(
             GroundShading {
                 size: track.heights.size(),
                 lit_smoothly: normals.is_some() as u32,
+                ..default()
             },
             normals,
         )
@@ -259,13 +270,21 @@ fn spawn_terrain(
     match (&track.ground, images, tile_materials) {
         (Some(ground), Some(mut images), Some(mut tile_materials)) => {
             let tiles = images.add(tile_array(ground.tile_size, &ground.tiles, &settings));
-            let (shading, normals) = ground_shading(&mut images);
+            let (mut shading, normals) = ground_shading(&mut images);
+            let cells = settings
+                .blend_ground
+                .then(|| images.add(blend::cell_map(ground)));
+            if cells.is_some() {
+                shading.cells = ground.cells_per_side() as u32;
+                shading.blend_width = blend::BLEND_WIDTH;
+            }
             let material = tile_materials.add(TileMaterial {
                 base: surface.clone(),
                 extension: TileTextures {
                     tiles: tiles.clone(),
                     ground_normals: normals,
                     ground: shading,
+                    ground_cells: cells,
                     ..default()
                 },
             });

@@ -19,7 +19,8 @@ fn main() {
     // truck and track are for development, and only `--builtin` offers them: in the front
     // end's lists, as the truck when only a track is named, and with `--race`, which goes
     // straight to a race in the built-in truck on the built-in track. `--smooth-terrain`
-    // lights the ground as if it were rounded off,
+    // lights the ground as if it were rounded off, `--no-blend-ground` leaves the ground's
+    // textures meeting edge to edge, as MTM2 draws them,
     // `--no-mipmaps` draws textures without their smaller copies,
     // `--log-fps` prints frame times and how much is drawn, once a second, and `--autopilot`
     // drives the course by itself. See `diagnostics.rs`. `--unlit` draws without lighting,
@@ -100,6 +101,7 @@ fn main() {
     for argument in std::env::args_os().skip(1) {
         match argument.to_str() {
             Some("--smooth-terrain") => settings.smooth_terrain = true,
+            Some("--no-blend-ground") => settings.blend_ground = false,
             Some("--no-mipmaps") => settings.mipmaps = false,
             Some("--log-fps") => log_fps = true,
             Some("--autopilot") => autopilot = true,
@@ -170,7 +172,7 @@ fn main() {
             }
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
-                    "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
+                    "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-blend-ground --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
                      --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);

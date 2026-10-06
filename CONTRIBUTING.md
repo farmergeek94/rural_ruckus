@@ -11,6 +11,7 @@ cargo run -- --race --builtin      # straight to a race in the built-in truck on
 cargo run -- tracks/MyTrack.pod --builtin   # play a Monster Truck Madness 2 track in the built-in truck
 cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod   # in one of its trucks (either order)
 cargo run -- tracks/AlpineMtns.pod --smooth-terrain   # with the ground lit as if rounded off
+cargo run -- tracks/AlpineMtns.pod --no-blend-ground  # with the ground's textures edge to edge, as MTM2 draws them
 cargo run -- tracks/AlpineMtns.pod --no-mipmaps       # textures without mipmaps, to compare
 cargo run -- --log-fps --no-vsync  # print the true frame time once a second
 cargo run -- --fifo                # strict vsync (PresentMode::Fifo): never shows a late frame early
