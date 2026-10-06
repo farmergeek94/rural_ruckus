@@ -45,7 +45,7 @@ const TIRE_BOUNCE: f32 = 0.8;
 /// How big a wheel's core is, as a share of the tire's radius: a tire sinks into the
 /// ground by the rest of its radius at most before the core stands on the surface. Larger
 /// lets it sink less, and meets the ground sooner, where the suspension would have coped.
-const CORE_SHARE: f32 = 0.75;
+pub(super) const CORE_SHARE: f32 = 0.75;
 /// The same for the body: less than a tire, being steel over a frame.
 const BODY_BOUNCE: f32 = 0.2;
 /// How far ahead of touching something the physics makes a contact with it, in metres.
@@ -193,7 +193,10 @@ fn spawn_truck(
             let collider = commands
                 .spawn((
                     Name::new("Wheel collider"),
-                    WheelCollider { bottomed: false },
+                    WheelCollider {
+                        bottomed: false,
+                        rolling_over: None,
+                    },
                     ChildOf(truck),
                     Transform::from_translation(rest)
                         .with_rotation(Quat::from_rotation_z(FRAC_PI_2)),

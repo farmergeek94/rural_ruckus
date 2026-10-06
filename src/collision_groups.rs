@@ -20,10 +20,18 @@ pub const GROUND: LayerMask = LayerMask(1 << 1);
 pub const WHEELS: LayerMask = LayerMask(1 << 2);
 /// The solid core inside each wheel, which touches the ground and nothing else.
 pub const WHEEL_CORES: LayerMask = LayerMask(1 << 3);
+/// The ground boxes, which are in `GROUND` as well. Their sides are upright, as no face of
+/// the terrain is, and a tire meets one as a wall (see `truck/contacts.rs`).
+pub const GROUND_BOXES: LayerMask = LayerMask(1 << 4);
 
 /// For the terrain: touches everything.
 pub fn ground() -> CollisionLayers {
     CollisionLayers::new(GROUND, LayerMask::ALL)
+}
+
+/// For the ground boxes: the ground, and touches everything.
+pub fn ground_boxes() -> CollisionLayers {
+    CollisionLayers::new(LayerMask(GROUND.0 | GROUND_BOXES.0), LayerMask::ALL)
 }
 
 /// For a wheel: touches everything, the ground included. The ground under the tread is
@@ -45,7 +53,7 @@ mod tests {
 
     #[test]
     fn no_layer_is_the_one_every_collider_is_in_by_default() {
-        for layer in [GROUND, WHEELS, WHEEL_CORES] {
+        for layer in [GROUND, WHEELS, WHEEL_CORES, GROUND_BOXES] {
             assert_eq!(layer & LayerMask::DEFAULT, LayerMask::NONE);
         }
     }

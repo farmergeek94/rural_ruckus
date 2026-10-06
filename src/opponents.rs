@@ -12,15 +12,19 @@
 //! round every bend on that line. Near a bend that point is nearer (`BEND_CUT`), so that a
 //! truck at speed does not take a chord across the inside of the bend to a point far round it. Each driver's line is the middle of the road or a little to
 //! one side of it, so that trucks don't all want the same one. It keeps to a speed that the
-//! bends ahead allow, which is the sharper the slower (`bend_speed`): all of it in `plan`, a
-//! pure function. Every truck drives the straights flat out, so a driver catches up in the
-//! bends instead: the further down the order it is, and the further behind the leader, the
-//! more it asks of its tires, the later it brakes, and the more of the road it cuts corners
-//! across, never leaving it (`chasing`, `Style::cutting`), until it is back in range.
-//! No corner is cut past the checkpoint it has to drive through next, and near one it
-//! leaves the course and its line and steers straight through the gate, inside its edges
-//! (`NextGate`): the course is only near the gates, and a line, a pass or a cut corner can
-//! take a truck round one.
+//! bends ahead allow, which is the sharper the slower (`bend_speed`), and round a bend that
+//! goes on, a loop or a right angle, the speed that its whole radius allows
+//! (`LONG_BEND_SPAN`): all of it in `plan`, a pure function. A driver that is behind
+//! catches up on its line, never across the inside of a bend: the further down the order it
+//! is, and the further behind the leader, the more power its engine has, the more it asks of
+//! its tires and the later it brakes (`chasing`), until it is back in range. The edge of the
+//! course is not the edge of the road: a Monster Truck Madness 2 course leaves out the
+//! corners between its straight pieces, and the road goes round them outside the course's
+//! centreline, on Round and Round up to 11 m outside it. A chord across the inside of a bend
+//! to the edge of the course took the trucks that were behind across the grass.
+//! Near the checkpoint it has to drive through next, a driver leaves the course and its line
+//! and steers straight through the gate, inside its edges (`NextGate`): the course is only
+//! near the gates, and a line or a pass can take a truck round one.
 //! One that comes up behind another truck swerves round it instead of slowing down: it pulls
 //! out to one side (`passing_line`) and follows that line until it is by. Only boxed in, with
 //! no side clear, does it hold station a truck's length behind (`keeping_off`) and press. It
@@ -40,12 +44,17 @@
 //! (`take_the_players_wheel`), and it drives on round the course with the others. It gets
 //! `truck::Autopilot`, so that the keys leave it alone.
 //!
+//! `lead_driver` lends the same rules to `--autopilot` (`diagnostics`), which presses the
+//! player's keys to drive as the quickest driver would on a clear road.
+//!
 //! Uses the `track` slice for the course, the `truck` slice for the trucks and the `race`
-//! slice for the checkpoints. Needs `RacePlugin`.
+//! slice for the checkpoints. Needs `RacePlugin`, and the physics, which says where the ground
+//! is under a truck.
 
-use avian3d::prelude::LinearVelocity;
+use avian3d::prelude::{LinearVelocity, SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 
+use crate::collision_groups::GROUND;
 use crate::game_state::GameState;
 use crate::race::{BackToCheckpoint, RaceSystems, Racer};
 use crate::track::{Course, Track};
@@ -76,6 +85,21 @@ const BRAKING: f32 = 7.0;
 const SLOWEST_BEND: f32 = 16.0;
 /// A bend is measured as the change in the course's direction over this many metres.
 const BEND_SPAN: f32 = 30.0;
+/// It is measured over this longer stretch as well, in metres. A turn that goes on, a loop or
+/// a right angle, is driven on its whole radius, which no 30 m of it shows when the course
+/// makes it of straight pieces: Round and Round's loops are turns of 45 degrees 19 to 55 m
+/// apart, and a driver took each at the speed of a single kink, ran wide out of the loops
+/// and missed the checkpoints in them. Measured in eight races of 240 s on each of four
+/// tracks, against the same drivers without it: on Round and Round, missed checkpoints fell
+/// from 18 to 4.5 a race and trucks put back from 28 to 12; elsewhere, the distance driven
+/// changed by less than 2 %.
+const LONG_BEND_SPAN: f32 = 60.0;
+/// Sideways acceleration a driver allows itself all the way round a long bend, in m/s²,
+/// chasing or not: what the trucks hold. Measured on flat ground round circles of 20, 40 and
+/// 80 m, speeding up slowly: the built-in truck, Bigfoot and Max-D, each as tuned and with
+/// three random setups, held 11.5 to 13.3 and then slid wide; none tipped. Higher runs wide
+/// out of loops; lower is slower round them.
+const LONG_BEND_CORNERING: f32 = 12.0;
 /// How far apart the places are at which the course ahead is looked at for bends, in metres.
 const BEND_STEP: f32 = 10.0;
 /// How far ahead a driver looks for bends to slow for, in metres.
@@ -175,7 +199,11 @@ const SIDE_BY_SIDE: f32 = 7.0;
 /// is what rolls it: from eight starts on Alpine, 68 of 77 rolls were at the ditch after
 /// checkpoint 2, and with the wheel held straight through the ditch, 10. Bumps
 /// and crests lift a truck on the road by up to a metre, so less than that takes the
-/// steering away from a driver on the ground.
+/// steering away from a driver on the ground. It is measured down to the ground under the
+/// truck, ground boxes included: on a bridge or a deck the terrain is far below, and a
+/// driver that took that for flying did not steer across it. Round and Round's bridge over
+/// the lake is 18 m above the terrain, with a bend at either end of it. Measured in eight
+/// races of 240 s: the trucks went 5 % further on Round and Round and 3 % on Winding Way.
 const AIRBORNE: f32 = 2.0;
 const SETTLE: f32 = 0.5;
 
@@ -320,11 +348,46 @@ type Undriven = (With<Truck>, Without<PlayerTruck>, Without<ComputerDriver>);
 
 /// What a driver does with the controls, as `TruckInput` has them.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Controls {
+pub struct Controls {
     /// -1 (full brake) to 1 (full throttle).
-    throttle: f32,
+    pub throttle: f32,
     /// -1 (right) to 1 (left).
-    steer: f32,
+    pub steer: f32,
+}
+
+/// What the quickest driver would do with the controls of a truck at `transform`, going at
+/// `velocity`, on a clear road: on the middle line, not chasing and with no checkpoint to
+/// aim through. `last` is how far round the `course` the truck was last found, in metres,
+/// if it is known; the second value is how far round it is now, for next time, or `None`
+/// when it is so far off the course that it is to be looked for everywhere.
+pub fn lead_driver(
+    course: &Course,
+    last: Option<f32>,
+    transform: &Transform,
+    velocity: Vec3,
+    config: &TruckConfig,
+) -> (Controls, Option<f32>) {
+    let position = transform.translation.xz();
+    let nearest = match last {
+        Some(along) => course.nearest_within(position, along - BEHIND, along + AHEAD),
+        None => course.nearest(position),
+    };
+    let along = course.distance_along(&nearest);
+    let style = Style {
+        pace: 1.0,
+        lane: 0.0,
+        chasing: 0.0,
+        reach_across: reach(config).x,
+        gate: None,
+    };
+    let forward = transform.forward().xz().normalize_or_zero();
+    let speed = velocity.dot(transform.forward().as_vec3());
+    let controls = plan(course, along, position, forward, speed, style);
+    // Off the course altogether, where it is is not to be trusted: look everywhere next time.
+    (
+        controls,
+        (nearest.distance < LOST_DISTANCE).then_some(along),
+    )
 }
 
 /// A driver getting its truck unstuck: when it has been trying to go and getting nowhere, it
@@ -404,17 +467,13 @@ struct Style {
     /// The line it is taking: how far to the left of the centreline, in metres.
     lane: f32,
     /// How desperate it is, from 0 to 1, as `chasing` works it out. It asks more of the tires
-    /// in a bend and brakes later for one.
+    /// in a bend and brakes later for one, and keeps to its line.
     chasing: f32,
     /// How far its own truck reaches sideways from its middle, in metres, wheels included:
     /// what says how near the edge of the course its line may go to pass.
     reach_across: f32,
-    /// How much of the road it cuts corners across, from 0 (none: it follows its line) to 1
-    /// (all of it, its outer wheels at the edge). A driver that is behind cuts them as it is
-    /// desperate (`chasing`), and none while it is passing or has a truck beside it.
-    cutting: f32,
-    /// The checkpoint it has to drive through next, if it has one: it cuts no corner past
-    /// it, and near it steers through it (`Ahead::aim`).
+    /// The checkpoint it has to drive through next, if it has one: near it, it steers
+    /// through it (`Ahead::aim`).
     gate: Option<NextGate>,
 }
 
@@ -460,7 +519,7 @@ fn plan(
     let ahead = Ahead::of(course, along, style.reach_across);
     // Nothing nearer than this is steered at: further when going faster.
     let reach = (speed * AIM_AHEAD_SECONDS).clamp(*AIM_AHEAD.start(), *AIM_AHEAD.end());
-    let aim = ahead.aim(course, position, ahead.steering_reach(reach), style);
+    let aim = ahead.aim(course, ahead.steering_reach(reach), style);
     let to_aim = (aim - position).normalize_or_zero();
     // Positive when the aim point is to the left.
     let off_straight = (-forward.perp_dot(to_aim)).atan2(forward.dot(to_aim));
@@ -482,9 +541,16 @@ fn plan(
         if distance > braking_distance {
             break;
         }
-        let bend = ahead.bend(i).abs();
+        let (bend, long_bend) = (ahead.bend(i).abs(), ahead.long_bend(i).abs());
+        let mut in_the_bend = f32::INFINITY;
         if bend > 1e-3 {
-            let in_the_bend = bend_speed(bend, cornering, slowest_bend);
+            in_the_bend = bend_speed(bend, cornering, slowest_bend);
+        }
+        if long_bend > 1e-3 {
+            let round_it = (LONG_BEND_CORNERING * LONG_BEND_SPAN / long_bend).sqrt();
+            in_the_bend = in_the_bend.min(round_it.max(slowest_bend));
+        }
+        if in_the_bend.is_finite() {
             // Going this fast here, the brakes bring it down to that by there.
             let here = (in_the_bend * in_the_bend + 2.0 * braking * distance).sqrt();
             allowed = allowed.min(here);
@@ -811,14 +877,15 @@ impl Places<'_> {
 }
 
 /// The course ahead of a truck: its position and direction of travel every `BEND_STEP`
-/// metres from where the truck is, to `HORIZON` and a `BEND_SPAN` beyond, so that a bend
+/// metres from where the truck is, to `HORIZON` and a `LONG_BEND_SPAN` beyond, so that a bend
 /// at the horizon can be measured.
 struct Ahead {
     /// How far along the course the truck is, in metres.
     along: f32,
     samples: Vec<(Vec2, Vec2)>,
-    /// How many samples a `BEND_SPAN` is.
+    /// How many samples a `BEND_SPAN` is, and a `LONG_BEND_SPAN`.
     span: usize,
+    long_span: usize,
     /// How far out a line may go, in metres, as `passing_room` works it out.
     passing_room: f32,
 }
@@ -826,11 +893,13 @@ struct Ahead {
 impl Ahead {
     fn of(course: &Course, along: f32, reach_across: f32) -> Self {
         let span = (BEND_SPAN / BEND_STEP).round() as usize;
-        let count = (HORIZON / BEND_STEP).round() as usize + span + 1;
+        let long_span = (LONG_BEND_SPAN / BEND_STEP).round() as usize;
+        let count = (HORIZON / BEND_STEP).round() as usize + long_span + 1;
         Self {
             along,
             samples: course.sample_ahead(along, BEND_STEP, count),
             span,
+            long_span,
             passing_room: passing_room(course, reach_across),
         }
     }
@@ -840,15 +909,22 @@ impl Ahead {
         i as f32 * BEND_STEP
     }
 
-    /// How many samples have a bend measured from them.
+    /// How many samples have a bend measured from them, a long one too.
     fn bends(&self) -> usize {
-        self.samples.len() - self.span
+        self.samples.len() - self.long_span
     }
 
     /// The course's change of direction over the `BEND_SPAN` from sample `i`, in radians,
     /// positive to the right.
     fn bend(&self, i: usize) -> f32 {
         self.samples[i].1.angle_to(self.samples[i + self.span].1)
+    }
+
+    /// The same over the `LONG_BEND_SPAN` from sample `i`.
+    fn long_bend(&self, i: usize) -> f32 {
+        self.samples[i]
+            .1
+            .angle_to(self.samples[i + self.long_span].1)
     }
 
     /// How far up its line a driver steers at, in metres: `reach`, or nearer where a bend
@@ -868,20 +944,15 @@ impl Ahead {
         nearest.max(*AIM_AHEAD.start()).min(reach)
     }
 
-    /// Where a driver of this `style` at `position` steers at: the point of its line `reach`
-    /// metres up the course. So it follows the road round every bend on its line, and a truck
-    /// knocked off its line, or off the road, heads back to it within about that distance. A
-    /// line is held to the road, however far out passing would take it.
-    ///
-    /// A driver that cuts corners (`Style::cutting`) steers further up its line instead, as far
-    /// as a straight line from the truck reaches without leaving its share of the road, which
-    /// through a bend is a chord across the inside of it. That share is never more than the
-    /// road: its outer wheels at the edge, and not over it.
+    /// Where a driver of this `style` steers at: the point of its line `reach` metres up the
+    /// course. So it follows the road round every bend on its line, and a truck knocked off
+    /// its line, or off the road, heads back to it within about that distance. A line is held
+    /// to the course, however far out passing would take it. A driver that is behind steers
+    /// at the same point: it catches up on its line.
     ///
     /// Its next checkpoint (`Style::gate`) comes first: nearer than `reach`, it steers
-    /// through the gate (`NextGate::aim`), and further, it cuts no corner beyond the gate. A
-    /// chord across the inside of a bend with a gate in it goes round the gate.
-    fn aim(&self, course: &Course, position: Vec2, reach: f32, style: Style) -> Vec2 {
+    /// through the gate (`NextGate::aim`).
+    fn aim(&self, course: &Course, reach: f32, style: Style) -> Vec2 {
         let lane = style.lane.clamp(-self.passing_room, self.passing_room);
         if let Some(gate) = style.gate
             && gate.ahead <= reach
@@ -889,51 +960,8 @@ impl Ahead {
             return gate.aim(lane, reach, style.reach_across);
         }
         let (point, direction) = course.point_at(self.along + reach);
-        let mut aim = point - direction.perp() * lane;
-        if style.cutting <= 0.0 {
-            return aim;
-        }
-        // From its own line, where cutting nothing leaves it, out to the edge of the road.
-        let room = lane.abs() + (self.passing_room - lane.abs()) * style.cutting.min(1.0);
-        for i in 1..self.bends() {
-            let distance = self.distance(i);
-            if distance <= reach {
-                continue;
-            }
-            if style.gate.is_some_and(|gate| distance > gate.ahead) {
-                break;
-            }
-            let (point, direction) = self.samples[i];
-            let target = point - direction.perp() * lane;
-            if !self.is_clear(position, target, distance, room) {
-                break;
-            }
-            aim = target;
-        }
-        aim
+        point - direction.perp() * lane
     }
-
-    /// Whether a straight line from `position` to `target`, which is `distance` metres along
-    /// the course, keeps within `room` of the centreline, judged at every sample on the way.
-    /// The sample beside the truck is not on the way, so a truck that has been knocked out to
-    /// the edge of the road still gets to look ahead.
-    fn is_clear(&self, position: Vec2, target: Vec2, distance: f32, room: f32) -> bool {
-        let before = (distance / BEND_STEP).ceil() as usize;
-        self.samples[1..before.min(self.samples.len())]
-            .iter()
-            .all(|(point, _)| distance_to_segment(*point, position, target) <= room + 1e-3)
-    }
-}
-
-/// How far `point` is from the line segment from `a` to `b`, in metres.
-fn distance_to_segment(point: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let along = b - a;
-    let length_squared = along.length_squared();
-    if length_squared < 1e-6 {
-        return point.distance(a);
-    }
-    let t = ((point - a).dot(along) / length_squared).clamp(0.0, 1.0);
-    point.distance(a + along * t)
 }
 
 /// What a driver is given the controls by: its truck, and its place in the race.
@@ -961,6 +989,7 @@ type Watching<'a> = (
 fn drive(
     time: Res<Time>,
     track: Res<Track>,
+    spatial: SpatialQuery,
     mut drivers: Query<Driving>,
     player: Query<Watching, (With<PlayerTruck>, Without<ComputerDriver>)>,
     // Where the player's truck was last found round the course, as a driver remembers its
@@ -1023,6 +1052,8 @@ fn drive(
         .map(|truck| truck.raced)
         .fold(f32::MIN, f32::max);
 
+    // The terrain and the ground boxes, and not the trucks or the scenery.
+    let the_ground = SpatialQueryFilter::from_mask(GROUND);
     let mut others: Vec<Neighbour> = Vec::new();
     for (entity, transform, velocity, mut config, mut input, mut driver, racer, held) in
         &mut drivers
@@ -1090,9 +1121,6 @@ fn drive(
         let boost = 1.0 + CHASING_POWER * chasing;
         config.engine_force = pull * boost;
         config.top_speed = top_speed * boost;
-        // Cutting a corner across a truck it is passing, or one beside it, is running into it.
-        let passing = (steering_line - driver.home.clamp(-room, room)).abs() > 1e-3
-            || others.iter().any(|other| other.side_by_side(me.across));
         // Once it has finished, no checkpoint counts for it any more.
         let gate = racer
             .filter(|racer| racer.progress.finished.is_none())
@@ -1109,7 +1137,6 @@ fn drive(
             lane: steering_line,
             chasing,
             reach_across: me.reach.x,
-            cutting: if passing { 0.0 } else { chasing },
             gate,
         };
         let controls = plan(course, me.along, position, forward, speed, style);
@@ -1117,13 +1144,21 @@ fn drive(
         input.throttle = controls
             .throttle
             .min(throttle_for(keeping_off(in_front), speed));
-        // Hands still in the air, and for a moment after landing.
-        let ride_height = config.wheel_radius - config.wheel_rest[0].y;
-        let clearance = transform.translation.y
-            - track
-                .heights
-                .height_at(transform.translation.x, transform.translation.z);
-        driver.settling = if clearance > ride_height + AIRBORNE {
+        // Hands still in the air, and for a moment after landing. The terrain is cheap to
+        // read, and nothing under the truck is lower: only above it, a ray looks for a box.
+        let flying = config.wheel_radius - config.wheel_rest[0].y + AIRBORNE;
+        let Vec3 { x, y, z } = transform.translation;
+        let on_the_ground = y - track.heights.height_at(x, z) <= flying
+            || spatial
+                .cast_ray(
+                    transform.translation,
+                    Dir3::NEG_Y,
+                    flying,
+                    true,
+                    &the_ground,
+                )
+                .is_some();
+        driver.settling = if !on_the_ground {
             SETTLE
         } else {
             (driver.settling - time.delta_secs()).max(0.0)
@@ -1285,7 +1320,6 @@ mod tests {
             lane: 0.0,
             chasing: 0.0,
             reach_across: built_in().x,
-            cutting: 0.0,
             gate: None,
         }
     }
@@ -1299,14 +1333,13 @@ mod tests {
     /// Where a driver at `along` on the first side steers at, 15 m up a line `lane` metres
     /// to the left.
     fn aim_from_the_first_side(along: f32, lane: f32) -> Vec2 {
-        aim_cutting(along, Style { lane, ..steady() })
+        aim_of(along, Style { lane, ..steady() })
     }
 
-    /// The same, from on its line, for a driver of any `style`.
-    fn aim_cutting(along: f32, style: Style) -> Vec2 {
+    /// The same, for a driver of any `style`.
+    fn aim_of(along: f32, style: Style) -> Vec2 {
         let course = course();
-        let position = Vec2::new(along, -style.lane);
-        Ahead::of(&course, along, style.reach_across).aim(&course, position, 15.0, style)
+        Ahead::of(&course, along, style.reach_across).aim(&course, 15.0, style)
     }
 
     /// The first side's corner is beyond the horizon from here: a plain straight ahead.
@@ -1417,44 +1450,30 @@ mod tests {
     }
 
     #[test]
-    fn a_driver_that_is_behind_cuts_the_corner_and_stays_on_the_road() {
-        let behind = |along: f32, cutting: f32| {
-            aim_cutting(
-                along,
-                Style {
-                    cutting,
+    fn a_driver_that_is_behind_takes_the_same_line_round_a_corner() {
+        // Coming up to the corner at (300, 0), which turns right onto the side along +Z, and
+        // in it. However desperate, a driver steers as one that races its own race: it catches
+        // up on its line, and does not cut across the inside of the bend.
+        for along in [250.0, 280.0, 290.0, 296.0] {
+            for chasing in [0.3, 1.0] {
+                let style = |chasing: f32| Style {
+                    chasing,
                     ..steady()
-                },
-            )
-        };
-        // 50 m before the corner at (300, 0), which turns right onto the side along +Z. Its
-        // own race is its line, 15 m up the road. Behind, it steers further up the straight,
-        // but no further than the corner: any line round it from here would leave the road.
-        assert!((behind(250.0, 0.0) - Vec2::new(265.0, 0.0)).length() < 1e-3);
-        let far = behind(250.0, 1.0);
-        assert!(
-            far.x > 265.0 && far.x <= 300.0 && far.y.abs() < 1e-3,
-            "{far}"
-        );
-
-        // 4 m before it, its own race goes round on its line; far behind, it cuts across
-        // the inside, far up the next side, with its wheels on the road all the way.
-        let own_race = behind(296.0, 0.0);
-        assert!(
-            (own_race - Vec2::new(300.0, 11.0)).length() < 1e-3,
-            "{own_race}"
-        );
-        let cut = behind(296.0, 1.0);
-        assert!(
-            cut.x.abs() - 300.0 < 1e-3 && cut.y > own_race.y + 10.0,
-            "{cut}"
-        );
-        assert!(
-            distance_to_segment(Vec2::new(300.0, 0.0), Vec2::new(296.0, 0.0), cut)
-                <= room_to_pass() + 1e-3
-        );
-        // A little behind, a little room: not enough to cut this corner at all.
-        assert_eq!(behind(296.0, 0.3), own_race);
+                };
+                let at = |chasing: f32| {
+                    plan(
+                        &course(),
+                        along,
+                        Vec2::new(along, 0.0),
+                        Vec2::X,
+                        20.0,
+                        style(chasing),
+                    )
+                };
+                assert_eq!(aim_of(along, style(chasing)), aim_of(along, steady()));
+                assert_eq!(at(chasing).steer, at(0.0).steer, "{along} m, {chasing}");
+            }
+        }
     }
 
     /// A gate on the square course `along` metres round it, `off_to_the_left` of the
@@ -1477,7 +1496,7 @@ mod tests {
             ahead: gate_along - along,
             ..gate
         };
-        aim_cutting(
+        aim_of(
             along,
             Style {
                 gate: Some(gate),
@@ -1487,21 +1506,11 @@ mod tests {
     }
 
     #[test]
-    fn it_cuts_no_corner_past_its_next_checkpoint() {
-        let cutting = Style {
-            cutting: 1.0,
-            ..steady()
-        };
-        // 4 m before the corner at (300, 0), a truck far behind cuts across the inside of it
-        // and far up the next side (see above). A gate 30 m up the course, 26 m up that side,
-        // is as far as it cuts.
-        let gate = gate_at(326.0, 0.0, 7.0);
-        let cut = aim_for_the_gate(296.0, gate, cutting);
-        assert!(cut.y <= 26.0 + 1e-3, "{cut}");
-        assert!(cut.y > aim_cutting(296.0, steady()).y, "{cut}");
-        // Nearer than it steers ahead, it steers straight through the gate: 14 m up the course
-        // and 15 m ahead, the point 1 m beyond the gate on the line through it.
-        let through = aim_for_the_gate(296.0, gate_at(310.0, 0.0, 7.0), cutting);
+    fn near_its_next_checkpoint_it_steers_straight_through_it() {
+        // 4 m before the corner at (300, 0), with a gate 14 m up the course: nearer than it
+        // steers ahead, so it steers straight through the gate, 15 m ahead, at the point 1 m
+        // beyond the gate on the line through it.
+        let through = aim_for_the_gate(296.0, gate_at(310.0, 0.0, 7.0), steady());
         assert!(
             (through - Vec2::new(300.0, 11.0)).length() < 1e-3,
             "{through}"
@@ -1581,6 +1590,56 @@ mod tests {
         // At the speed the corner allows, a little short of it: carry on.
         let slow = at(260.0, allows);
         assert!(slow.throttle > 0.0, "{slow:?}");
+    }
+
+    /// The speed `plan` wants of a driver on the centreline of `course`, `along` metres round
+    /// it and facing the way it goes: where its throttle goes from on to off.
+    fn wanted_speed(course: &Course, along: f32) -> f32 {
+        let (position, forward) = course.point_at(along);
+        let throttle =
+            |speed: f32| plan(course, along, position, forward, speed, steady()).throttle;
+        let (mut slow, mut fast) = (1.0, CRUISE_SPEED + 10.0);
+        for _ in 0..40 {
+            let speed = (slow + fast) / 2.0;
+            if throttle(speed) > 0.0 {
+                slow = speed;
+            } else {
+                fast = speed;
+            }
+        }
+        slow
+    }
+
+    /// A course of 300 m straights that turns 45 degrees at a time, `apart` metres from one
+    /// turn to the next round each corner, and so right angles of two turns.
+    fn corners_of_two_turns(apart: f32) -> Course {
+        let directions = (0..8).map(|k| Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_4));
+        let mut point = Vec2::ZERO;
+        let mut points = Vec::new();
+        for (k, direction) in directions.enumerate() {
+            points.push(point);
+            point += direction * if k % 2 == 0 { 300.0 } else { apart };
+        }
+        Course::new(points, 14.0)
+    }
+
+    #[test]
+    fn a_bend_that_goes_on_is_taken_at_the_speed_its_whole_radius_allows() {
+        // A right angle of two half turns 50 m apart, as a course that leaves the corner out
+        // makes it, 8 m before the first: the whole of it is a quarter circle of about 38 m,
+        // and no 30 m of it turns more than 45 degrees.
+        let right_angle = wanted_speed(&corners_of_two_turns(50.0), 292.0);
+        let whole_radius = LONG_BEND_SPAN / std::f32::consts::FRAC_PI_2;
+        let round_it = (LONG_BEND_CORNERING * whole_radius).sqrt();
+        assert!(
+            (right_angle - round_it).abs() < 0.1,
+            "{right_angle} {round_it}"
+        );
+        // Half turns 300 m apart are kinks, and each is taken at the speed of a kink.
+        let kink = wanted_speed(&corners_of_two_turns(300.0), 292.0);
+        let as_a_kink = bend_speed(std::f32::consts::FRAC_PI_4, CORNERING, SLOWEST_BEND);
+        assert!((kink - as_a_kink).abs() < 0.1, "{kink} {as_a_kink}");
+        assert!(right_angle < kink);
     }
 
     #[test]

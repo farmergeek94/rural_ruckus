@@ -5,7 +5,9 @@
 //! the renderer's passes took on the CPU and on the graphics processor (`render/...`).
 //! `--autopilot` drives the truck round the course, so that a problem that only shows while
 //! driving can be reproduced and measured without anyone at the keyboard. It is a
-//! diagnostic, not an opponent: it presses the player's own keys.
+//! diagnostic, not an opponent: it presses the player's own keys, as the quickest computer
+//! driver would drive on a clear road (`opponents::lead_driver`), so that it takes the
+//! course at the speeds the computer's drivers do.
 
 use std::time::{Duration, Instant};
 
@@ -16,9 +18,10 @@ use bevy::diagnostic::{
 };
 use bevy::prelude::*;
 
+use crate::opponents::lead_driver;
 use crate::scenery::SceneryObject;
 use crate::track::Track;
-use crate::truck::Player;
+use crate::truck::{Player, TruckConfig, TruckInput};
 
 #[derive(Default)]
 pub struct DiagnosticsPlugin {
@@ -217,40 +220,56 @@ fn log_view_motion(
     motion.velocity_changes.clear();
 }
 
-/// How far ahead along the course to aim, in metres.
-const LOOK_AHEAD: f32 = 25.0;
-/// In m/s: brisk, but slow enough to stay on a mountain road.
-const CRUISE_SPEED: f32 = 18.0;
+/// How far the keys' steering may be from what the driver wants before a key is pressed or
+/// let go, as a share of full lock. Smaller follows the driver more closely, and flicks the
+/// keys more often.
+const STEER_BAND: f32 = 0.05;
+/// How hard the driver must ask to brake before the brake key is pressed, as a share of
+/// full brake. The key is all or nothing: lower brakes for every small excess of speed.
+const BRAKE_FROM: f32 = 0.5;
 
 fn drive_the_course(
     track: Res<Track>,
-    truck: Single<(&Transform, &LinearVelocity), Player>,
+    truck: Single<(&Transform, &LinearVelocity, &TruckConfig, &TruckInput), Player>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    // How far round the course the truck was last found, in metres.
+    mut along: Local<Option<f32>>,
 ) {
     let Some(course) = &track.course else {
         return;
     };
-    let (transform, velocity) = *truck;
-    let position = transform.translation.xz();
-    let forward = transform.forward().xz().normalize_or_zero();
-
-    // Aim at the point of the centreline a little further along than where we are.
-    let travelled = course.distance_along(&course.nearest(position));
-    let (aim, _) = course.point_at(travelled + LOOK_AHEAD);
-    // Positive when the aim point is to the left.
-    let turn = -forward.perp_dot((aim - position).normalize_or_zero());
+    let (transform, velocity, config, input) = *truck;
+    let (wanted, now) = lead_driver(course, *along, transform, velocity.0, config);
+    *along = now;
 
     // The arrow keys, which drive whatever the player has bound (see `keys`).
-    for key in [KeyCode::ArrowUp, KeyCode::ArrowLeft, KeyCode::ArrowRight] {
+    for key in [
+        KeyCode::ArrowUp,
+        KeyCode::ArrowDown,
+        KeyCode::ArrowLeft,
+        KeyCode::ArrowRight,
+    ] {
         keys.release(key);
     }
-    if velocity.0.length() < CRUISE_SPEED {
+    if wanted.throttle > 0.0 {
         keys.press(KeyCode::ArrowUp);
+    } else if wanted.throttle < -BRAKE_FROM {
+        keys.press(KeyCode::ArrowDown);
     }
-    if turn > 0.04 {
-        keys.press(KeyCode::ArrowLeft);
-    } else if turn < -0.04 {
-        keys.press(KeyCode::ArrowRight);
+    // A held key winds the steering on, and a let-go one centres it (`truck::input`): wind it
+    // towards what the driver wants, and hold it there.
+    let towards = wanted.steer - input.steer;
+    let left = if towards.abs() > STEER_BAND {
+        Some(towards > 0.0)
+    } else if wanted.steer.abs() > STEER_BAND {
+        Some(wanted.steer > 0.0)
+    } else {
+        None
+    };
+    match left {
+        Some(true) => keys.press(KeyCode::ArrowLeft),
+        Some(false) => keys.press(KeyCode::ArrowRight),
+        None => {}
     }
 }
 

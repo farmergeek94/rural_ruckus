@@ -33,6 +33,43 @@
 //! heavy object holds a truck up on its own, and is moved by its contacts with the
 //! truck's wheels and body.
 //!
+//! Nor is an upright face of scenery or of a ground box ground, however the truck leans
+//! against it (see `carries`). A tire rolls over the top of such a face if the springs
+//! reach it (`EDGE_INTO_STOP`), as over a kerb or a log. The sweep's touch on the top edge
+//! is the ground, turned up (`edge_lean`), and the hub rises onto it only so fast
+//! (`EDGE_RAMP`), so that it rolls up over a few steps and does not jump. A face whose top
+//! is out of reach is a wall. Met squarely (`meets_squarely`), a wall squashes the tire,
+//! which stops it evenly over a few steps (`wall_squash`), and the tread rides up the wall
+//! from the hit, at a share of the speed it hit at (`WALL_CARRY`), and drops back. The
+//! wheel stands on the ground at the foot of the wall, found with a ray down through the
+//! hub, or holds its length. The wheel collider meets what is deeper (see `contacts`).
+//!
+//! Measured with the probe, against walls of 0.5 to 3 m met at 0, 30 and 50 degrees, at a
+//! crawl and at 4, 8 and 15 m/s, for the built-in truck, Bigfoot and MAXD: every wall of
+//! 1.25 m and less is got over, where 130 runs of 144 were; none of 108 runs at 2 to 3 m
+//! gets over, where 17 did; the worst jolt into walls of 2 to 3 m at 4 m/s is 20 g on
+//! average, where it was 52 g. One run of 288 tips, where 9 did: the built-in truck, met
+//! with a 2 m wall at 50 degrees and 15 m/s, gets two wheels onto its top, goes along it
+//! and falls off its end.
+//!
+//! A sweep that begins inside something says nothing of how deep the tire is in it, and a
+//! sweep that meets a face first says nothing of the ground at the foot of the face. So
+//! such a tire is swept again from higher up, where its bottom is above all that it can
+//! stand on: on the terrain from `RESWEEP` of its radius higher, and elsewhere from just
+//! above the highest edge in reach.
+//!
+//! A tire pressed further than its springs go squashes before it is solid. On the terrain
+//! it squashes up to `GROUND_SQUASH` past the top of its travel. On an edge, the springs go
+//! only `EDGE_SPRINGS` into the bump stop, and the tire squashes into the edge for the rest
+//! (`edge_squash`), up to `EDGE_SQUASH`.
+//!
+//! The springs' dampers go by how fast each hub moves along the truck's up, which keeps
+//! the body calm over bumps but does not feel the ground rise under a tire. On the
+//! terrain the bump stop's damper, and a damper of its own at the wheel (`GROUND_DAMPING`),
+//! go by how fast the ground presses the hub up instead (`stroke_rate`). On scenery and the
+//! ground boxes they do not: there an edge met at speed reads as ground that rises very
+//! fast (see `STEEP_FULL`).
+//!
 //! The forces are handed to the physics through `Forces`, which forgets them after each
 //! step, so each step's are worked out afresh.
 
@@ -45,17 +82,93 @@ use super::{
     GroundGrip, Held, Truck, TruckConfig, TruckInput, TruckWheelColliders, TruckWheels, Wheel,
     WheelCollider, WheelCore,
 };
+use crate::collision_groups::{GROUND, GROUND_BOXES};
 
-/// How far above its mount the tire is swept from, in metres, so that a tire pressed up
-/// past its mount on a hard landing is found that far in and not merely touching: a cast
-/// that begins inside something stops at once and says nothing of how deep. Anything found
-/// past the mount means the springs are shut and the tire is solid (see `WheelCollider`).
-/// It also keeps the sweep out of the wheel arch, where a rail or another truck's body
-/// would be taken for ground under the tire.
+/// How far above its mount, and above how far the tire squashes (`reach_above_mount`),
+/// the tire is swept from, in metres, so that a tire pressed up past its mount on a hard
+/// landing is found that far in and not merely touching: a cast that begins inside
+/// something stops at once and says nothing of how deep. Anything found past the mount
+/// means the springs are shut: on the terrain the tire then squashes (`GROUND_SQUASH`),
+/// on an edge it has squashed already (`EDGE_SPRINGS`), and elsewhere it is solid (see
+/// `WheelCollider`). It also keeps the sweep out of the wheel arch, where a rail or
+/// another truck's body would be taken for ground under the tire.
 const BUMP_STOP_REACH: f32 = 0.1;
 
+/// How much higher than its first sweep a tire that began that sweep inside the terrain is
+/// swept again, as a share of its radius (see `drive_truck`). It must be more than such a
+/// tire is pressed in; higher costs nothing more, but finds more of what is overhead.
+/// Measured on rough ground at 25 m/s, 0.5% of the tires' sweeps were made again, and on
+/// Critic.pod 0.1%. Against anything else the tire is swept again from just above the
+/// highest edge in reach (see `EDGE_INTO_STOP`), so that it finds that edge.
+const RESWEEP: f32 = 1.0;
+
+/// How far a tire on the terrain squashes once its springs are shut, before it is solid,
+/// as a share of its radius. A 66-inch tire really does squash this far. It must stay
+/// under the part of the radius outside the wheel's core (`spawn::CORE_SHARE`), so that
+/// the tire is solid by the time the core meets the ground. More soaks up harder hits,
+/// and sinks the drawn tire further into the ground.
+///
+/// Measured over whoops 1 m high at 10 to 30 m/s, the hardest jolt went from 109 g to 73
+/// g, and on landsbetween.pod from 54 to 114 g to 40 to 43 g. On the ground boxes and on
+/// scenery the tire squashes into an edge by a rule of its own (`EDGE_SPRINGS`) and is
+/// solid on anything else: with this squash there too, before that rule, a truck driven
+/// at a step 1 to 1.25 m high at 8 or 15 m/s was thrown 1.6 to 4.3 m above its height on
+/// top, where without it it was thrown 1.7 m at most.
+const GROUND_SQUASH: f32 = 0.2;
+/// How stiff a tire is as it squashes into the terrain, as a multiple of
+/// `bump_stop_spring`, so that it goes with the truck's weight. Higher stops a hit in less
+/// of the squash, and jolts more often; lower lets more hits through to the rigid tire.
+/// 0.75 jolted less often but harder: on the same tracks, 67 g at worst against 41 g.
+const GROUND_SQUASH_STIFFNESS: f32 = 1.75;
+
+/// How far above its mount a tire is swept from, in metres: far enough to find a tire
+/// squashed into the terrain as far as it goes, and `BUMP_STOP_REACH` more.
+fn reach_above_mount(config: &TruckConfig) -> f32 {
+    BUMP_STOP_REACH + GROUND_SQUASH * config.wheel_radius
+}
+
+/// How steep the terrain under a tire may be for the dampers to answer all of its rise
+/// (see `stroke_rate`), as the cosine of the angle between its normal and straight up:
+/// 45 degrees. From there they answer less of it, and none at `STEEP_NONE`, 60 degrees,
+/// and go by the hub's own speed instead. A face that steep is a wall that a tire runs
+/// into more than ground that rises under it. On the ground boxes and on scenery, whose
+/// edges a tire meets at any angle, they never answer it: answered there, the top edge of
+/// a step 1.25 m high met at 15 m/s read as the hub being pressed up at 62 m/s, and the
+/// bump stop threw the truck 3 to 4 m into the air and over.
+///
+/// The truck's own lean leaves this alone: going by how far the face leans from the
+/// truck's up, over whoops 1 m high at 10 to 30 m/s the hardest jolt was 185 g where it
+/// was 73 g, and 2 runs of 18 went over where none did. Higher here and lower in
+/// `STEEP_NONE` answer less of a steep bank.
+///
+/// It is also the least share of the truck's up that `stroke_rate` divides by: by all of
+/// it, down to `UPWARD`, a truck on its side was read as pressed in at up to ten times its
+/// speed, and 8 computer trucks in 8 races on AlpineMtns.pod had 7 399 truck-steps with a
+/// jolt over 5 g and went over 66 times; with it, 6 661 and 52 times. Over those whoops it
+/// cost: 127 g at worst, and 3 runs over.
+const STEEP_FULL: f32 = 0.707;
+const STEEP_NONE: f32 = 0.5;
+
+/// A damper on how fast the terrain presses each hub up (see `stroke_rate`), at the wheel
+/// as the bump stop is, as a share of `damper`, so that it follows the garage's
+/// suspension dial and suits every truck. The dampers in `beam_loads` go by the hub's own
+/// speed, which keeps the body calm but leaves a tire that runs onto a rise to the bump
+/// stop alone. It works only as the tire is pressed in. Measured over whoops 0.6 m high at
+/// 10 to 30 m/s, with the bump stop's damper on the same rate: without it, 369 steps over
+/// 2 g and 61 over 5 g; with it, 125 and 22, and over whoops 0.3 m high no change. At 1,
+/// over the whoops 0.6 m high 196 steps over 2 g and none over 5 g, and fewer jolts on
+/// the tracks, but 8 computer trucks racing on AlpineMtns.pod were jolted over 5 g in
+/// 15 137 truck-steps in 16 races, where at this they were in 13 924, and before it in 14 308.
+const GROUND_DAMPING: f32 = 0.57;
+/// The rate, in m/s, above which `GROUND_DAMPING`'s damper stiffens by only
+/// 1 / `GROUND_DAMPING_BLOWOFF` as fast, as a damper's valve blows off, so that a tire
+/// that meets an edge at speed is not kicked up off it. Higher kicks harder.
+const GROUND_DAMPING_KNEE: f32 = 0.5;
+const GROUND_DAMPING_BLOWOFF: f32 = 4.0;
+
 /// How far below its mount the hub may still be and count as having shut its springs, in
-/// metres. The sweep reports how far below the mount the tire touches, and the travel is
+/// metres, and on the terrain squashed its tire as far as it goes (`GROUND_SQUASH`). The
+/// sweep reports how far below the mount the tire touches, and the travel is
 /// `suspension_bump` plus `suspension_droop`: 0 is the springs exactly shut, and this is the last
 /// couple of centimetres before that, where they have almost nothing left to give and
 /// handing the wheel back and forth between them and the collider only chatters.
@@ -128,6 +241,185 @@ fn wrapped(normal: Vec3, heading: Vec3, up: Vec3) -> Vec3 {
 /// ground: measured, 416 kN on a two-tonne truck, twenty-one g, and it was thrown off.
 /// Such a touch is the wheel collider's instead (see `contacts`).
 pub(super) const UPWARD: f32 = 0.1;
+
+/// Whether the suspension carries a tire on a face that pushes it along `normal`, in the
+/// world, on a truck whose up is `up`. The face must hold the tire up by `UPWARD` as the
+/// truck stands and, unless it is the `terrain`, as the world stands too. `contacts` asks
+/// the same of each contact, so that a face is the suspension's or the wheel collider's,
+/// and never both or neither.
+///
+/// As the world stands, because an upright wall is a wall however the truck leans on it.
+/// By the truck's up alone, a wall turned into ground once a tire that climbed it had
+/// lifted the nose 6 degrees: the climb (see `contacts`) stopped there, and the springs
+/// pushed the truck back off the wall instead. The terrain is left to the truck's up
+/// alone, as it was: it is a field of heights, which has slopes and no upright face.
+/// Scenery and the ground boxes have them. Not measured: it wants driving at a wall.
+pub(super) fn carries(normal: Vec3, up: Vec3, terrain: bool) -> bool {
+    normal.dot(up) > UPWARD && (terrain || normal.y > UPWARD)
+}
+
+/// How far into the bump stop the springs may be pressed for a tire to roll over an edge,
+/// as a share of `bump_stop_travel`: an edge whose top is further below the mount than
+/// this is in reach. 0 reaches as high as the bump stop begins; at 1 the hub may reach the
+/// mount itself. With the built-in truck at rest, 0.5 reaches 1.4 m up; with a POD truck
+/// on 0.91 m tires, 1.31 m. Higher rolls over taller walls, with a harder push from the bump
+/// stop.
+const EDGE_INTO_STOP: f32 = 0.5;
+
+/// How far into the bump stop the springs may be pressed by an edge, as a share of
+/// `bump_stop_travel`. Where the sweep would put the hub higher still, the tire squashes
+/// into the edge instead (see `edge_squash`): pressed fully into the bump stop by an edge
+/// met at 8 m/s, the springs threw the truck up and back. Higher passes more of an edge to
+/// the bump stop.
+const EDGE_SPRINGS: f32 = 0.5;
+
+/// How steeply a hub may rise towards an edge it rolls over, as rise per metre the truck
+/// goes on. A real tire squashes against an edge and rises over it as it rolls on, where
+/// the sweep finds the hub's place on top of the edge at once: measured with the built-in
+/// truck at 8 m/s into a 1.25 m wall, it put the hub 0.44 m higher in one step, and the
+/// springs answered with the bump stop. Higher rises quicker and digs the
+/// tire less far into the face; lower spreads the rise over more steps.
+const EDGE_RAMP: f32 = 3.0;
+
+/// How fast a hub may rise towards an edge however slowly the truck goes, in m/s, so that a
+/// truck creeping up to an edge still gets onto it. Higher is quicker at a crawl.
+const EDGE_RISE_SPEED: f32 = 3.0;
+
+/// The most that an edge's push may lean from the truck's up, in radians. The sweep meets
+/// the top of a face with a normal that is nearly level, which would push the truck back
+/// off the edge with nearly all of its load. Lower glides over with less speed lost;
+/// higher behaves more like a rigid wheel, which an edge stops.
+const EDGE_LEAN_MAX: f32 = 30.0 * std::f32::consts::PI / 180.0;
+
+/// How long a tire squashed into an edge takes to stop going further in, in seconds, for
+/// its quarter of the truck: the time to take all but a third of the speed it goes in at.
+/// Longer stops it more gently, and lets it further into the edge before the edge's face
+/// stops it outright (see `contacts`).
+const EDGE_SQUASH_TIME: f32 = 0.025;
+
+/// How far a tire may squash into a face of scenery or of a ground box, as a share of its
+/// radius. Beyond it the face stops it outright (see `contacts`), and so does a ground
+/// box's face against a wheel's core, at a quarter of the radius.
+pub(super) const FACE_SQUASH: f32 = 0.35;
+
+/// How far into a face `wall_squash` stops a tire, as a share of its radius: short of
+/// `FACE_SQUASH`, so that what it misses by does not reach the rigid contact there.
+/// Further spreads the stop over more of the tire, and lets it further into the face.
+const FACE_STOP: f32 = 0.25;
+
+/// How stiff a tire squashed into a face is, as the frequency in Hz at which its quarter of
+/// the truck would bounce on it. It holds a truck that the throttle pushes into a face.
+/// Higher holds it further out, and pushes a truck that slides along a wall off it harder.
+const FACE_FREQUENCY: f32 = 2.0;
+
+/// The least that `wall_squash` counts on being left of `FACE_STOP`, as a share of the
+/// radius, so that its push stays finite.
+const SQUASH_LEFT_LEAST: f32 = 0.02;
+
+/// How far a tire may squash into an edge that it rolls onto, as a share of its radius,
+/// before it is solid, as a tire whose springs are shut is (see `WheelCollider`). On the
+/// terrain it is `GROUND_SQUASH`.
+const EDGE_SQUASH: f32 = 0.5;
+
+/// Over how much of its radius the damper of a tire squashed into an edge comes in, as a
+/// share. Lower comes in more sharply.
+const EDGE_SQUASH_ONSET: f32 = 0.05;
+
+/// How stiff a tire squashed into an edge is, as the frequency in Hz at which its quarter
+/// of the truck would bounce on it. Higher lifts a truck over an edge as high as its hub
+/// sooner, with less of the tire in the edge, and throws it higher: at 2.5 Hz the built-in
+/// truck met a 1.25 m wall at 15 m/s with 160 g, and at 4 Hz with 66 g, but rose 3.1 m.
+const EDGE_SQUASH_FREQUENCY: f32 = 4.0;
+
+/// How much of the speed a tire goes into a wall at carries it up the wall, as a share: its
+/// tread grips the wall as it hits, and rides up it from the hit. Nothing else lifts it, so
+/// that a truck crawling at a wall stays at its foot; it drops back down once it has
+/// stopped going in. Higher rides further up, and throws the nose up harder.
+pub(super) const WALL_CARRY: f32 = 0.3;
+
+/// How hard a tire squashed `depth` metres into an edge pushes back, in newtons, as it
+/// goes further in at `going_in` m/s: its spring and its damper, for its quarter of the
+/// truck.
+fn edge_squash(config: &TruckConfig, depth: f32, going_in: f32) -> f32 {
+    if depth <= 0.0 {
+        return 0.0;
+    }
+    let quarter = config.mass / 4.0;
+    let stiffness = quarter * (std::f32::consts::TAU * EDGE_SQUASH_FREQUENCY).powi(2);
+    // The damper comes in over the first `EDGE_SQUASH_ONSET` of the radius, as the bump
+    // stop's does: whole at once, it met a tire at speed with all of its force in one step.
+    let onset = (depth / (EDGE_SQUASH_ONSET * config.wheel_radius)).min(1.0);
+    // Damped both ways, so that it does not throw back what it soaks up.
+    (stiffness * depth + onset * quarter / EDGE_SQUASH_TIME * going_in).max(0.0)
+}
+
+/// How squarely a face must stand in a tire's way for the tire to squash into it and ride
+/// up it, as the cosine of the angle between them: 0.5 is 60 degrees. Met more at a glance,
+/// the side of the tire brushes the face and bounces off it, as before: squashed, a truck
+/// that brushed a wall on Critic went on along another line and lost 160 m in a minute.
+/// Lower squashes into faces met more at a glance.
+pub(super) const WALL_FACING: f32 = 0.5;
+
+/// The speed under which `meets_squarely` also goes by where a tire points, and not only by
+/// where it goes, in m/s. Higher squashes tires steered at a wall that the truck slides
+/// along faster; lower leaves a truck that slides slowly along a wall, driven into it, to
+/// the rigid contact, which rolled the built-in truck over at 50 degrees to a 2 m wall.
+const SQUARELY_SLOW: f32 = 8.0;
+
+/// Whether a tire that goes at `velocity`, in m/s, pointing along `heading`, both in the
+/// world, meets a face whose outward normal is `normal` squarely enough to squash into it
+/// (`WALL_FACING`): by where it goes, or, slower than `SQUARELY_SLOW`, by where it points.
+/// By where it points at any speed, a front tire steered towards a wall that the truck slid
+/// along at 21 m/s squashed into it. `drive` and `contacts` both ask, so that a face is
+/// squashed by the one and left unsolved by the other, or neither.
+pub(super) fn meets_squarely(velocity: Vec3, heading: Vec3, normal: Vec3) -> bool {
+    let level = normal.reject_from(Vec3::Y).normalize_or_zero();
+    let going = velocity.reject_from(Vec3::Y);
+    let speed = going.length();
+    -going.dot(level) >= WALL_FACING * speed
+        || (speed < SQUARELY_SLOW && heading.dot(level).abs() >= WALL_FACING)
+}
+
+/// The push of a face on a tire squashed `depth` metres into it: along `level`, the face's
+/// level outward normal, and up the face by the tire's grip as it rides up it (see
+/// `WALL_CARRY`). `hub_velocity` is how fast the hub goes, in m/s.
+///
+/// The tire is stopped evenly over what is left of `FACE_STOP`, so that it stops before
+/// it is that far in, with no harder a push than that takes: a spring or a damper pushes
+/// hardest at one end of the squash, and twice as hard as an even stop over the same
+/// depth. Its spring holds a tire that the throttle pushes into the face.
+fn wall_squash(config: &TruckConfig, depth: f32, level: Vec3, hub_velocity: Vec3, dt: f32) -> Vec3 {
+    let quarter = config.mass / 4.0;
+    let going_in = (-hub_velocity.dot(level)).max(0.0);
+    let stiffness = quarter * (std::f32::consts::TAU * FACE_FREQUENCY).powi(2);
+    let left =
+        (FACE_STOP * config.wheel_radius - depth).max(SQUASH_LEFT_LEAST * config.wheel_radius);
+    // As if this tire stopped half the truck, as each front tire does in a wall met head
+    // on. One that stops more of it is stopped less evenly, and later.
+    let half = config.mass / 2.0;
+    let pressed = stiffness * depth.max(0.0) + half * going_in * going_in / (2.0 * left);
+    let rising = hub_velocity.y;
+    let lift = ((WALL_CARRY * going_in - rising) * quarter / dt).clamp(0.0, config.grip * pressed);
+    level * pressed + Vec3::Y * lift
+}
+
+/// How far inside a face and above where a sweep met it a ray looks for the top of the
+/// face, in metres (see `drive_truck`). Each must be more than the error of where a sweep
+/// says it touched, and less than the thinnest wall and the smallest step that a tire
+/// rolls onto.
+const TOP_TEST_IN: f32 = 0.02;
+const TOP_TEST_ABOVE: f32 = 0.05;
+
+/// The push of what is not the terrain, from its outward normal, turned up towards `up`
+/// until it leans no further than `EDGE_LEAN_MAX`.
+fn edge_lean(normal: Vec3, up: Vec3) -> Vec3 {
+    let (sin, cos) = EDGE_LEAN_MAX.sin_cos();
+    if normal.dot(up) >= cos {
+        return normal;
+    }
+    let level = normal.reject_from_normalized(up).normalize_or_zero();
+    (up * cos + level * sin).normalize_or(up)
+}
 
 /// Whether a tire is touched below its axle, at this point of its own cylinder (whose axis
 /// is Y) with the wheel steered this way: the half of it that can stand on something. Only
@@ -246,6 +538,50 @@ struct Cast {
     reach: f32,
 }
 
+/// One tire's sweep, which sees only what `stands_on` lets it.
+fn sweep(
+    spatial: &SpatialQuery,
+    cast: &Cast,
+    stands_on: &dyn Fn(Entity) -> bool,
+) -> Option<ShapeHitData> {
+    sweep_from(
+        spatial,
+        &cast.tire,
+        cast.from,
+        cast.turned,
+        cast.down,
+        cast.reach,
+        stands_on,
+    )
+}
+
+/// A tire's sweep, from `from` down `reach` metres.
+fn sweep_from(
+    spatial: &SpatialQuery,
+    tire: &Collider,
+    from: Vec3,
+    turned: Quat,
+    down: Dir3,
+    reach: f32,
+    stands_on: &dyn Fn(Entity) -> bool,
+) -> Option<ShapeHitData> {
+    spatial.cast_shape_predicate(
+        tire,
+        from,
+        turned,
+        down,
+        &ShapeCastConfig {
+            max_distance: reach,
+            target_distance: 0.0,
+            // A cast that starts inside something stops there, and says so.
+            compute_contact_on_penetration: true,
+            ignore_origin_penetration: false,
+        },
+        &SpatialQueryFilter::default(),
+        stands_on,
+    )
+}
+
 /// Makes every tire's sweep, on as many threads as the machine has. The sweeps only read
 /// the world, and none depends on another. One after another they were two thirds of this
 /// system's time: measured on Scrapyard Run with eight trucks, unoptimised, 32 sweeps took
@@ -257,29 +593,17 @@ fn sweep_all(
     casts: &[Cast],
     stands_on: &(dyn Fn(Entity) -> bool + Sync),
 ) -> Vec<Option<ShapeHitData>> {
-    let sweep = |cast: &Cast| {
-        spatial.cast_shape_predicate(
-            &cast.tire,
-            cast.from,
-            cast.turned,
-            cast.down,
-            &ShapeCastConfig {
-                max_distance: cast.reach,
-                target_distance: 0.0,
-                // A cast that starts inside something stops there, and says so.
-                compute_contact_on_penetration: true,
-                ignore_origin_penetration: false,
-            },
-            &SpatialQueryFilter::default(),
-            stands_on,
-        )
-    };
     // A few to each task: a task costs more to hand out than a sweep does to make.
     const PER_TASK: usize = 4;
     ComputeTaskPool::get_or_init(TaskPool::default)
         .scope(|scope| {
             for chunk in casts.chunks(PER_TASK) {
-                scope.spawn(async move { chunk.iter().map(sweep).collect::<Vec<_>>() });
+                scope.spawn(async move {
+                    chunk
+                        .iter()
+                        .map(|cast| sweep(spatial, cast, stands_on))
+                        .collect::<Vec<_>>()
+                });
             }
         })
         .into_iter()
@@ -299,6 +623,8 @@ pub(super) fn drive_truck(
     surfaces: Query<Forces, Without<Truck>>,
     bodies: Query<&ColliderOf>,
     kinds: Query<(&RigidBody, &ComputedMass, Has<Truck>)>,
+    // Which collider is the terrain, for `carries`.
+    layers: Query<&CollisionLayers>,
 ) {
     let dt = time.delta_secs();
     // Not this truck, another, or light loose scenery (see the module's notes).
@@ -345,10 +671,10 @@ pub(super) fn drive_truck(
                 let mount = transform.transform_point(wheel.mount);
                 casts.push(Cast {
                     tire: colliders.tire.clone(),
-                    from: mount + up * BUMP_STOP_REACH,
+                    from: mount + up * reach_above_mount(config),
                     turned: transform.rotation * tire_rotation * AXLE_ALONG_X,
                     down: Dir3::new(-up).unwrap_or(Dir3::NEG_Y),
-                    reach: travel + BUMP_STOP_REACH,
+                    reach: travel + reach_above_mount(config),
                 });
                 Some(Planned {
                     cast: casts.len() - 1,
@@ -402,9 +728,78 @@ pub(super) fn drive_truck(
             else {
                 continue;
             };
-            let lift = BUMP_STOP_REACH;
+            let lift = reach_above_mount(config);
             let (from, tire_turned) = (casts[cast].from, casts[cast].turned);
-            let touch = hits[cast].and_then(|hit| {
+            // The terrain alone has no upright faces (see `carries`).
+            let is_terrain = |collider: Entity| {
+                layers.get(collider).is_ok_and(|layers| {
+                    layers.memberships.has_all(GROUND) && !layers.memberships.has_all(GROUND_BOXES)
+                })
+            };
+            // A touch on what the suspension carries the tire on.
+            let stood_on = |collider: Entity, normal: Vec3, below_mount: f32, on_the_tread: f32| {
+                // The ground and scenery are each a body of their own; only a collider
+                // within a body, such as a truck's, needs its body looked up.
+                let (surface, kind) = match kinds.get(collider) {
+                    Ok((kind, ..)) => (collider, Some(kind)),
+                    Err(_) => {
+                        let body = bodies.get(collider).map_or(collider, |of| of.body);
+                        (body, kinds.get(body).ok().map(|(kind, ..)| kind))
+                    }
+                };
+                let terrain = is_terrain(collider);
+                Touch {
+                    below_mount,
+                    normal,
+                    on_the_tread,
+                    surface,
+                    moves: kind.is_some_and(|kind| !kind.is_static()),
+                    terrain,
+                    // Pressed past the top of its travel, a tire on the terrain squashes
+                    // (see `GROUND_SQUASH`).
+                    squash: if terrain {
+                        (-below_mount).clamp(0.0, GROUND_SQUASH * config.wheel_radius)
+                    } else {
+                        0.0
+                    },
+                    rolling_over: None,
+                }
+            };
+            // Where the hub was after the last step, as far below its mount.
+            let last_length = wheel_colliders
+                .get(collider)
+                .map_or(travel, |(at, _)| mount_in_truck.y - at.translation.y);
+            // How far the hub may rise towards what is not the terrain in this step (see
+            // `EDGE_RAMP`), and more as the body comes down onto it.
+            let mount_velocity = forces.velocity_at_point(mount);
+            let rolling = mount_velocity.reject_from_normalized(up).length();
+            let sinking = (-mount_velocity.dot(up)).max(0.0);
+            let rise_limit = (EDGE_RISE_SPEED.max(rolling * EDGE_RAMP) + sinking) * dt;
+            // How far below the mount the top of an edge must be for the springs to reach
+            // it (see `EDGE_INTO_STOP`).
+            let reach_floor = config.bump_stop_travel * EDGE_INTO_STOP;
+            let edge_springs = config.bump_stop_travel * (1.0 - EDGE_SPRINGS);
+            // Whether a sweep that met a face met it at its top, and not partway up it: a
+            // sweep goes down along the truck's up, and on a truck that leans, a tire
+            // pressed against a wall meets the wall's face as it goes down. Taken for the
+            // top, the face was climbed. A short ray down from just above the touch, just
+            // inside the face, finds the top there, or begins inside the face.
+            let at_the_top = |hit: &ShapeHitData| {
+                let inward = -hit.normal1.reject_from(Vec3::Y).normalize_or_zero();
+                spatial
+                    .cast_ray_predicate(
+                        hit.point1 + inward * TOP_TEST_IN + Vec3::Y * TOP_TEST_ABOVE,
+                        Dir3::NEG_Y,
+                        2.0 * TOP_TEST_ABOVE,
+                        true,
+                        &SpatialQueryFilter::default(),
+                        &|collider| collider == hit.entity,
+                    )
+                    .is_some_and(|ray| ray.distance > 0.0)
+            };
+            // What a sweep from `lift` above the mount found, if the suspension stands the
+            // tire on it.
+            let stand_on = |hit: &ShapeHitData, from: Vec3, lift: f32| {
                 // `normal1` is the outward normal of what was hit, in the world, and
                 // `point2` the touch on the tire, in the world too: taken into the
                 // cylinder's own frame, whose axis is Y, from where the tire touched.
@@ -413,36 +808,131 @@ pub(super) fn drive_truck(
                 let on_the_tire = tire_turned.inverse() * (hit.point2 - touched_at);
                 let out_from_axle = on_the_tire.xz().length() / config.wheel_radius;
                 let on_the_tread = ((out_from_axle - SIDEWALL) / (1.0 - SIDEWALL)).clamp(0.0, 1.0);
-                // Brushed by the sidewall, and not stood on: the wheel hangs. So does
-                // a wheel whose tread meets a face that is not holding it up at all --
-                // the ground against the top of a tire on a truck tipped over, which
-                // the wheel collider takes as a rigid contact instead (see `contacts`).
-                let underneath = normal.dot(up) > UPWARD;
-                if on_the_tread <= 0.0 || !underneath {
+                // Brushed by the sidewall, and not stood on: the wheel hangs.
+                if on_the_tread <= 0.0 {
                     return None;
                 }
-                // The ground and scenery are each a body of their own; only a collider
-                // within a body, such as a truck's, needs its body looked up.
-                let (surface, kind) = match kinds.get(hit.entity) {
-                    Ok((kind, ..)) => (hit.entity, Some(kind)),
-                    Err(_) => {
-                        let body = bodies.get(hit.entity).map_or(hit.entity, |of| of.body);
-                        (body, kinds.get(body).ok().map(|(kind, ..)| kind))
-                    }
-                };
+                let found = hit.distance - lift;
+                // The terrain against a tire that it does not hold up is the top of a tire
+                // on a truck tipped over, which the wheel collider takes as a rigid
+                // contact instead (see `contacts`).
+                if is_terrain(hit.entity) {
+                    return carries(normal, up, true)
+                        .then(|| stood_on(hit.entity, normal, found, on_the_tread));
+                }
+                // Anything else the tire rolls onto, as a kerb, a deck or the top of a wall,
+                // if the springs reach it. A sweep that began inside it says nothing of how
+                // far in, and a face that does not hold the tire up is rolled onto only at
+                // its top.
+                if hit.distance <= 0.0 || (mount - hit.point1).dot(up) < reach_floor {
+                    return None;
+                }
+                if !carries(normal, up, false) && (normal.dot(up) <= -UPWARD || !at_the_top(hit)) {
+                    return None;
+                }
+                // Further up than the springs go, the tire squashes rather than shutting them.
+                let length = found.max(last_length - rise_limit).max(edge_springs);
+                let leaned = edge_lean(normal, up);
+                let squash = (edge_springs - found).max(0.0);
                 Some(Touch {
-                    below_mount: hit.distance - lift,
-                    normal,
-                    on_the_tread,
-                    surface,
-                    moves: kind.is_some_and(|kind| !kind.is_static()),
+                    squash,
+                    rolling_over: (leaned != normal || squash > 0.0).then_some(hit.entity),
+                    ..stood_on(hit.entity, leaned, length, on_the_tread)
                 })
+            };
+            // Against a face that it cannot roll over, with nothing found under it, the
+            // wheel holds its length rather than dropping to the bottom of its travel: a
+            // wheel that drops on a truck whose nose is up swings into the face.
+            let mut walled = false;
+            let touch = hits[cast].and_then(|first| {
+                // What the sweep found, unless it began inside it: such a sweep says nothing
+                // of how deep the tire is in it.
+                if first.distance > 0.0 {
+                    if let Some(stood) = stand_on(&first, from, lift) {
+                        return Some(stood);
+                    }
+                    // The terrain has no upright faces (see `carries`), and what holds the
+                    // tire up but is out of reach is no ground for it either.
+                    let normal = first.normal1.try_normalize().unwrap_or(up);
+                    if is_terrain(first.entity) || carries(normal, up, false) {
+                        return None;
+                    }
+                }
+                // Something the tire is already in, or a face. A sweep stops at the first
+                // thing it meets, and a tire pressed into a face meets the face before the
+                // top of it or the ground at its foot. So the tire is swept again from where
+                // its bottom is above all that it can stand on. In the terrain that is
+                // `RESWEEP` of its radius higher: taken at its word, a sweep that began
+                // inside the terrain left the wheel at the bottom of its travel, deep in the
+                // ground, and the rigid contacts of its collider and core stopped the truck;
+                // measured, a truck at 28 m/s into a whoop came out of one step going
+                // backwards at 4 m/s. Against anything else it is just above the highest
+                // edge the springs reach, so that whatever is found, the tire rolls onto.
+                // Few wheels are in either case in any step, so these are cast here, one
+                // after another.
+                let higher = if is_terrain(first.entity) {
+                    RESWEEP * config.wheel_radius
+                } else {
+                    config.wheel_radius - reach_floor - lift
+                };
+                // What the last sweep met.
+                let mut met = first.entity;
+                if higher > 0.0 {
+                    let again_from = from + up * higher;
+                    let again = sweep_from(
+                        &spatial,
+                        &colliders.tire,
+                        again_from,
+                        tire_turned,
+                        casts[cast].down,
+                        casts[cast].reach + higher,
+                        &stands_on,
+                    );
+                    if let Some(hit) = again {
+                        if let Some(stood) = stand_on(&hit, again_from, lift + higher) {
+                            return Some(stood);
+                        }
+                        met = hit.entity;
+                    }
+                }
+                // The terrain has no upright faces: what of it the tire does not stand on is
+                // no wall either.
+                if is_terrain(met) {
+                    return None;
+                }
+                walled = true;
+                // Out of reach, a wall. What the tire stands on is found with a ray
+                // instead, down through the hub, which the wall is not in the way of: the
+                // tire reaches the ground a radius before the ray does. Left without it,
+                // the wheel hung with nothing under it, and neither held its end of the
+                // truck up nor drove it. From where the first sweep began, low in the
+                // wheel arch: from higher up, the ray of a truck that leans on a wall
+                // can begin inside the wall.
+                let ray = spatial.cast_ray_predicate(
+                    from,
+                    casts[cast].down,
+                    casts[cast].reach + config.wheel_radius,
+                    true,
+                    &SpatialQueryFilter::default(),
+                    &stands_on,
+                )?;
+                let normal = ray.normal.try_normalize().unwrap_or(up);
+                // No deeper than a sweep that begins inside something says.
+                let below_mount = (ray.distance - config.wheel_radius - lift).max(-lift);
+                carries(normal, up, is_terrain(ray.entity))
+                    .then(|| stood_on(ray.entity, normal, below_mount, 1.0))
             });
 
             // Suspension length: from the mount down to the hub. With nothing under it the
-            // wheel hangs at the bottom of its travel. Above the mount it can't go: the hub
-            // stays at its upper limit and the rest is taken by the bump stop.
-            let length = touch.map_or(travel, |touch| touch.below_mount.max(0.0));
+            // wheel hangs at the bottom of its travel, unless it is against a face. Above
+            // the mount it can't go: the hub stays at its upper limit and the rest is taken
+            // by the bump stop.
+            let hanging = if walled {
+                last_length.clamp(0.0, travel)
+            } else {
+                travel
+            };
+            let length = touch.map_or(hanging, |touch| touch.below_mount.max(0.0));
             let hub = mount - up * length;
             // Against what it stands on, which is only the ground's own when that is still.
             let surface_velocity = touch
@@ -450,6 +940,43 @@ pub(super) fn drive_truck(
                 .and_then(|touch| surfaces.get(touch.surface).ok())
                 .map_or(Vec3::ZERO, |surface| surface.velocity_at_point(hub));
             let hub_velocity = forces.velocity_at_point(hub) - surface_velocity;
+            // A face of scenery or of a ground box squashes the tire where it reaches as
+            // high as the hub, and the tread rides up it from the hit (see `wall_squash`):
+            // the suspension rolls a tire over what is lower without losing speed, and
+            // lifts it only so fast over what is higher. Few wheels are against a face in
+            // any step, so these rays are cast here, one after another.
+            let face = hits[cast].filter(|hit| {
+                !is_terrain(hit.entity)
+                    && (hit.distance <= 0.0 || hit.normal1.dot(up) < EDGE_LEAN_MAX.cos())
+            });
+            if let Some((face, normal)) = face.map(|hit| (hit.entity, hit.normal1)) {
+                let level = normal.reject_from(Vec3::Y).normalize_or_zero();
+                let tire_forward = transform.rotation * steer_rotation * Vec3::NEG_Z;
+                let tire_axle = transform.rotation * steer_rotation * Vec3::X;
+                // How far the tire reaches from its hub towards the face.
+                let reach = config.wheel_radius * level.dot(tire_forward).abs()
+                    + config.wheel_width / 2.0 * level.dot(tire_axle).abs();
+                // A face met at a glance, by the side of the tire, is the wheel collider's
+                // alone (see `contacts`).
+                let squarely = meets_squarely(hub_velocity, tire_forward, level);
+                let into = Dir3::new(-level)
+                    .ok()
+                    .filter(|_| squarely)
+                    .and_then(|into| {
+                        spatial.cast_ray_predicate(
+                            hub,
+                            into,
+                            reach,
+                            true,
+                            &SpatialQueryFilter::default(),
+                            &|collider| collider == face,
+                        )
+                    });
+                if let Some(ray) = into {
+                    let push = wall_squash(config, reach - ray.distance, level, hub_velocity, dt);
+                    forces.apply_force_at_point(push, hub - level * ray.distance);
+                }
+            }
             sweeps.push(Sweep {
                 index,
                 wheel: child,
@@ -529,10 +1056,25 @@ pub(super) fn drive_truck(
             let mut bottomed = false;
 
             if let Some(touch) = sweep.touch {
-                bottomed = touch.below_mount < SPRINGS_SHUT;
+                // Pressed past the top of its travel, and squashed as far as the tire goes:
+                // on the terrain `GROUND_SQUASH` further, and into an edge `EDGE_SQUASH`.
+                let radius = config.wheel_radius;
+                bottomed = if touch.terrain {
+                    touch.below_mount < SPRINGS_SHUT - GROUND_SQUASH * radius
+                } else {
+                    touch.below_mount < SPRINGS_SHUT || touch.squash > EDGE_SQUASH * radius
+                };
                 let hub = sweep.hub;
                 let hub_velocity = sweep.hub_velocity;
-                let compression_rate = rise_rate(sweep);
+                // How much the dampers at the wheel go by how fast the terrain presses the
+                // hub up, and not by the hub's own speed (see `STEEP_FULL`).
+                let share = if touch.terrain {
+                    ground_share(touch.normal.y)
+                } else {
+                    0.0
+                };
+                let ground_rate = stroke_rate(hub_velocity, touch.normal, up) * share;
+                let compression_rate = rise_rate(sweep) * (1.0 - share) + ground_rate;
 
                 // The bump stop, over the top of the travel, at the wheel itself: a stiff
                 // spring, and a damper that works only as the wheel presses in. So it soaks
@@ -545,6 +1087,12 @@ pub(super) fn drive_truck(
                 // went from 116 to 66, and the sharpest change of lift from 2.5 g to 0.5 to
                 // 1.7 g; on Alpine the springs shut, the truck was jolted and lost speed no
                 // more often than before.
+                //
+                // On the terrain its damper goes by how fast the ground presses the hub up,
+                // as much as the face is not too steep (see `STEEP_FULL`). By the hub's own
+                // speed, as the springs' dampers go, a tire that ran onto a rise was not
+                // slowed by it at all, and the springs shut: measured over whoops 0.6 m
+                // high at 30 m/s, the hardest jolt went from 391 g to 21 g.
                 let into_stop = rise(sweep) - (config.suspension_bump - config.bump_stop_travel);
                 let bump_stop = if into_stop > 0.0 {
                     let depth = (into_stop / config.bump_stop_travel).min(1.0);
@@ -554,7 +1102,21 @@ pub(super) fn drive_truck(
                 } else {
                     0.0
                 };
-                let load = (spring + bump_stop).max(0.0) * touch.on_the_tread;
+                // See `GROUND_DAMPING`.
+                let stroke = ground_rate.max(0.0);
+                let ground_damper = config.damper
+                    * GROUND_DAMPING
+                    * (stroke.min(GROUND_DAMPING_KNEE)
+                        + (stroke - GROUND_DAMPING_KNEE).max(0.0) / GROUND_DAMPING_BLOWOFF);
+                // The tire squashed: into the terrain, past the top of its travel, or into an
+                // edge that the springs cannot lift it onto.
+                let squashed = if touch.terrain {
+                    GROUND_SQUASH_STIFFNESS * config.bump_stop_spring * touch.squash
+                } else {
+                    edge_squash(config, touch.squash, compression_rate)
+                };
+                let load =
+                    (spring + bump_stop + ground_damper + squashed).max(0.0) * touch.on_the_tread;
                 let heading = transform.rotation * steer_rotation * Vec3::NEG_Z;
                 let normal = wrapped(touch.normal, heading, up);
 
@@ -642,6 +1204,7 @@ pub(super) fn drive_truck(
                 collider_transform.translation = hub_in_truck;
                 collider_transform.rotation = tire_rotation * AXLE_ALONG_X;
                 wheel_collider.bottomed = bottomed;
+                wheel_collider.rolling_over = sweep.touch.and_then(|touch| touch.rolling_over);
             }
         }
     }
@@ -709,6 +1272,33 @@ struct Touch {
     /// Whether that body moves: moving or heavy loose scenery, and not the ground or fixed
     /// scenery, which are not looked into.
     moves: bool,
+    /// Whether it is the terrain, and not a ground box or scenery.
+    terrain: bool,
+    /// How far the tire is squashed, in metres: on the terrain, as far as it is pressed
+    /// past the top of its travel (`GROUND_SQUASH`); on an edge that it rolls over, as far
+    /// as the edge presses it past what the springs take (`EDGE_SPRINGS`).
+    squash: f32,
+    /// What it rolls over the edge of, if that is not the terrain (see `WheelCollider`).
+    rolling_over: Option<Entity>,
+}
+
+/// How fast a hub is pressed up towards its mount, in m/s, by what its tire stands on:
+/// from how fast it goes, `hub_velocity`, against a surface whose outward normal is
+/// `normal`, on a truck whose up is `up`. A tire that stays on the surface keeps its
+/// distance from it along the normal, so the hub must give along `up` by as much as it
+/// closes in along the normal, over how much of `up` the normal has (no less than
+/// `STEEP_FULL`). Unlike the hub's own speed along `up`, it holds the rise of the ground
+/// under a tire that runs onto a slope or a bump; and it is 0 for a truck that drives
+/// over level ground nose up, where the hub's own speed is its speed times the sine of
+/// the pitch.
+fn stroke_rate(hub_velocity: Vec3, normal: Vec3, up: Vec3) -> f32 {
+    -hub_velocity.dot(normal) / up.dot(normal).max(STEEP_FULL)
+}
+
+/// How much of the terrain's rise under a tire the dampers answer, from 0 to 1, on a face
+/// whose normal has this much of straight up in it (see `STEEP_FULL`).
+fn ground_share(upright: f32) -> f32 {
+    ((upright - STEEP_NONE) / (STEEP_FULL - STEEP_NONE)).clamp(0.0, 1.0)
 }
 
 /// What is known of a wheel before its tire is swept.
@@ -800,6 +1390,104 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-2
+    }
+
+    #[test]
+    fn an_edge_pushes_no_further_back_than_its_lean_allows() {
+        let up = Vec3::Y;
+        // The top of a face, met with the front of the tire: nearly level.
+        let leaned = edge_lean(Vec3::new(0.0, 0.05, 1.0).normalize(), up);
+        assert!(close(leaned.dot(up), EDGE_LEAN_MAX.cos()), "{leaned}");
+        assert!(leaned.z > 0.0 && close(leaned.x, 0.0));
+        // Ground no steeper than that is left as it is.
+        let slope = Vec3::new(0.0, 1.0, 0.3).normalize();
+        assert_eq!(edge_lean(slope, up), slope);
+    }
+
+    #[test]
+    fn a_face_is_met_squarely_by_where_the_tire_goes_or_slowly_by_where_it_points() {
+        let wall = Vec3::Z;
+        let at_it = Vec3::NEG_Z;
+        // Head on, fast or slow.
+        assert!(meets_squarely(Vec3::new(0.0, 0.0, -15.0), at_it, wall));
+        assert!(meets_squarely(Vec3::new(0.0, 0.0, -2.0), at_it, wall));
+        // Pushed into it at a standstill.
+        assert!(meets_squarely(Vec3::ZERO, at_it, wall));
+        // Sliding fast along it with the tire steered at it: a glance.
+        assert!(!meets_squarely(Vec3::new(20.0, 0.0, -1.0), at_it, wall));
+        // Sliding slowly along it, driven into it.
+        assert!(meets_squarely(Vec3::new(4.0, 0.0, -0.5), at_it, wall));
+        // Going away from it.
+        assert!(!meets_squarely(Vec3::new(0.0, 0.0, 15.0), Vec3::Z, wall));
+    }
+
+    #[test]
+    fn a_squash_pushes_only_while_the_tire_is_in_and_never_pulls() {
+        let config = TruckConfig::default();
+        assert_eq!(edge_squash(&config, 0.0, 5.0), 0.0);
+        assert!(edge_squash(&config, 0.1, 0.0) > 0.0);
+        assert!(edge_squash(&config, 0.1, 3.0) > edge_squash(&config, 0.1, 0.0));
+        // Coming back out fast, the damper takes the push away but never pulls.
+        assert_eq!(edge_squash(&config, 0.01, -50.0), 0.0);
+    }
+
+    /// Drives half of a truck at a face at `speed`, and returns how far into the face its
+    /// tire stops, in metres, and the hardest it is slowed, in m/s².
+    fn into_a_face(config: &TruckConfig, speed: f32) -> (f32, f32) {
+        let dt = 1.0 / 120.0;
+        let (mut depth, mut velocity, mut hardest) = (0.0f32, -speed, 0.0f32);
+        let level = Vec3::Z;
+        for _ in 0..240 {
+            let push = wall_squash(config, depth, level, Vec3::Z * velocity, dt);
+            let slowing = push.dot(level) / (config.mass / 2.0);
+            hardest = hardest.max(slowing);
+            velocity += slowing * dt;
+            if velocity >= 0.0 {
+                break;
+            }
+            depth -= velocity * dt;
+        }
+        (depth, hardest)
+    }
+
+    #[test]
+    fn a_tire_that_hits_a_wall_is_stopped_evenly_before_the_wall_holds_it() {
+        for config in [
+            TruckConfig::default(),
+            TruckConfig {
+                wheel_radius: 0.9144,
+                ..TruckConfig::default()
+            },
+        ] {
+            let stop = FACE_STOP * config.wheel_radius;
+            for speed in [2.5, 4.0, 8.0, 15.0] {
+                let (depth, hardest) = into_a_face(&config, speed);
+                // Short of the rigid contact, give or take what one step overshoots by.
+                assert!(depth <= 1.01 * stop, "{speed} m/s: {depth} m in");
+                assert!(depth < FACE_SQUASH * config.wheel_radius);
+                // No harder than twice an even stop over the whole depth.
+                let even = speed * speed / (2.0 * stop);
+                assert!(
+                    hardest <= 2.0 * even,
+                    "{speed} m/s: {hardest} against {even}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_tire_rides_up_a_wall_from_the_hit_only() {
+        let config = TruckConfig::default();
+        let dt = 1.0 / 120.0;
+        // Hit at 8 m/s: lifted up the wall.
+        let hit = wall_squash(&config, 0.02, Vec3::Z, Vec3::new(0.0, 0.0, -8.0), dt);
+        assert!(hit.y > 0.0);
+        // Pressed against it by the throttle, at a standstill: not lifted at all.
+        let pressed = wall_squash(&config, 0.05, Vec3::Z, Vec3::ZERO, dt);
+        assert_eq!(pressed.y, 0.0);
+        assert!(pressed.z > 0.0);
+        // Never more than the tire's grip.
+        assert!(hit.y <= config.grip * hit.z + 1e-3);
     }
 
     #[test]
@@ -928,6 +1616,43 @@ mod tests {
         let hanging = -config.suspension_droop;
         assert!(config.sag() < config.suspension_droop);
         assert_eq!(beam_loads(&config, [hanging; 2], [0.0; 2]), [0.0; 2]);
+    }
+
+    #[test]
+    fn the_stroke_rate_is_the_ground_rising_under_the_tire() {
+        let up = Vec3::Y;
+        // Level ground, driven over level: nothing, whichever way the truck goes.
+        assert!(close(
+            stroke_rate(Vec3::new(3.0, 0.0, -20.0), Vec3::Y, up),
+            0.0
+        ));
+        // Nose up 10 degrees over level ground: the hub's own speed along the truck's up
+        // is the speed times the sine of the pitch, but the tire is not pressed in at all.
+        let pitched = Quat::from_rotation_x(10f32.to_radians()) * Vec3::Y;
+        let along = Vec3::new(0.0, 0.0, -20.0);
+        assert!(close(stroke_rate(along, Vec3::Y, pitched), 0.0));
+        assert!(-along.dot(pitched) > 3.0);
+        // A slope that rises 1 in 5 ahead, met at 20 m/s: pressed up at 4 m/s.
+        let slope = Vec3::new(0.0, 1.0, 0.2).normalize();
+        assert!(close(stroke_rate(along, slope, up), 4.0));
+        // Falling onto level ground at 3 m/s: pressed up at 3 m/s.
+        assert!(close(
+            stroke_rate(Vec3::new(0.0, -3.0, 0.0), Vec3::Y, up),
+            3.0
+        ));
+        // A face that holds the tire up little is read no faster than at 45 degrees.
+        let face = Vec3::new(0.0, 0.1, 1.0).normalize();
+        assert!(stroke_rate(along, face, up) <= along.length() / STEEP_FULL + 1e-3);
+    }
+
+    #[test]
+    fn the_dampers_answer_the_terrain_less_as_it_steepens() {
+        assert_eq!(ground_share(1.0), 1.0);
+        assert_eq!(ground_share(STEEP_FULL), 1.0);
+        assert_eq!(ground_share(STEEP_NONE), 0.0);
+        assert_eq!(ground_share(0.0), 0.0);
+        let between = ground_share((STEEP_FULL + STEEP_NONE) / 2.0);
+        assert!(close(between, 0.5));
     }
 
     #[test]

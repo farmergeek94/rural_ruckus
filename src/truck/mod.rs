@@ -213,11 +213,18 @@ pub(crate) struct TruckWheelColliders {
 /// On a wheel's collider.
 #[derive(Component)]
 pub(crate) struct WheelCollider {
-    /// Whether the tire is pressed past the top of its travel this step. There the
-    /// springs have nothing left to give and the tire is simply solid: `drive` stops
-    /// pushing and `contacts` keeps the ground contact, which is what holds the truck up
-    /// and bounces it. Written by `drive` every step, read by `contacts`.
+    /// Whether the tire is pressed past the top of its travel this step, and squashed as
+    /// far as it goes (`drive::GROUND_SQUASH` on the terrain, `drive::EDGE_SQUASH` into an
+    /// edge). There the springs have nothing left to give and the tire is simply solid:
+    /// `drive` stops pushing and `contacts` keeps the ground contact, which is what holds
+    /// the truck up and bounces it. Written by `drive` every step, read by `contacts`.
     pub(super) bottomed: bool,
+    /// What the suspension rolls the tire over the top of this step, if it is not the
+    /// terrain: scenery, or the ground boxes. A tire met fast with an edge as high as its
+    /// hub goes into the edge's face for a few steps as the springs lift it, and `contacts`
+    /// lets it, and its core, further into that than into another face. Written by `drive`
+    /// every step, read by `contacts` in the same step.
+    pub(super) rolling_over: Option<Entity>,
 }
 
 /// A solid ball inside a wheel, at its hub, that touches the ground and nothing else. The

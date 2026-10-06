@@ -196,11 +196,11 @@ fn spawn_terrain(
     };
     // The ground boxes are part of the ground: trucks drive on them as on it, and the
     // wheels treat them the same (see `truck/contacts.rs`).
-    let ground = || {
+    let ground = |layers: CollisionLayers| {
         (
             RigidBody::Static,
             // So that `truck/contacts.rs` can tell a wheel's contacts with it apart.
-            crate::collision_groups::ground(),
+            layers,
             Friction::new(1.0),
             // Dirt, not rubber. Once a truck's springs are shut its tires are what meets
             // the ground (see `truck/contacts.rs`), and a tire's own bounce is a lively
@@ -218,7 +218,7 @@ fn spawn_terrain(
             Transform::default(),
             Visibility::default(),
             build_collider(&track.heights),
-            ground(),
+            ground(crate::collision_groups::ground()),
         ))
         .id();
     if let Some(collider) = ground_boxes::build_collider(&track.ground_boxes) {
@@ -227,7 +227,8 @@ fn spawn_terrain(
             ChildOf(terrain),
             Transform::default(),
             collider,
-            ground(),
+            // And their upright sides apart from the terrain's slopes.
+            ground(crate::collision_groups::ground_boxes()),
         ));
     }
 
