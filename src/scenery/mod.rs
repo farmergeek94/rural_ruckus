@@ -64,6 +64,7 @@ impl Plugin for SceneryPlugin {
                 interpolate::place_visuals,
                 animation::cycle_textures,
                 animation::move_keyframes,
+                animation::refresh_morphs_in_view,
                 facing::face_the_camera.after(CameraSystems::Place),
                 keep_draw_distance,
                 show_decorations,

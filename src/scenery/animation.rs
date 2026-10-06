@@ -17,7 +17,7 @@
 //! by as it faces.
 
 use bevy::camera::primitives::Aabb;
-use bevy::mesh::morph::{MAX_MORPH_WEIGHTS, MorphAttributes, MorphWeights};
+use bevy::mesh::morph::{MAX_MORPH_WEIGHTS, MeshMorphWeights, MorphAttributes, MorphWeights};
 use bevy::prelude::*;
 
 use crate::track::{Keyframes, SceneryModel, TileMaterial, Track};
@@ -139,6 +139,24 @@ pub(super) fn move_keyframes(
             continue;
         };
         weights_at(keyframes, seconds, weights.weights_mut());
+    }
+}
+
+type MorphedAndSeenOrHidden = (With<MeshMorphWeights>, Changed<ViewVisibility>);
+
+/// Makes Bevy write again what the graphics card holds about an object that moves by
+/// keyframes, on the frame after the object comes into view. Bevy 0.19 writes it as the
+/// object comes into view, but before it has made the object's morph descriptor (the
+/// order of `prepare_morph_descriptors` and `collect_meshes_for_gpu_building`), and then
+/// keeps it until the object changes. Without this, an object that comes into view after
+/// it is spawned stays in its first keyframe: measured on Tinhorn Junction's pump jacks.
+pub(super) fn refresh_morphs_in_view(
+    mut came_into_view: Query<(&ViewVisibility, &mut Mesh3d), MorphedAndSeenOrHidden>,
+) {
+    for (visibility, mut mesh) in &mut came_into_view {
+        if visibility.get() {
+            mesh.set_changed();
+        }
     }
 }
 

@@ -235,7 +235,7 @@ animated texture, and uses it as seconds from one frame to the next: 1 s for the
 dinosaur, 0.5 s for the pump jack. What is solid is the first frame. `src/pod/mod.rs`
 reads the first frame into `Track::models` and every frame's vertices into
 `Track::animated_models`; a frame that is missing, or has another vertex count, leaves the
-model still. The scenery moves the mesh (`scenery/animation.rs`).
+model still. The scenery moves the mesh (`scenery/animation.rs`). Bevy 0.19 shows a model like this in its first frame if it comes into view after it is spawned, unless the game makes Bevy write the model's data again (`refresh_morphs_in_view`).
 
 ## Placing a model in a track
 
