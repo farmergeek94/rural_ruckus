@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 
+use super::along::GatesAlong;
 use super::pause::running;
 use super::{RaceClock, RacePause, RaceSettings, Racer};
 use crate::game_state::GameState;
@@ -15,6 +16,11 @@ pub(super) fn reset_clock(mut clock: ResMut<RaceClock>) {
     clock.tick = 0;
 }
 
+/// Where the gates of the race's track are along its course.
+pub(super) fn find_gates_along(mut commands: Commands, track: Res<Track>) {
+    commands.insert_resource(GatesAlong::new(&track));
+}
+
 pub(super) fn tick_clock(mut clock: ResMut<RaceClock>) {
     clock.tick += 1;
 }
@@ -23,6 +29,7 @@ pub(super) fn track_progress(
     clock: Res<RaceClock>,
     settings: Res<RaceSettings>,
     track: Res<Track>,
+    gates_along: Res<GatesAlong>,
     mut racers: Query<(&Transform, &mut Racer)>,
 ) {
     for (transform, mut racer) in &mut racers {
@@ -37,6 +44,8 @@ pub(super) fn track_progress(
             );
         }
         racer.last_position = Some(position);
+        racer.to_next_gate =
+            gates_along.to_next_gate(&track, racer.progress.next_gate, position.xz());
     }
 }
 

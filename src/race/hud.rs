@@ -32,11 +32,11 @@ pub(super) fn update_race_hud(
     settings: Res<RaceSettings>,
     track: Res<Track>,
     time: Res<Time<Fixed>>,
-    racer: Single<(&Racer, &Transform), With<PlayerTruck>>,
-    others: Query<(&Racer, &Transform), Without<PlayerTruck>>,
+    racer: Single<&Racer, With<PlayerTruck>>,
+    others: Query<&Racer, Without<PlayerTruck>>,
     mut text: Single<&mut Text, With<RaceText>>,
 ) {
-    let (racer, transform) = *racer;
+    let racer = *racer;
     let progress = &racer.progress;
     let tick_seconds = time.timestep().as_secs_f64();
     let show = |ticks: Option<u64>| match ticks {
@@ -58,17 +58,11 @@ pub(super) fn update_race_hud(
     let place = if others.is_empty() {
         String::new()
     } else {
-        let to_next_gate = |racer: &Racer, transform: &Transform| {
-            track
-                .gates
-                .get(racer.progress.next_gate)
-                .map_or(0.0, |gate| gate.center.distance(transform.translation.xz()))
-        };
         let place = position(
-            (progress, to_next_gate(racer, transform)),
+            (progress, racer.to_next_gate),
             others
                 .iter()
-                .map(|(other, transform)| (&other.progress, to_next_gate(other, transform))),
+                .map(|other| (&other.progress, other.to_next_gate)),
             track.gates.len(),
         );
         format!("Position {place}/{}\n", others.iter().count() + 1)

@@ -126,6 +126,30 @@ pub fn map_image(track: &TrackData, size: usize) -> Vec<u8> {
     map.pixels
 }
 
+/// The square of the world that `map_image` shows of a track, for whatever is put over the
+/// picture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MapFrame {
+    /// The place in the world (X and Z) at the middle of the picture, in metres.
+    pub middle: Vec2,
+    /// The length of each side of the picture in the world, in metres.
+    pub span: f32,
+}
+
+impl MapFrame {
+    /// Where `world` (X and Z) is on the picture: (0, 0) at its top left and (1, 1) at its
+    /// bottom right. Outside that it is off the picture.
+    pub fn place(&self, world: Vec2) -> Vec2 {
+        (world - self.middle) / self.span + 0.5
+    }
+}
+
+/// The square of the world that `map_image` shows of `track`.
+pub fn map_frame(track: &TrackData) -> MapFrame {
+    let (middle, span) = frame(track);
+    MapFrame { middle, span }
+}
+
 /// The square of the world to show: its middle, and the metres along each side. Around
 /// the course, the gates and the start where there is a course, and otherwise everything.
 fn frame(track: &TrackData) -> (Vec2, f32) {
@@ -277,6 +301,19 @@ mod tests {
         assert!(track.gates.len() > 1);
         for gate in &track.gates[1..] {
             assert_eq!(pixel_at(&map, &track, gate.center), MAP_GATE);
+        }
+    }
+
+    #[test]
+    fn the_frame_places_things_where_the_picture_draws_them() {
+        let track = builtin_track();
+        let map = map_image(&track, SIZE);
+        let frame = map_frame(&track);
+        for (index, gate) in track.gates.iter().enumerate() {
+            let pixel = (frame.place(gate.center) * SIZE as f32).as_uvec2();
+            let at = (pixel.y as usize * SIZE + pixel.x as usize) * 4;
+            let expected = if index == 0 { MAP_START } else { MAP_GATE };
+            assert_eq!(map[at..at + 3], expected, "gate {index}");
         }
     }
 

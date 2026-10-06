@@ -20,6 +20,8 @@ pub enum Control {
     BackToCheckpoint,
     /// Once the player has finished: race again.
     RaceAgain,
+    /// Shows or hides the map of the track.
+    Map,
     ChangeView,
     LookLeft,
     LookRight,
@@ -32,7 +34,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the options screen lists them.
-    pub const ALL: [Control; 16] = [
+    pub const ALL: [Control; 17] = [
         Control::Throttle,
         Control::Reverse,
         Control::SteerLeft,
@@ -41,6 +43,7 @@ impl Control {
         Control::FlipUpright,
         Control::BackToCheckpoint,
         Control::RaceAgain,
+        Control::Map,
         Control::ChangeView,
         Control::LookLeft,
         Control::LookRight,
@@ -69,6 +72,7 @@ impl Control {
             Control::FlipUpright => "Flip upright",
             Control::BackToCheckpoint => "Back to checkpoint",
             Control::RaceAgain => "Race again (after the finish)",
+            Control::Map => "Track map",
             Control::ChangeView => "Change view",
             Control::LookLeft => "Look left",
             Control::LookRight => "Look right",
@@ -91,6 +95,7 @@ impl Control {
             Control::FlipUpright => KeyCode::KeyR,
             Control::BackToCheckpoint => KeyCode::KeyC,
             Control::RaceAgain => KeyCode::Enter,
+            Control::Map => KeyCode::KeyM,
             Control::ChangeView => KeyCode::KeyV,
             Control::LookLeft => KeyCode::KeyQ,
             Control::LookRight => KeyCode::KeyE,

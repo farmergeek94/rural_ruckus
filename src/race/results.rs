@@ -93,13 +93,13 @@ pub(super) fn show_results(
     settings: Res<RaceSettings>,
     track: Res<Track>,
     time: Res<Time<Fixed>>,
-    racers: Query<(&Racer, &Transform, Option<&TruckName>, Has<PlayerTruck>)>,
+    racers: Query<(&Racer, Option<&TruckName>, Has<PlayerTruck>)>,
     mut panel: Single<&mut Visibility, With<ResultsPanel>>,
     mut columns: Query<(&ResultsColumn, &mut Text)>,
 ) {
     let player_finished = racers
         .iter()
-        .any(|(racer, _, _, player)| player && racer.progress.finished.is_some());
+        .any(|(racer, _, player)| player && racer.progress.finished.is_some());
     panel.set_if_neq(if player_finished {
         Visibility::Inherited
     } else {
@@ -117,19 +117,13 @@ pub(super) fn show_results(
     let racers: Vec<_> = racers.iter().collect();
     let places: Vec<_> = racers
         .iter()
-        .map(|(racer, transform, _, _)| {
-            let to_next_gate = track
-                .gates
-                .get(racer.progress.next_gate)
-                .map_or(0.0, |gate| gate.center.distance(transform.translation.xz()));
-            (&racer.progress, to_next_gate)
-        })
+        .map(|(racer, _, _)| (&racer.progress, racer.to_next_gate))
         .collect();
     let rows: Vec<Row> = standings(&places, track.gates.len())
         .into_iter()
         .enumerate()
         .map(|(at, index)| {
-            let (racer, _, name, player) = racers[index];
+            let (racer, name, player) = racers[index];
             let progress = &racer.progress;
             let name = match (player, name) {
                 (true, Some(name)) => format!("{} (you)", name.0),

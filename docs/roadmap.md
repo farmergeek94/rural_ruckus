@@ -102,7 +102,7 @@ Goal: feature parity. Confirm each item in MTM2 before you build it (**Game**).
 | Race types other than circuit (rally, Summit Rumble, others) | Missing. Needs `Track Race Type` from stage 12. |
 | Championship or season across several tracks | Missing |
 | Difficulty of the computer's drivers | Missing |
-| Map of the track in the race | Missing. The front end paints one already. |
+| Map of the track in the race | Done. M shows it; not yet seen in the game. |
 | Other camera views (bumper, far) | Partial |
 | Damage | **Open** |
 | Gears: automatic and manual | **Open** |
@@ -231,7 +231,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Chase camera | Done | | |
 | Other camera views (in the cab, bumper, far) | Partial | Game | V changes to the cockpit and back; Q, E and B (or the right stick) look left, right and back from either view (`src/camera/views.rs`). A truck with a dashboard (every base truck) shows it in the cockpit, with the eye tipped down a little so that the road is in its window (`src/camera/dashboard.rs`); the built-in truck shows the road alone. MTM2's list of views is not confirmed. Not yet driven. |
 | Speedometer, lap and race readout, compass to the next checkpoint | Done | | |
-| Map of the track in the race | Missing | Game | The front end paints a track map already. |
+| Map of the track in the race | Done | Game | M (`keys::Control::Map`) shows and hides it in the bottom right corner (`src/race/map.rs`): the front end's picture (`track::map_image`), with a red dot for the player and a blue dot for each of the computer's trucks, with its place in the race in it, counted as the race readout counts the player's. Hidden at first, and kept as it is from race to race. Whether MTM2 had such a map is not confirmed. Not yet seen in the game. |
 | Weather | Own | | Clear is the default, as MTM2 was. The rest is the game's own. Snow freezes the water. |
 | Time of day: day, dusk, night | Own | File: [level.md](formats/level.md) | An option, and F8 in a race. MTM2 had dusk and night skies (**reference**); how it lit the ground under them is not measured. |
 | Dirt and dust | Own | | Only on loose ground (`track::TrackData::loose_at`). |

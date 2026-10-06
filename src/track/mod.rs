@@ -36,7 +36,7 @@ pub use data::{
 };
 pub use generator::builtin_track;
 pub use height_grid::{Diagonals, HeightGrid};
-pub use map::{MAP_COURSE, MAP_GATE, MAP_START, map_image};
+pub use map::{MAP_COURSE, MAP_GATE, MAP_START, MapFrame, map_frame, map_image};
 pub use pod_import::{BaseTrack, load_base, load_pod, peek_base, peek_pod, track_from_pod};
 pub use tile_material::{
     GroundShading, MAX_TEXTURE_CYCLES, TileCycles, TileLighting, TileMaterial, TileTextures,

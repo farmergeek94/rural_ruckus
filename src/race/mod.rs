@@ -1,16 +1,18 @@
 //! Racing laps around the track: a countdown on the grid, checkpoint gates crossed in
 //! order, lap counting and timing, and the results once the player has finished, plus the
-//! gate markers, the race readout and a compass to the next checkpoint on screen. Esc
-//! pauses the race (`pause`).
+//! gate markers, the race readout, a compass to the next checkpoint and a map of the track
+//! with every truck on it on screen. Esc pauses the race (`pause`).
 //!
 //! Uses the `track` slice for the gates and start position, and the `truck` slice for
 //! the trucks. Every truck becomes a `Racer` with a place on the starting grid: the
 //! player's truck (`truck::PlayerTruck`) behind the others. The readout and the keys are
 //! the player's.
 
+mod along;
 mod compass;
 mod gate;
 mod hud;
+mod map;
 mod markers;
 mod pause;
 mod progress;
@@ -23,6 +25,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
 use crate::game_state::GameState;
+use crate::keys::{Control, just_pressed};
 use crate::track::TrackSystems;
 use crate::truck::TruckSystems;
 
@@ -50,6 +53,8 @@ impl Plugin for RacePlugin {
             .init_resource::<RaceClock>()
             .init_resource::<RaceStart>()
             .init_resource::<pause::PauseMenu>()
+            .init_resource::<map::MapShown>()
+            .init_resource::<along::GatesAlong>()
             .add_message::<BackToCheckpoint>()
             .add_message::<RaceCancelled>()
             .add_systems(
@@ -74,9 +79,12 @@ impl Plugin for RacePlugin {
                 OnEnter(GameState::Racing),
                 (
                     (systems::reset_clock, start::begin_countdown).chain(),
+                    systems::find_gates_along.after(TrackSystems::Prepare),
                     markers::spawn_gate_markers.after(TrackSystems::Prepare),
                     hud::spawn_race_hud,
                     compass::spawn_compass,
+                    // Painted from the track the race is run on.
+                    map::spawn_map.after(TrackSystems::Prepare),
                     start::spawn_count,
                     results::spawn_results,
                 ),
@@ -98,6 +106,16 @@ impl Plugin for RacePlugin {
                     results::show_results,
                     // After the drawn truck has been placed for the frame.
                     compass::update_compass.after(TruckSystems::PlaceVisuals),
+                    map::toggle_map
+                        .run_if(pause::running)
+                        .run_if(just_pressed(Control::Map)),
+                    // A new racer gets its dot in the frame it joins.
+                    (
+                        map::add_dots.after(systems::enlist_trucks),
+                        (map::place_dots, map::number_dots),
+                    )
+                        .chain()
+                        .after(TruckSystems::PlaceVisuals),
                 )
                     // Outside a race there are no gates, and before the first one no
                     // banner materials either.
@@ -156,6 +174,10 @@ pub struct Racer {
     last_position: Option<Vec3>,
     /// Which place of the starting grid is this truck's. 0 is pole position.
     grid_place: usize,
+    /// How far the truck has still to drive to its next gate, along the course, in metres,
+    /// as of the last physics tick. Between two trucks that have driven through as many
+    /// gates, the one with less to go is ahead.
+    to_next_gate: f32,
 }
 
 /// For other slices to order their systems against this one.

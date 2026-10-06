@@ -1237,6 +1237,7 @@ const OPTIONS: &[OptionLine] = &[
     key_line!("key.flip_upright", DRIVING, Control::FlipUpright),
     key_line!("key.back_to_checkpoint", RACE, Control::BackToCheckpoint),
     key_line!("key.race_again", RACE, Control::RaceAgain),
+    key_line!("key.track_map", RACE, Control::Map),
     key_line!("key.change_view", CAMERA, Control::ChangeView),
     key_line!("key.look_left", CAMERA, Control::LookLeft),
     key_line!("key.look_right", CAMERA, Control::LookRight),
