@@ -14,6 +14,9 @@ A square grid of unsigned bytes with no header: 65536 bytes for the usual 256 x 
   (column + 1, row) to (column, row + 1). **Measured.**
 - The world is 256 cells of 32 ft, 8192 ft square, and repeats. **Reference.** The game
   closes the far edges with the heights of the near ones, giving 257 x 257 vertices.
+  That it repeats is also **measured**: Monte Carlo's course goes across two edges of the
+  map (see "A course across the edge of the map" in situation.md). The game makes every
+  MTM2 track repeat (`HeightGrid::repeating`).
 
 ### How this was measured
 

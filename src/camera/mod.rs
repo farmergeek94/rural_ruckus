@@ -10,7 +10,9 @@
 //! and how fast its body is going, and about the ground under where the eye wants to be,
 //! which it then keeps clear of.
 //!
-//! Uses the `truck` slice for the truck and the `track` slice for the ground.
+//! Uses the `truck` slice for the truck and the `track` slice for the ground. Where the
+//! world repeats and the truck is moved across an edge of it (`truck::TruckWrapped`), the
+//! camera is moved with it.
 
 mod chase;
 mod dashboard;
@@ -27,7 +29,7 @@ use bevy::prelude::*;
 
 use crate::game_state::GameState;
 use crate::track::Track;
-use crate::truck::{Player, TruckSystems, TruckVisual};
+use crate::truck::{Player, TruckSystems, TruckVisual, TruckWrapped};
 
 pub use chase::{CameraRigPlugin, CameraSystems, ChaseCamera};
 pub use rig::{Pose, Rig, RigConfig, Target};
@@ -231,12 +233,19 @@ fn apply_settings(
 
 /// The player's truck: where it is drawn, which moves smoothly from frame to frame, and
 /// how fast its body is really going, which a difference of drawn positions wouldn't say.
+/// Moved across to the other edge of a world that repeats, it takes the camera with it.
 fn follow_truck(
     player: Single<(Entity, &LinearVelocity), Player>,
     visuals: Query<(&TruckVisual, &Transform)>,
+    mut wrapped: MessageReader<TruckWrapped>,
     mut camera: Single<&mut ChaseCamera>,
 ) {
     let (player, velocity) = *player;
+    for wrapped in wrapped.read() {
+        if wrapped.truck == player {
+            camera.shift(wrapped.by);
+        }
+    }
     // A handful of trucks at most.
     let Some((_, transform)) = visuals.iter().find(|(visual, _)| visual.truck == player) else {
         return;

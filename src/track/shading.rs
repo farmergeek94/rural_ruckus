@@ -30,13 +30,20 @@ pub(super) fn normal_map(grid: &HeightGrid) -> Image {
     let side = map_side(grid);
     let chain = data_mip_chain(&texels(grid, side), side);
     let levels = chain.len();
+    // Ground that repeats is lit beyond each edge as it is inside the other. The texels
+    // cover the map evenly, so the map repeats exactly with it.
+    let beyond_edge = if grid.repeats() {
+        ImageAddressMode::Repeat
+    } else {
+        ImageAddressMode::ClampToEdge
+    };
     // Built field by field, because `Image::new` takes only the full-size level.
     let mut image = Image {
         data: Some(chain.concat()),
         asset_usage: RenderAssetUsages::default(),
         sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::ClampToEdge,
-            address_mode_v: ImageAddressMode::ClampToEdge,
+            address_mode_u: beyond_edge,
+            address_mode_v: beyond_edge,
             mag_filter: ImageFilterMode::Linear,
             min_filter: ImageFilterMode::Linear,
             mipmap_filter: ImageFilterMode::Linear,

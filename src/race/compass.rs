@@ -118,7 +118,10 @@ pub(super) fn update_compass(
     };
     compass.set_if_neq(Visibility::Inherited);
     let forward = transform.forward().as_vec3().xz();
-    let bearing = bearing(transform.translation.xz(), forward, gate.center);
+    let position = transform.translation.xz();
+    // The short way, which on ground that repeats may be across an edge of the map.
+    let target = position + track.heights.offset(position, gate.center);
+    let bearing = bearing(position, forward, target);
     needle.rotation = Rot2::radians(bearing);
 }
 

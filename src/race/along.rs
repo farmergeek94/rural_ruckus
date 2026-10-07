@@ -12,7 +12,7 @@
 
 use bevy::prelude::*;
 
-use crate::track::{Course, Nearest, TrackData};
+use crate::track::{Course, TrackData};
 
 /// How much further from a gate than its nearest piece of course another piece may be and
 /// still be a candidate for where the gate is, as a share of the course's width. The right
@@ -48,7 +48,7 @@ impl GatesAlong {
                 let from = self.0[(next + count - 1) % count];
                 along_to(course, from, to, position)
             }
-            _ => gate.center.distance(position),
+            _ => track.heights.offset(position, gate.center).length(),
         }
     }
 }
@@ -140,7 +140,7 @@ fn candidates(course: &Course, gate: Vec2) -> Vec<Candidate> {
     let reach = course.nearest(gate).distance + course.width * CANDIDATE_REACH;
     (0..course.centerline().len())
         .map(|segment| {
-            let nearest = nearest_on_piece(course, segment, gate);
+            let nearest = course.nearest_on(segment, gate);
             Candidate {
                 along: course.distance_along(&nearest),
                 off: nearest.distance,
@@ -148,23 +148,6 @@ fn candidates(course: &Course, gate: Vec2) -> Vec<Candidate> {
         })
         .filter(|candidate| candidate.off <= reach)
         .collect()
-}
-
-/// The point of piece `segment` of `course` nearest `position`.
-fn nearest_on_piece(course: &Course, segment: usize, position: Vec2) -> Nearest {
-    let points = course.centerline();
-    let (a, b) = (points[segment], points[(segment + 1) % points.len()]);
-    let ab = b - a;
-    let t = if ab.length_squared() > 0.0 {
-        ((position - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    Nearest {
-        distance: (a + ab * t).distance(position),
-        segment,
-        t,
-    }
 }
 
 #[cfg(test)]

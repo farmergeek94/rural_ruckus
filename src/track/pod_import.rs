@@ -142,7 +142,10 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         // MTM2 splits its even cells from the origin corner. With Z flipped those are
         // our odd cells, and that diagonal becomes our +X to +Z one: exactly what
         // `Checkerboard` gives the odd cells (see `docs/formats/terrain.md`).
-        .with_diagonals(Diagonals::Checkerboard);
+        .with_diagonals(Diagonals::Checkerboard)
+        // And beyond each edge is the other: Monte Carlo's course drives off the map on the
+        // west and on again from the east, and off on the south and on from the north.
+        .repeating();
 
     // Without the ground textures, at least show where they change: whatever isn't the
     // most common texture is taken to be course. A vertex is shaded by how many of the
@@ -210,6 +213,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         None => (None, ground_boxes(track, to_ground, None)),
     };
 
+    let course = course_from_segments(&course, &heights);
     Ok(TrackData {
         name: track.situation.name.clone(),
         heights,
@@ -226,7 +230,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         scenery: super::pod_scenery::scenery_from_pod(track, to_ground),
         backdrop: super::pod_scenery::backdrop_from_pod(track),
         skies: skies_from_pod(&track.skies),
-        course: course_from_segments(&course),
+        course,
         gates,
         start: grid_place(pole_position),
         grid: clear_places(
@@ -276,21 +280,29 @@ const COURSE_WIDTH_FEET: f32 = 2.0 * FEET_PER_CELL;
 
 /// The route round the track, from the straight pieces that computer trucks follow.
 /// The corners between them aren't in the file, so each piece is simply joined to the
-/// next, and the last back to the first.
-fn course_from_segments(segments: &[(Vec2, Vec2)]) -> Option<Course> {
+/// next, and the last back to the first, the short way across an edge of the `ground`
+/// where that is shorter.
+fn course_from_segments(segments: &[(Vec2, Vec2)], ground: &HeightGrid) -> Option<Course> {
     let mut centerline: Vec<Vec2> = Vec::with_capacity(segments.len() * 2);
     for &(start, end) in segments {
         for point in [start, end] {
-            // Pieces that do meet would otherwise leave a segment of no length.
+            // Pieces that do meet would otherwise leave a segment of no length, and so
+            // would a point on one edge of the map and the same point on the other.
             if centerline
                 .last()
-                .is_none_or(|last| last.distance(point) > 0.01)
+                .is_none_or(|&last| ground.offset(last, point).length() > 0.01)
             {
                 centerline.push(point);
             }
         }
     }
-    (centerline.len() >= 3).then(|| Course::new(centerline, COURSE_WIDTH_FEET * METRES_PER_FOOT))
+    (centerline.len() >= 3).then(|| {
+        let width = COURSE_WIDTH_FEET * METRES_PER_FOOT;
+        match ground.repeats() {
+            true => Course::repeating(centerline, width, ground.size()),
+            false => Course::new(centerline, width),
+        }
+    })
 }
 
 /// The track's ground textures, if it carries its own, and the tiles they are made into,

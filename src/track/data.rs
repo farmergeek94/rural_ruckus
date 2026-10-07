@@ -10,6 +10,9 @@ use super::{Course, HeightGrid};
 #[derive(Clone, Debug)]
 pub struct TrackData {
     pub name: String,
+    /// The ground. Where it repeats (`HeightGrid::repeats`), as a Monster Truck Madness 2
+    /// world does, so does everything on it, and the way from one place to another is
+    /// `HeightGrid::offset`.
     pub heights: HeightGrid,
     /// How much of the ground at each vertex of `heights` is course rather than open
     /// country, from 0 to 1, in the same row-by-row order. It only tints the terrain,
@@ -76,6 +79,7 @@ impl TrackData {
         if cells == 0 {
             return Footing::Unnamed;
         }
+        let Vec2 { x, y: z } = self.heights.onto(Vec2::new(x, z));
         let cell = |world: f32| {
             let across = (world / self.heights.size() + 0.5).clamp(0.0, 1.0);
             ((across * cells as f32) as usize).min(cells - 1)
@@ -88,6 +92,7 @@ impl TrackData {
     /// whatever looks loose (`looks_loose`), judged at that point of its texture, so that
     /// a texture that is half grass and half road is loose only on its grass half.
     pub fn loose_at(&self, x: f32, z: f32) -> bool {
+        let Vec2 { x, y: z } = self.heights.onto(Vec2::new(x, z));
         match self.footing_at(x, z) {
             Footing::Loose => true,
             Footing::Firm | Footing::Ice => false,

@@ -37,7 +37,8 @@ fn main() {
     // `--weather=random` in one picked at random, and `--time=night` at that time of day
     // (day, dusk or night). `--no-backdrop` leaves out the distant
     // hills a track draws round its horizon, and `--no-decorations` the scenery that trucks
-    // drive through. `--flat-water` draws the water as a plain flat plane. `--base-game=FOLDER` looks for the base game's
+    // drive through. `--flat-water` draws the water as a plain flat plane,
+    // and `--no-water-reflections` mirrors only the sky in it. `--base-game=FOLDER` looks for the base game's
     // archives, which tracks and trucks borrow from, in FOLDER and its subfolders, in place
     // of the Shared and language folders chosen in the front end (or `base/`, if none was);
     // it may be given more than once.
@@ -130,6 +131,7 @@ fn main() {
             Some("--no-backdrop") => backdrop_settings.on = false,
             Some("--no-decorations") => settings.decorations = false,
             Some("--flat-water") => water_settings.flat = true,
+            Some("--no-water-reflections") => water_settings.reflections = false,
             Some(flag) if flag.starts_with("--base-game=") => {}
             Some(flag) if flag.starts_with("--shadow-cascades=") => {
                 environment_settings.shadow_cascades = number(flag);
@@ -173,7 +175,7 @@ fn main() {
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
                     "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-blend-ground --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
-                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
+                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --no-water-reflections --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
             }

@@ -166,6 +166,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Feature | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Terrain heights | Done | File: [terrain.md](formats/terrain.md) | |
+| The world repeats beyond the edges of the map | Done | File: [terrain.md](formats/terrain.md), [situation.md](formats/situation.md) | Monte Carlo's course goes across two edges. The course is joined the short way, a truck that goes over an edge is moved across to the other with its camera, and checkpoints, the computer's drivers, the compass and the map measure the short way. The ground, the ground boxes, the fixed scenery and the water are drawn again 1 km past each edge; what MTM2 showed there is **open**. Driven headless across both of Monte Carlo's edges; not yet driven or measured on screen. |
 | Ground textures, laid per cell | Done | File: [textures.md](formats/textures.md) | Whether the whole picture is mirrored is **open**. |
 | Bridges and tunnel roofs (ground boxes) | Done | File: [ground_boxes.md](formats/ground_boxes.md) | How textures lie on their sides and bottoms is **open**. |
 | Caves and second layers (`.RA2` to `.RA5`, `.CL1`, `.CL2`) | Open | File: [ground_boxes.md](formats/ground_boxes.md) | No MTM2 track is known to use them. |
@@ -180,7 +181,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Sky | Done | File: [level.md](formats/level.md) | `src/sky.rs`. The track's own picture in clear weather by day, the base game's cloudy one when overcast by day, its dusk one at a clear dusk, its night one at night; none at an overcast dusk or in fog, rain, a storm or snow. How MTM2 laid the picture on the sky is **open**: the dome is the game's own. Not yet looked at in the game. |
 | Fog, from the track | Missing | File: [level.md](formats/level.md), [terrain.md](formats/terrain.md) | The `.LVL` names a fog file. Format **open**. The weather's fog is the game's own. |
 | Lighting: sun direction, shadow strength, lighting table (`.LTE`) | Missing | File: [level.md](formats/level.md) | Values follow line 18 of the `.LVL`; only reference. The sun is the game's own. |
-| Water | Own | File: [level.md](formats/level.md) | The height is measured. How MTM2 drew water and moved trucks in it is not. |
+| Water | Own | File: [level.md](formats/level.md) | The height is measured. How MTM2 drew water and moved trucks in it is not. The moving water mirrors the scenery that is in the picture (screen-space reflections); `WaterSettings::reflections` turns it off. |
 | Frozen water in snow | Own | | In snow the water is a solid sheet of ice at its level, and tires on it grip as on ice. F7 freezes and thaws it in a race. MTM2 has no frozen water that is known. Not yet driven. |
 | Ground types (`.TTY`): ice | Own | File: [texture_types.md](formats/texture_types.md) | Only ice is used. `ICE_GRIP` is the game's own. |
 | Ground types (`.TTY`): loose ground | Own | File: [texture_types.md](formats/texture_types.md) | The hundreds of the base game's types are measured: 1 road, 2 dirt, 3 water, 4 mud, 5 sand, 6 grass, 7 rocky ground, 10 metal, 12 rock, 14 railway track. Tires throw up dirt only on 2 and 4 to 7, and, on ground the list doesn't name, where it is coloured and not blue (the game's own rule). Not yet driven. |

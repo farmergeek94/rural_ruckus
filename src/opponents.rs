@@ -49,6 +49,9 @@
 //! `lead_driver` lends the same rules to `--autopilot` (`diagnostics`), which presses the
 //! player's keys to drive as the quickest driver would on a clear road.
 //!
+//! On a world that repeats, a driver measures the way to anything the short way, which may
+//! be across an edge of the map (`track::Course::offset`).
+//!
 //! Uses the `track` slice for the course, the `truck` slice for the trucks and the `race`
 //! slice for the checkpoints. Needs `RacePlugin`, and the physics, which says where the ground
 //! is under a truck.
@@ -540,7 +543,8 @@ fn plan(
     // Nothing nearer than this is steered at: further when going faster.
     let reach = (speed * AIM_AHEAD_SECONDS).clamp(*AIM_AHEAD.start(), *AIM_AHEAD.end());
     let aim = ahead.aim(course, ahead.steering_reach(reach, style.careful), style);
-    let to_aim = (aim - position).normalize_or_zero();
+    // The short way, which on a world that repeats may be across an edge of the map.
+    let to_aim = course.offset(position, aim).normalize_or_zero();
     // Positive when the aim point is to the left.
     let off_straight = (-forward.perp_dot(to_aim)).atan2(forward.dot(to_aim));
     let steer = (off_straight / FULL_LOCK_ANGLE).clamp(-1.0, 1.0);
@@ -888,7 +892,7 @@ impl Places<'_> {
             along,
             off: nearest.distance,
             // A line `across` to the left is `point - direction.perp() * across`.
-            across: -(position - point).dot(direction.perp()),
+            across: -course.offset(point, position).dot(direction.perp()),
             speed: velocity.dot(direction),
             reach,
             raced: raced(along, self.start_line, lap_number, self.lap),
@@ -1116,12 +1120,12 @@ fn drive(
                 .iter()
                 .filter(|other| {
                     other.entity != entity
-                        && other.position.distance(position) <= LOOK_OUT
+                        && course.offset(position, other.position).length() <= LOOK_OUT
                         && gap(other.along - me.along, lap).abs() <= 2.0 * LOOK_OUT
                 })
                 .map(|other| Neighbour {
-                    ahead: (other.position - position).dot(forward),
-                    across: me.across + (other.position - position).dot(left),
+                    ahead: course.offset(position, other.position).dot(forward),
+                    across: me.across + course.offset(position, other.position).dot(left),
                     speed: other.speed,
                     // What the two of them reach towards each other, and a little more.
                     clear_by: me.reach.x + other.reach.x + ROOM_TO_SPARE,

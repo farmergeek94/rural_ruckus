@@ -113,6 +113,10 @@ pub struct GroundShading {
     /// How far into a cell, from each edge, the tile across the edge is faded in, in cells
     /// (`track/blend.rs`). 0 to leave the line between cells hard, as MTM2 does.
     pub fade: f32,
+    /// 1 where the ground repeats (`HeightGrid::repeats`): the cell across an edge of the
+    /// map is the one at the other edge, and the ground copied beyond it reads the cells
+    /// it is a copy of. 0 where the map ends at its edges.
+    pub repeats: u32,
 }
 
 impl MaterialExtension for TileTextures {

@@ -155,6 +155,18 @@ entity, like each scenery object, is already culled. Check with `--log-fps`, whi
 prints `meshes_in_view`: parked at Alpine's start, 104 of 583 meshes and 34 of 322
 scenery objects are drawn. What defeats culling is one big entity.
 
+Bevy does not cull by distance: its view test leaves the far plane out
+(`intersects_obb(.., true, false)` in `bevy_camera`'s `visibility/mod.rs`), so whatever is
+in the view is drawn however far away it is. The copies of the ground and the scenery round
+a map that repeats (`track::DRAWN_PAST_EDGE`) each carry a `VisibilityRange` of that
+distance, so that from the middle of a map none of them is drawn. **Not yet measured on
+screen**: `--log-fps --no-vsync` on Monte Carlo, parked in the middle and parked at an edge
+looking out, and on Snake River Canyon, which has 8723 copies of its scenery.
+
+When a truck goes over an edge and is moved across, its two drawn poses and the chase
+camera are moved with it (`truck::TruckWrapped`, `Rig::shift`), so that nothing is drawn
+in between.
+
 Culling to the view is not enough on a track with thousands of objects: on Snake River
 Canyon (TDSNAKE.POD, 4567 meshes) 1400 to 1900 were in view, most of them hundreds of
 metres off and a few pixels big. `TrackSettings::scenery_distance` gives each drawn

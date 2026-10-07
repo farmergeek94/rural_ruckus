@@ -4,12 +4,13 @@
 use bevy::prelude::*;
 
 use super::along::GatesAlong;
+use super::gate;
 use super::pause::running;
 use super::{RaceClock, RacePause, RaceSettings, Racer};
 use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
 use crate::track::{Track, TrackData, yaw_direction};
-use crate::truck::{PlaceTruck, PlayerTruck, Truck};
+use crate::truck::{PlaceTruck, PlayerTruck, RepeatingWorld, Truck};
 
 /// Every race starts from nothing. Each `Racer` does too, being part of a new truck.
 pub(super) fn reset_clock(mut clock: ResMut<RaceClock>) {
@@ -19,6 +20,13 @@ pub(super) fn reset_clock(mut clock: ResMut<RaceClock>) {
 /// Where the gates of the race's track are along its course.
 pub(super) fn find_gates_along(mut commands: Commands, track: Res<Track>) {
     commands.insert_resource(GatesAlong::new(&track));
+}
+
+/// Where the track's ground repeats, so does the world the trucks race in: one that goes
+/// over an edge comes back on at the other.
+pub(super) fn tell_trucks_of_the_world(track: Res<Track>, mut world: ResMut<RepeatingWorld>) {
+    let size = track.heights.repeats().then(|| track.heights.size());
+    world.set_if_neq(RepeatingWorld(size));
 }
 
 pub(super) fn tick_clock(mut clock: ResMut<RaceClock>) {
@@ -35,13 +43,13 @@ pub(super) fn track_progress(
     for (transform, mut racer) in &mut racers {
         let position = transform.translation;
         if let Some(last_position) = racer.last_position {
-            racer.progress.advance(
-                &track.gates,
-                settings.laps,
-                last_position,
-                position,
-                clock.tick,
-            );
+            let (from, to) = match track.gates.get(racer.progress.next_gate) {
+                Some(gate) => gate::beside(gate, &track.heights, last_position, position),
+                None => (last_position, position),
+            };
+            racer
+                .progress
+                .advance(&track.gates, settings.laps, from, to, clock.tick);
         }
         racer.last_position = Some(position);
         racer.to_next_gate =
@@ -127,9 +135,9 @@ pub(super) fn back_to_checkpoint(
             }
         };
         for _ in 0..TRIES {
-            let clear = taken
-                .iter()
-                .all(|&(other, at)| other == truck || at.distance(position) > CLEAR_OF_OTHERS);
+            let clear = taken.iter().all(|&(other, at)| {
+                other == truck || track.heights.offset(at, position).length() > CLEAR_OF_OTHERS
+            });
             if clear {
                 break;
             }

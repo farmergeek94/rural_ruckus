@@ -3,8 +3,12 @@
 //! The render mesh, the physics heightfield and `height_at` all split each cell into
 //! the same two triangles, so they agree between vertices as well as on them. Which two
 //! is up to the grid's `Diagonals`.
+//!
+//! A grid can repeat (`repeating`), as a Monster Truck Madness 2 world does: beyond each
+//! edge is the ground from the other edge, and a place off the grid is the same as the place
+//! a whole grid's width over, on it (`onto`).
 
-use bevy::math::Vec3;
+use bevy::math::{Vec2, Vec3};
 
 /// World-space coordinate of grid line `index` along either horizontal axis.
 pub fn grid_coord(index: usize, resolution: usize, size: f32) -> f32 {
@@ -32,6 +36,8 @@ pub struct HeightGrid {
     /// Heights in metres, row by row: rows run along Z and columns along X.
     heights: Vec<f32>,
     diagonals: Diagonals,
+    /// Whether the ground repeats beyond the edges, the grid's width over: see `repeating`.
+    repeats: bool,
 }
 
 impl HeightGrid {
@@ -63,6 +69,7 @@ impl HeightGrid {
             size,
             heights,
             diagonals: Diagonals::default(),
+            repeats: false,
         }
     }
 
@@ -71,10 +78,76 @@ impl HeightGrid {
         self
     }
 
+    /// The same ground, repeating beyond every edge, as a Monster Truck Madness 2 world
+    /// does: what is past one edge is what is inside the other. The vertices on the far
+    /// edges must be those of the near ones.
+    pub fn repeating(mut self) -> Self {
+        self.repeats = true;
+        self
+    }
+
+    /// Whether the ground repeats beyond the edges (`repeating`).
+    pub fn repeats(&self) -> bool {
+        self.repeats
+    }
+
+    /// The place on the grid that `point` (world X and Z) is: itself where it is on the grid
+    /// or the ground does not repeat, otherwise moved by whole widths of the grid onto it.
+    /// A place on the grid is returned exactly as it was.
+    pub fn onto(&self, point: Vec2) -> Vec2 {
+        if !self.repeats {
+            return point;
+        }
+        let half = self.size / 2.0;
+        let along = |world: f32| {
+            if (-half..half).contains(&world) {
+                world
+            } else {
+                (world + half).rem_euclid(self.size) - half
+            }
+        };
+        Vec2::new(along(point.x), along(point.y))
+    }
+
+    /// The shortest way from `from` to `to` (world X and Z), in metres: across an edge where
+    /// the ground repeats and that way is shorter, and otherwise straight.
+    pub fn offset(&self, from: Vec2, to: Vec2) -> Vec2 {
+        let offset = to - from;
+        if !self.repeats {
+            return offset;
+        }
+        offset - (offset / self.size).round() * self.size
+    }
+
+    /// Where the copies of the ground round the grid are, as offsets from it (world X and
+    /// Z), in metres: the eight around a grid that repeats, and none around one that
+    /// doesn't.
+    pub fn copies(&self) -> Vec<Vec2> {
+        if !self.repeats {
+            return Vec::new();
+        }
+        let mut copies = Vec::with_capacity(8);
+        for z in [-1.0, 0.0, 1.0] {
+            for x in [-1.0, 0.0, 1.0] {
+                if (x, z) != (0.0, 0.0) {
+                    copies.push(Vec2::new(x, z) * self.size);
+                }
+            }
+        }
+        copies
+    }
+
+    /// How far `point` (world X and Z) is outside the grid, in metres: 0 on it.
+    pub fn beyond_edge(&self, point: Vec2) -> f32 {
+        let half = self.size / 2.0;
+        (point.abs() - Vec2::splat(half)).max(Vec2::ZERO).length()
+    }
+
     /// Which way the ground faces at a world-space position, not on the flat triangles
     /// that are drawn and driven on, but on a smooth surface (a Catmull-Rom spline) through
     /// every vertex of the grid: for lighting the ground as if it were rounded off.
-    /// Positions outside the grid are taken to be on its nearest edge.
+    /// Positions outside the grid are taken to be on its nearest edge, or where the ground
+    /// repeats, on the copy of the grid they are in.
     ///
     /// On a vertex it is the normal `track/mesh.rs` gives that vertex, from the heights of
     /// its neighbours, and it turns smoothly from there to the next, with no crease where
@@ -82,12 +155,20 @@ impl HeightGrid {
     /// `SHARP_CREASE`, such as the lip of a ramp over a cliff, is kept: the surface on each
     /// side of it goes on at that side's own slope.
     pub fn smooth_normal(&self, x: f32, z: f32) -> Vec3 {
+        let Vec2 { x, y: z } = self.onto(Vec2::new(x, z));
         let (col, t_col) = self.to_grid(x);
         let (row, t_row) = self.to_grid(z);
         let last = (self.resolution - 1) as isize;
-        let vertex = |col: isize, row: isize| {
-            self.vertex(col.clamp(0, last) as usize, row.clamp(0, last) as usize)
+        // Past an edge of ground that repeats is the ground inside the other, whose last
+        // vertices are the same as its first.
+        let index = |index: isize| {
+            if self.repeats {
+                index.rem_euclid(last) as usize
+            } else {
+                index.clamp(0, last) as usize
+            }
         };
+        let vertex = |col: isize, row: isize| self.vertex(index(col), index(row));
         let cell = self.cell();
 
         // Along X within each of the four nearest rows: the height, and its slope.
@@ -137,8 +218,9 @@ impl HeightGrid {
     }
 
     /// Ground height at a world-space position. Positions outside the grid get the
-    /// height of the nearest edge.
+    /// height of the nearest edge, or where the ground repeats, of the copy they are on.
     pub fn height_at(&self, x: f32, z: f32) -> f32 {
+        let Vec2 { x, y: z } = self.onto(Vec2::new(x, z));
         let (col, fx) = self.to_grid(x);
         let (row, fz) = self.to_grid(z);
 
@@ -370,5 +452,67 @@ mod tests {
         let grid = grid();
         assert_eq!(grid.height_at(-50.0, 0.0), grid.height_at(-2.0, 0.0));
         assert_eq!(grid.height_at(50.0, 50.0), grid.vertex(2, 2));
+        assert_eq!(grid.onto(Vec2::new(50.0, -9.0)), Vec2::new(50.0, -9.0));
+        assert_eq!(
+            grid.offset(Vec2::new(-1.9, 0.0), Vec2::new(1.9, 0.0)).x,
+            3.8
+        );
+        assert!(grid.copies().is_empty());
+    }
+
+    /// Rolling ground 8 m across in 1 m cells, a whole wave each way, so that its far
+    /// edges are its near ones: it can repeat.
+    fn tiled() -> HeightGrid {
+        let wave = std::f32::consts::TAU / 8.0;
+        HeightGrid::from_fn(9, 8.0, |x, z| {
+            0.3 * (wave * x).sin() + 0.2 * (wave * z).cos()
+        })
+        .with_diagonals(Diagonals::Checkerboard)
+        .repeating()
+    }
+
+    #[test]
+    fn ground_that_repeats_is_the_same_a_whole_width_over() {
+        let grid = tiled();
+        for (x, z) in [(-3.3, 0.7), (1.2, -2.5), (3.9, 3.9), (-4.0, -4.0)] {
+            let here = grid.height_at(x, z);
+            for copy in grid.copies() {
+                let there = Vec2::new(x, z) + copy;
+                assert!(
+                    (grid.height_at(there.x, there.y) - here).abs() < 1e-4,
+                    "{there}"
+                );
+                assert!(grid.onto(there).distance(Vec2::new(x, z)) < 1e-4, "{there}");
+            }
+        }
+        // The normals carry on across the edge, from the vertices inside the other.
+        let edge = grid.size() / 2.0;
+        assert_close(
+            grid.smooth_normal(edge - 1e-3, 1.0),
+            grid.smooth_normal(-edge + 1e-3, 1.0),
+            "across",
+        );
+    }
+
+    #[test]
+    fn a_place_on_ground_that_repeats_stays_exactly_where_it_is() {
+        let grid = tiled();
+        for point in [Vec2::new(0.1, -3.7), Vec2::new(-4.0, 3.999)] {
+            assert_eq!(grid.onto(point), point);
+        }
+        // The far edge is the near one.
+        assert_eq!(grid.onto(Vec2::new(4.0, 0.0)), Vec2::new(-4.0, 0.0));
+    }
+
+    #[test]
+    fn the_shortest_way_on_ground_that_repeats_may_cross_an_edge() {
+        let grid = tiled();
+        let way = grid.offset(Vec2::new(3.5, -3.0), Vec2::new(-3.5, 3.5));
+        assert!(way.distance(Vec2::new(1.0, -1.5)) < 1e-5, "{way}");
+        let way = grid.offset(Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0));
+        assert!(way.distance(Vec2::new(2.0, 0.0)) < 1e-5, "{way}");
+        assert_eq!(grid.copies().len(), 8);
+        assert_eq!(grid.beyond_edge(Vec2::new(3.0, -2.0)), 0.0);
+        assert!((grid.beyond_edge(Vec2::new(7.0, -8.0)) - 5.0).abs() < 1e-5);
     }
 }

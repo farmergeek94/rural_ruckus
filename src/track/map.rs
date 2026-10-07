@@ -109,6 +109,11 @@ pub fn map_image(track: &TrackData, size: usize) -> Vec<u8> {
         let radius = (course.width / 2.0 / pixel).max(THINNEST_COURSE / 2.0);
         for (from, to) in course.segments() {
             map.line(from, to, radius, MAP_COURSE);
+            // A piece that runs off the map comes back on at the other side.
+            let back = track.heights.onto(to) - to;
+            if back != Vec2::ZERO {
+                map.line(from + back, to + back, radius, MAP_COURSE);
+            }
         }
     }
     // The start line last, so that nothing is drawn over it.

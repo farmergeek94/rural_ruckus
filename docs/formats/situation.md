@@ -193,6 +193,28 @@ because the world repeats. **Measured** on the base game's 15 tracks:
 The game moves each such position by whole map widths onto the map. A position on the
 map, its far edge included, is not changed.
 
+## A course across the edge of the map
+
+A course can go off one edge of the map and come back on at the opposite edge. **Measured**
+on Monte Carlo (`MonteCarlo_PZ.pod`), the one track of the 12 user tracks examined that does
+it:
+
+- The course runs west to a point at x = 25.5 ft, and the next point is at x = 8153 ft,
+  at almost the same z (4423 and 4419.5 ft). Across the edge at x = 0 they are 64.5 ft
+  apart. The long way, across the map, they are 8127.5 ft apart.
+- Later the course runs south to z = 8154.5 ft, and the next point is at z = 26.5 ft:
+  64 ft apart across the edge at z = 8192.
+- The sixth of the 20 checkpoints in the file is on that edge, at x = 0 ft.
+- Joined the short way, across the edges, the lap is 9352 m and every checkpoint is
+  within 5.1 m of the course, in lap order. Joined straight across the map, the lap was
+  14267 m, with two pieces of 2.5 km.
+
+So the world repeats for the course and for the trucks, as it does for positions. The game
+joins each pair of course points the short way, across an edge where that is shorter,
+and moves a truck that goes over an edge to the other (`truck::RepeatingWorld`). What MTM2
+showed beyond the edge is **open**: the game draws the ground, the ground boxes, the fixed
+scenery and the water again there.
+
 ## Checkpoints
 
 - The last checkpoint in the file is the finish line. **Measured** on both tracks: in

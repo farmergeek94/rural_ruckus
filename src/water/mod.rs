@@ -15,6 +15,8 @@
 //! - `ice`: in snow the water is frozen, a solid sheet of ice that trucks drive on. Then
 //!   the water neither holds trucks up nor splashes, and its surface is hidden.
 //!
+//! Where the ground repeats beyond the edges of the map, so does the water (`water_width`).
+//!
 //! Only the look moves. Trucks meet the water at its still level: the swell is a few tenths
 //! of a metre, which the forces and the splashes pass over.
 //!
@@ -39,7 +41,7 @@ use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 
 use crate::game_state::GameState;
-use crate::track::TrackSystems;
+use crate::track::{DRAWN_PAST_EDGE, TrackData, TrackSystems};
 use crate::truck::TruckSystems;
 
 pub struct WaterPlugin;
@@ -94,6 +96,7 @@ impl Plugin for WaterPlugin {
                         (splash::make_waves, shore::splash_shore).run_if(not(ice::frozen)),
                         splash::spread_rings,
                         surface::show_waves,
+                        surface::mirror,
                         underwater::tint_under_water,
                     )
                         .chain()
@@ -116,6 +119,10 @@ pub struct WaterSettings {
     /// or foam: no patch of fine mesh round the camera and none of `water.wgsl`, the least
     /// it can cost. How it holds trucks up and the splashes are as ever.
     pub flat: bool,
+    /// Whether the moving water mirrors the scenery round it, as well as the sky's colour.
+    /// It is found in the picture already drawn, so what is off the picture is not
+    /// mirrored. It costs time for every pixel of water seen at a glancing angle.
+    pub reflections: bool,
 }
 
 impl Default for WaterSettings {
@@ -123,6 +130,7 @@ impl Default for WaterSettings {
         Self {
             splashes: true,
             flat: false,
+            reflections: true,
         }
     }
 }
@@ -131,3 +139,15 @@ impl Default for WaterSettings {
 /// that can't, as a marker that the track has water.
 #[derive(Component)]
 pub struct WaterSurface;
+
+/// How far across the water is, in metres, centred on the origin: the whole track, and
+/// where the ground repeats beyond its edges, as far past them as the ground is drawn again
+/// (`track::DRAWN_PAST_EDGE`), so that the copies of the ground have water round them too.
+fn water_width(track: &TrackData) -> f32 {
+    let past_edges = if track.heights.repeats() {
+        2.0 * DRAWN_PAST_EDGE
+    } else {
+        0.0
+    };
+    track.heights.size() + past_edges
+}

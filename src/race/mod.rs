@@ -51,6 +51,8 @@ impl Plugin for RacePlugin {
             .init_resource::<RaceSettings>()
             .init_resource::<crate::keys::KeyBindings>()
             .init_resource::<RaceClock>()
+            // Which the race fills in, whether or not the trucks' plugin is there yet.
+            .init_resource::<crate::truck::RepeatingWorld>()
             .init_resource::<RaceStart>()
             .init_resource::<pause::PauseMenu>()
             .init_resource::<map::MapShown>()
@@ -80,6 +82,7 @@ impl Plugin for RacePlugin {
                 (
                     (systems::reset_clock, start::begin_countdown).chain(),
                     systems::find_gates_along.after(TrackSystems::Prepare),
+                    systems::tell_trucks_of_the_world.after(TrackSystems::Prepare),
                     markers::spawn_gate_markers.after(TrackSystems::Prepare),
                     hud::spawn_race_hud,
                     compass::spawn_compass,

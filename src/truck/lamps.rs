@@ -28,10 +28,10 @@ use super::{Beam, SeenFromInside, TruckLamp, TruckTexture, TruckVisual};
 /// How bright a beam is at its middle, in lumens. Enough to light the course a beam's
 /// length ahead at night; higher washes the ground near the truck out to white. At 400 000
 /// the beams were lost under the moonlight.
-const BEAM_POWER: f32 = 6_000_000.0;
+const BEAM_POWER: f32 = 8_000_000.0;
 /// How bright the cone of a beam is at the lamp, added onto what is behind it, from 0
-/// (not seen) up. Higher is a thicker, mistier beam.
-const CONE_BRIGHTNESS: f32 = 0.001;
+/// (not seen) up. Higher is a thicker, mistier beam. At 0.001 the cones were too easy to see.
+const CONE_BRIGHTNESS: f32 = 0.0004;
 /// How bright a lamp's glow is, as a multiple of its picture. The race camera draws in high
 /// dynamic range with bloom, so above 1 the glow spills light round it; higher shines more.
 const GLOW_BRIGHTNESS: f32 = 12.0;
@@ -39,15 +39,16 @@ const GLOW_BRIGHTNESS: f32 = 12.0;
 /// least far it reaches, in metres. MTM2's headlight cones spread 0.14 and reach 23 m,
 /// which, as light, lit a narrow strip a few truck lengths long. The drawn cone keeps
 /// MTM2's shape. Wider and longer lights more of the course.
-const LEAST_SPREAD: f32 = 0.45;
-const LEAST_REACH: f32 = 60.0;
+const LEAST_SPREAD: f32 = 0.6;
+const LEAST_REACH: f32 = 90.0;
 /// How far ahead of the lamp its light starts, in metres, so that it is outside the body.
 const AHEAD_OF_LAMP: f32 = 0.3;
 /// How many sides the cone of a beam has.
 const CONE_SIDES: u32 = 16;
 /// How much of a beam's spread is at full brightness, from 0 to 1, before it fades to
-/// nothing at its edge. Lower is a softer edge.
-const BEAM_CORE: f32 = 0.001;
+/// nothing at its edge. Lower is a softer edge; higher lights the sides of the course as
+/// well as its middle. At 0.001 only a strip down the middle was well lit.
+const BEAM_CORE: f32 = 0.35;
 
 /// Whether the trucks' lamps shine. Off unless someone turns them on.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]

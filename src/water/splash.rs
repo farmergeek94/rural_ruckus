@@ -34,6 +34,7 @@ use super::WaterSettings;
 use super::forces::Column;
 use super::ripples::{Ripple, Ripples};
 use super::shore::swell_height;
+use super::surface::WATER_COLOR;
 use super::wind::Wind;
 use crate::game_state::GameState;
 use crate::particles::{self, Motion, Particle, Particles};
@@ -96,10 +97,21 @@ const MIST_DRAG: f32 = 2.5;
 const MIST_GRAVITY: f32 = 2.0;
 /// How see-through mist is, from 0 (not there) to 1 (solid), when it is thrown, and a drop.
 const MIST_OPACITY: f32 = 0.45;
-const DROP_OPACITY: f32 = 0.9;
+const DROP_OPACITY: f32 = 0.7;
 /// The colour of spray, in sRGB from 0 to 1: white where the light catches it, whichever way
 /// it is seen from, and not shaded like a solid thing.
 const SPRAY_COLOR: Vec3 = Vec3::new(0.9, 0.95, 1.0);
+/// How much of the water's own deep blue (`WATER_COLOR`) the spray takes, from 0 (white)
+/// to 1 (as blue as the water), so that it looks to be of the same water. Higher is bluer
+/// and darker.
+const SPRAY_BLUE: f32 = 0.7;
+
+/// Spray's colour, as see-through as `opacity` (from 0 to 1).
+fn spray_color(opacity: f32) -> Color {
+    Color::srgb(SPRAY_COLOR.x, SPRAY_COLOR.y, SPRAY_COLOR.z)
+        .mix(&WATER_COLOR, SPRAY_BLUE)
+        .with_alpha(opacity)
+}
 /// How near the camera a droplet starts to shrink away, in metres. Spray that the truck
 /// throws back at the camera would otherwise pass it as big blobs, as if on the lens. Inside
 /// it, a droplet also looks smaller the nearer it comes, not only no bigger.
@@ -218,7 +230,7 @@ pub(super) fn make_droplet_looks(
 ) {
     let mut material = |picture: Handle<Image>, opacity: f32| {
         materials.add(StandardMaterial {
-            base_color: Color::srgba(SPRAY_COLOR.x, SPRAY_COLOR.y, SPRAY_COLOR.z, opacity),
+            base_color: spray_color(opacity),
             base_color_texture: Some(picture),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
@@ -550,7 +562,7 @@ pub(super) fn throw_droplet(
         size,
         turned: 0.0,
         turning: 0.0,
-        color: Color::srgba(SPRAY_COLOR.x, SPRAY_COLOR.y, SPRAY_COLOR.z, opacity).into(),
+        color: spray_color(opacity).into(),
         trail: Vec3::ZERO,
         shape: 0,
     };

@@ -36,6 +36,13 @@ impl PhysicsPose {
             current: transform,
         }
     }
+
+    /// Both poses moved `by`, as the truck is when it goes over the edge of a world that
+    /// repeats (`wrap`): drawn going on as it was, not streaking across the map.
+    pub(super) fn shift(&mut self, by: Vec3) {
+        self.previous.translation += by;
+        self.current.translation += by;
+    }
 }
 
 pub(super) fn record_poses(mut trucks: Query<(&Transform, &mut PhysicsPose), With<Truck>>) {

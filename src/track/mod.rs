@@ -4,6 +4,12 @@
 //! Monster Truck Madness 2 POD archive. This slice holds the current one in the `Track`
 //! resource and builds the terrain from it: one height grid feeds both the render mesh
 //! and the physics heightfield collider, so the two can never disagree.
+//!
+//! Where the ground repeats (`HeightGrid::repeats`), as a Monster Truck Madness 2 world
+//! does, the ground is copied round the map: the collider whole, and what is drawn as far
+//! from the map as the camera sees (`DRAWN_PAST_EDGE`). Copies share their originals'
+//! meshes and shapes. Whatever crosses an edge is moved across to the other by its own
+//! slice: a truck by `truck::RepeatingWorld`.
 
 mod blend;
 mod collider;
@@ -21,6 +27,8 @@ mod tile_material;
 
 use avian3d::prelude::*;
 use bevy::asset::embedded_asset;
+use bevy::camera::primitives::MeshAabb;
+use bevy::camera::visibility::VisibilityRange;
 use bevy::ecs::change_detection::Tick;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
@@ -220,25 +228,41 @@ fn spawn_terrain(
             Restitution::new(GROUND_BOUNCE).with_combine_rule(CoefficientCombine::Min),
         )
     };
+    let collider = build_collider(&track.heights);
     let terrain = commands
         .spawn((
             Name::new("Terrain"),
             DespawnOnExit(GameState::Racing),
             Transform::default(),
             Visibility::default(),
-            build_collider(&track.heights),
+            collider.clone(),
             ground(crate::collision_groups::ground()),
         ))
         .id();
-    if let Some(collider) = ground_boxes::build_collider(&track.ground_boxes) {
+    let copies = track.heights.copies();
+    // Whole, round a map that repeats: a truck is moved across only once its middle is
+    // over the edge, and its wheels, or another truck, may be over it before then. The
+    // copies share the original's heights.
+    for &copy in &copies {
         commands.spawn((
-            Name::new("Ground boxes"),
+            Name::new("Terrain copy"),
             ChildOf(terrain),
-            Transform::default(),
-            collider,
-            // And their upright sides apart from the terrain's slopes.
-            ground(crate::collision_groups::ground_boxes()),
+            Transform::from_xyz(copy.x, 0.0, copy.y),
+            collider.clone(),
+            ground(crate::collision_groups::ground()),
         ));
+    }
+    if let Some(collider) = ground_boxes::build_collider(&track.ground_boxes) {
+        for offset in std::iter::once(Vec2::ZERO).chain(copies.iter().copied()) {
+            commands.spawn((
+                Name::new("Ground boxes"),
+                ChildOf(terrain),
+                Transform::from_xyz(offset.x, 0.0, offset.y),
+                collider.clone(),
+                // And their upright sides apart from the terrain's slopes.
+                ground(crate::collision_groups::ground_boxes()),
+            ));
+        }
     }
 
     info!(
@@ -262,6 +286,7 @@ fn spawn_terrain(
             GroundShading {
                 size: track.heights.size(),
                 lit_smoothly: normals.is_some() as u32,
+                repeats: track.heights.repeats() as u32,
                 ..default()
             },
             normals,
@@ -289,11 +314,14 @@ fn spawn_terrain(
                 },
             });
             for chunk in mesh::build_textured_meshes(&track.heights, ground) {
-                commands.spawn((
-                    Mesh3d(meshes.add(chunk)),
-                    MeshMaterial3d(material.clone()),
-                    ChildOf(terrain),
-                ));
+                spawn_chunk(
+                    &mut commands,
+                    terrain,
+                    &track,
+                    chunk,
+                    &mut meshes,
+                    &material,
+                );
             }
             // Lit by their own faces: the smooth surface through the ground's heights is
             // not theirs.
@@ -303,13 +331,16 @@ fn spawn_terrain(
             });
             let (textured, plain) = ground_boxes::build_meshes(&track.ground_boxes, true);
             for chunk in textured {
-                commands.spawn((
-                    Mesh3d(meshes.add(chunk)),
-                    MeshMaterial3d(boxes.clone()),
-                    ChildOf(terrain),
-                ));
+                spawn_chunk(&mut commands, terrain, &track, chunk, &mut meshes, &boxes);
             }
-            spawn_plain_boxes(&mut commands, terrain, plain, &mut meshes, &mut materials);
+            spawn_plain_boxes(
+                &mut commands,
+                terrain,
+                &track,
+                plain,
+                &mut meshes,
+                &mut materials,
+            );
         }
         // Shaded ground lit smoothly: the tile material for its normal map, with a tile
         // that its meshes, having no tile numbers, never read.
@@ -326,26 +357,46 @@ fn spawn_terrain(
                 },
             });
             for chunk in mesh::build_shaded_meshes(&track) {
-                commands.spawn((
-                    Mesh3d(meshes.add(chunk)),
-                    MeshMaterial3d(material.clone()),
-                    ChildOf(terrain),
-                ));
+                spawn_chunk(
+                    &mut commands,
+                    terrain,
+                    &track,
+                    chunk,
+                    &mut meshes,
+                    &material,
+                );
             }
             let (_, plain) = ground_boxes::build_meshes(&track.ground_boxes, false);
-            spawn_plain_boxes(&mut commands, terrain, plain, &mut meshes, &mut materials);
+            spawn_plain_boxes(
+                &mut commands,
+                terrain,
+                &track,
+                plain,
+                &mut meshes,
+                &mut materials,
+            );
         }
         _ => {
             let material = materials.add(surface);
             for chunk in mesh::build_shaded_meshes(&track) {
-                commands.spawn((
-                    Mesh3d(meshes.add(chunk)),
-                    MeshMaterial3d(material.clone()),
-                    ChildOf(terrain),
-                ));
+                spawn_chunk(
+                    &mut commands,
+                    terrain,
+                    &track,
+                    chunk,
+                    &mut meshes,
+                    &material,
+                );
             }
             let (_, plain) = ground_boxes::build_meshes(&track.ground_boxes, false);
-            spawn_plain_boxes(&mut commands, terrain, plain, &mut meshes, &mut materials);
+            spawn_plain_boxes(
+                &mut commands,
+                terrain,
+                &track,
+                plain,
+                &mut meshes,
+                &mut materials,
+            );
         }
     }
 }
@@ -356,6 +407,7 @@ const PLAIN_BOX_COLOR: Color = Color::srgb(0.55, 0.53, 0.5);
 fn spawn_plain_boxes(
     commands: &mut Commands,
     terrain: Entity,
+    track: &TrackData,
     chunks: Vec<Mesh>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -369,10 +421,55 @@ fn spawn_plain_boxes(
         ..default()
     });
     for chunk in chunks {
+        spawn_chunk(commands, terrain, track, chunk, meshes, &material);
+    }
+}
+
+/// How far past the edges of a map that repeats its ground is drawn again, in metres: as
+/// far as the camera sees, which is Bevy's default far plane, that the backdrop and the sky
+/// are fitted inside. Less, and the ground beyond an edge ends in mid-air in plain view of
+/// a truck near it; more draws nothing that can be seen.
+pub const DRAWN_PAST_EDGE: f32 = 1000.0;
+
+/// Spawns one chunk of what is drawn of the ground, with `material`. Where the ground
+/// repeats, so do its copies round the map that come within `DRAWN_PAST_EDGE` of it. Bevy
+/// culls only to the sides of the view, not by distance, so each copy is drawn only within
+/// `DRAWN_PAST_EDGE` of the camera: from the middle of the map, none of them is.
+fn spawn_chunk<M: Material>(
+    commands: &mut Commands,
+    terrain: Entity,
+    track: &TrackData,
+    chunk: Mesh,
+    meshes: &mut Assets<Mesh>,
+    material: &Handle<M>,
+) {
+    let bounds = chunk.compute_aabb();
+    let mesh = meshes.add(chunk);
+    commands.spawn((
+        Mesh3d(mesh.clone()),
+        MeshMaterial3d(material.clone()),
+        ChildOf(terrain),
+    ));
+    let Some(bounds) = bounds else {
+        return;
+    };
+    let middle = Vec3::from(bounds.center).xz();
+    let half_across = Vec3::from(bounds.half_extents).xz().length();
+    for copy in track.heights.copies() {
+        if track.heights.beyond_edge(middle + copy) > DRAWN_PAST_EDGE + half_across {
+            continue;
+        }
         commands.spawn((
-            Mesh3d(meshes.add(chunk)),
+            Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
             ChildOf(terrain),
+            Transform::from_xyz(copy.x, 0.0, copy.y),
+            // Measured to the middle of the chunk, so that one partly within reach is drawn.
+            VisibilityRange {
+                start_margin: 0.0..0.0,
+                end_margin: DRAWN_PAST_EDGE + half_across..DRAWN_PAST_EDGE + half_across,
+                use_aabb: true,
+            },
         ));
     }
 }

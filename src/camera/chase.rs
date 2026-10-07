@@ -75,6 +75,16 @@ impl ChaseCamera {
     pub fn snap(&mut self) {
         self.rig = None;
     }
+
+    /// Moves the camera `by`, with all it has followed, for a target that has been moved
+    /// as far: the picture goes on as it was. Before `CameraSystems::Want`, in the frame
+    /// the target is first told of at its new place.
+    pub fn shift(&mut self, by: Vec3) {
+        if let Some(rig) = &mut self.rig {
+            rig.shift(by);
+        }
+        self.wanted_eye += by;
+    }
 }
 
 fn want(time: Res<Time>, mut cameras: Query<&mut ChaseCamera>) {

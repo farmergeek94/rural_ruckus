@@ -60,6 +60,8 @@ struct GroundShading {
     // How far into a cell, from each edge, the tile across it is faded in, in cells. 0 for
     // not at all.
     fade: f32,
+    // 1 where the ground repeats beyond the edges of the map.
+    repeats: u32,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<uniform> ground: GroundShading;
 
@@ -113,7 +115,8 @@ fn tile_in(cell: Cell, local: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec4
 // the tile across that edge, half and half on the edge, so the line between two cells is
 // soft instead of hard. The tile across is read at its own edge, stretched the little way
 // past it. Near a corner, the tile across the edge along X is faded in, then the one
-// across the edge along Z. Off the track a cell's neighbour is itself.
+// across the edge along Z. Off the track a cell's neighbour is itself, unless the ground
+// repeats: then it is the cell at the other edge, and beyond the map is a copy of it.
 fn faded_ground(own: vec4<f32>, world: vec2<f32>) -> vec4<f32> {
     let cells = i32(ground.cells);
     let place = (world / ground.size + 0.5) * f32(ground.cells);
@@ -121,8 +124,7 @@ fn faded_ground(own: vec4<f32>, world: vec2<f32>) -> vec4<f32> {
     let ddx = dpdx(place);
     let ddy = dpdy(place);
 
-    let last = vec2<i32>(cells - 1);
-    let at = clamp(vec2<i32>(floor(place)), vec2<i32>(0), last);
+    let at = neighbour(vec2<i32>(floor(place)));
     let local = place - vec2<f32>(at);
     let upper = local >= vec2<f32>(0.5);
     let to_edge = select(local, 1.0 - local, upper);
@@ -132,16 +134,33 @@ fn faded_ground(own: vec4<f32>, world: vec2<f32>) -> vec4<f32> {
     let toward = select(vec2<i32>(-1), vec2<i32>(1), upper);
     var color = own;
     if to_edge.x < ground.fade {
-        let across = clamp(at + vec2<i32>(toward.x, 0), vec2<i32>(0), last);
+        let across = neighbour(at + vec2<i32>(toward.x, 0));
         let there = clamp(place - vec2<f32>(across), vec2<f32>(0.0), vec2<f32>(1.0));
-        color = mix(color, tile_in(ground_cell(across), there, ddx, ddy), 0.5 * (1.0 - to_edge.x / ground.fade));
+        color = mix(color, tile_in(ground_cell(on_the_map(across)), there, ddx, ddy), 0.5 * (1.0 - to_edge.x / ground.fade));
     }
     if to_edge.y < ground.fade {
-        let across = clamp(at + vec2<i32>(0, toward.y), vec2<i32>(0), last);
+        let across = neighbour(at + vec2<i32>(0, toward.y));
         let there = clamp(place - vec2<f32>(across), vec2<f32>(0.0), vec2<f32>(1.0));
-        color = mix(color, tile_in(ground_cell(across), there, ddx, ddy), 0.5 * (1.0 - to_edge.y / ground.fade));
+        color = mix(color, tile_in(ground_cell(on_the_map(across)), there, ddx, ddy), 0.5 * (1.0 - to_edge.y / ground.fade));
     }
     return color;
+}
+
+// Cell `cell`, counted as `faded_ground` counts them from the place: as it is where the
+// ground repeats, so that a place is measured from its own cell's corner, and otherwise the
+// nearest cell on the map.
+fn neighbour(cell: vec2<i32>) -> vec2<i32> {
+    if ground.repeats != 0u {
+        return cell;
+    }
+    return clamp(cell, vec2<i32>(0), vec2<i32>(i32(ground.cells) - 1));
+}
+
+// Which cell of `ground_cells` a `neighbour` is: the one a whole map over, where the ground
+// repeats and it is off the map.
+fn on_the_map(cell: vec2<i32>) -> vec2<i32> {
+    let cells = i32(ground.cells);
+    return ((cell % cells) + cells) % cells;
 }
 
 #ifndef PREPASS_PIPELINE

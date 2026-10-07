@@ -11,6 +11,9 @@
 //! number that someone else drives (from `ComputerTrucks`). They are built alike, and
 //! differ only in who writes their `TruckInput`.
 //!
+//! On a world that repeats (`RepeatingWorld`), a truck that goes over an edge of the map is
+//! moved across to the other (`wrap`), and `TruckWrapped` says so.
+//!
 //! A truck is plain data (`TruckData`): the built-in one, or one converted from a Monster
 //! Truck Madness 2 archive by `pod_import`. Such an archive gives a truck's shape and its
 //! looks, and nothing of how it drives, which is `TruckConfig`'s defaults for every truck.
@@ -29,6 +32,7 @@ mod pod_import;
 mod reset;
 mod spawn;
 mod speedometer;
+mod wrap;
 
 use avian3d::prelude::{Collider, PhysicsSystems};
 use bevy::prelude::*;
@@ -50,6 +54,7 @@ pub use pod_import::{
 };
 pub use reset::PlaceTruck;
 pub use spawn::Wheel;
+pub use wrap::{RepeatingWorld, TruckWrapped};
 
 pub struct TruckPlugin;
 
@@ -72,7 +77,9 @@ impl Plugin for TruckPlugin {
             .init_resource::<SpeedUnits>()
             .init_resource::<TruckLooksSettings>()
             .init_resource::<TruckLamps>()
+            .init_resource::<RepeatingWorld>()
             .add_message::<PlaceTruck>()
+            .add_message::<TruckWrapped>()
             .add_systems(
                 OnEnter(GameState::Racing),
                 (spawn::spawn_trucks, speedometer::spawn_speedometer),
@@ -102,7 +109,9 @@ impl Plugin for TruckPlugin {
             .add_systems(FixedUpdate, drive::drive_truck.in_set(TruckSystems::Drive))
             .add_systems(
                 FixedPostUpdate,
-                interpolate::record_poses.after(PhysicsSystems::Writeback),
+                (wrap::bring_back_on, interpolate::record_poses)
+                    .chain()
+                    .after(PhysicsSystems::Writeback),
             );
     }
 }

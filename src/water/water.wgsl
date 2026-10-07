@@ -14,6 +14,15 @@
 // And where the water is shallow, from a map of its depth (`shore.rs`): foam along the
 // water's edge, which moves up and down the ground with the swell, lines of surf that roll
 // in towards it, and foam where the rings break in the shallows.
+//
+// At a glancing angle it mirrors what is round it. The reflected ray is followed across
+// the picture drawn so far, in steps that grow longer as it goes, until it goes behind
+// something drawn there, which it shows (screen-space reflections). A ray that leaves the
+// picture first shows what is at the edge where it left: what it would have met past the
+// edge is not in the picture, and is most often more of the same, a cliff that goes on up.
+// The sky's colour there showed as bright patches under dark cliffs. A ray that meets
+// nothing shows the sky's colour. The water is drawn solid after everything else solid,
+// and mixes in the picture under it itself (see `surface.rs`).
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -32,7 +41,12 @@
 #import bevy_pbr::{
     forward_io::{Vertex, VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+    mesh_view_bindings::{view_transmission_texture, view_transmission_sampler},
+    view_transformations::{depth_ndc_to_view_z, frag_coord_to_uv, ndc_to_uv},
 }
+#ifdef DEPTH_PREPASS
+#import bevy_pbr::prepass_utils::prepass_depth
+#endif
 #endif
 
 struct Ripples {
@@ -44,8 +58,14 @@ struct Ripples {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<storage, read> water: Ripples;
-// The sky's colour, in linear light.
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> sky: vec4<f32>;
+struct Mirroring {
+    // The sky's colour, in linear light.
+    sky: vec4<f32>,
+    // 1 to mirror the scenery as well, 0 for only the sky (`WaterSettings::reflections`).
+    scenery: u32,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> mirroring: Mirroring;
 
 struct Wind {
     // Which way it blows, on the ground plane (world X and Z), of length 1. How hard, is
@@ -63,6 +83,8 @@ struct Shore {
     // How far apart its texels are, in metres, and how many there are along a side.
     spacing: f32,
     resolution: f32,
+    // 1 where the ground repeats beyond the edges of the map.
+    repeats: u32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<uniform> shore: Shore;
@@ -89,7 +111,7 @@ const CHOP_WIND: f32 = 6.0;
 // downwind, in m/s.
 const GUST_SIZE: f32 = 45.0;
 const GUST_DRIFT: f32 = 5.0;
-// How much of its mirrored sky ruffled water loses. Ruffled water looks darker.
+// How much of what it mirrors ruffled water loses. Ruffled water looks darker.
 const GUST_DARKENING: f32 = 0.45;
 // How hard the wind must blow for the swell's crests to break, in m/s: they start to at
 // the first, and all do at the second.
@@ -124,9 +146,39 @@ const FOAM: f32 = 3.0;
 const FOAM_FADE: f32 = 0.5;
 // How big the patches of foam are, in metres. Foam is never an even band.
 const FOAM_PATCH: f32 = 0.35;
-// How much of the sky the water mirrors, seen edge on. Looked straight down into, it
-// mirrors almost none.
-const SKY_MIRROR: f32 = 0.55;
+// How much of what is round it the water mirrors, seen edge on. Looked straight down
+// into, it mirrors almost none.
+const MIRROR: f32 = 0.25;
+// How much of what is round it the water must mirror for the reflected ray to be
+// followed; less shows the sky's colour. Higher saves the cost of following it on more
+// of the water seen from above, where the reflection hardly shows.
+const LEAST_REFLECTION: f32 = 0.05;
+// How much the waves bend what the water mirrors, from 0 (a still mirror); at 1 as much
+// as they bend the light off it, and above that more. Higher is a more broken reflection.
+const REFLECTION_WAVINESS: f32 = 1.6;
+// What the scenery the water mirrors is multiplied by, in linear light: water mirrors
+// it bluer than it is. Lower red and green is bluer.
+const REFLECTION_TINT: vec3<f32> = vec3(0.7, 0.84, 1.0);
+// How much of the scenery the water mirrors is lost in haze, the sky's colour, from 0 (a
+// sharp mirror) to 1 (only the sky). Real water never mirrors as sharply as glass.
+const REFLECTION_HAZE: f32 = 0.55;
+// How the reflected ray is followed: its first step, in metres, how much longer each step
+// is than the one before, and how many there are. 16 steps from 0.3 m reach about 400 m.
+// Each step is a read of the depth for every pixel of water that mirrors: more steps, or
+// slower growth, find thinner things further off, at that cost.
+const REFLECTION_FIRST_STEP: f32 = 0.3;
+const REFLECTION_GROWTH: f32 = 1.5;
+const REFLECTION_STEPS: u32 = 16u;
+// How many times the step in which the ray went behind something is halved, to find
+// where it did. Fewer leaves the reflection's edges ragged.
+const REFLECTION_HALVINGS: u32 = 4u;
+// How thick things are taken to be behind what is drawn of them, in metres, on top of
+// the length of a step. A ray that is further behind than that has passed behind them,
+// not met them. Thinner leaves holes in the reflections of steep things.
+const REFLECTION_THICKNESS: f32 = 1.0;
+// How far the view goes through the water before it hides almost two thirds of what is
+// under it, in metres. Higher is clearer water: a ford stays plain to see deeper down.
+const WATER_CLARITY: f32 = 0.3;
 // How deep the water is at the outer edge of the band of foam along the shore, in metres.
 const EDGE_FOAM_DEPTH: f32 = 0.45;
 // The surf: how deep it starts to roll in, in metres, how much deeper each line is than
@@ -217,10 +269,15 @@ fn gustiness(position: vec2<f32>, time: f32) -> f32 {
 }
 
 // How deep the still water is over the ground at `position`, in metres. Below the ground
-// it is less than 0.
+// it is less than 0. Past an edge of ground that repeats, as deep as inside the other.
 fn still_depth(position: vec2<f32>) -> f32 {
     let last = i32(shore.resolution) - 1;
-    let texels = clamp((position - shore.origin) / shore.spacing, vec2(0.0), vec2(f32(last)));
+    var from_origin = position - shore.origin;
+    if shore.repeats != 0u {
+        let size = shore.spacing * f32(last);
+        from_origin -= floor(from_origin / size) * size;
+    }
+    let texels = clamp(from_origin / shore.spacing, vec2(0.0), vec2(f32(last)));
     let corner = min(vec2<i32>(floor(texels)), vec2(last - 1));
     let within = texels - vec2<f32>(corner);
     let near = mix(
@@ -330,6 +387,104 @@ fn ring(position: vec2<f32>, ripple: vec4<f32>) -> vec4<f32> {
     return vec4(offset / from_center * outwards, crest * exp(-age / FOAM_FADE), crest);
 }
 
+#ifndef PREPASS_PIPELINE
+#ifdef DEPTH_PREPASS
+// The reflected ray, as the picture sees it: where it starts in clip space and how that
+// changes for each metre along it, and the same for how far it is ahead of the camera,
+// along the view (view space's Z). Both change in a straight line along the ray, so are
+// worked out once for it, and each step only adds to them.
+struct Ray {
+    clip_start: vec4<f32>,
+    clip_way: vec4<f32>,
+    view_start: f32,
+    view_way: f32,
+}
+
+// Where the ray is `along` metres out, in the picture drawn so far, and how far it is
+// behind what is drawn there, in metres along the view: below 0 in front of it, or where
+// only the sky is.
+struct Probe {
+    uv: vec2<f32>,
+    // Whether it is in front of the camera.
+    ahead: bool,
+    on_screen: bool,
+    behind: f32,
+}
+
+fn probe(ray: Ray, along: f32) -> Probe {
+    var out: Probe;
+    let clip = ray.clip_start + ray.clip_way * along;
+    let ndc = clip.xy / clip.w;
+    out.uv = ndc_to_uv(ndc);
+    out.ahead = clip.w > 0.0;
+    out.on_screen = out.ahead && all(abs(ndc) < vec2(1.0));
+    out.behind = -1.0e9;
+    if out.on_screen {
+        let drawn = prepass_depth(vec4(out.uv * view.viewport.zw + view.viewport.xy, 0.0, 0.0), 0u);
+        // A depth of 0 is the sky, as far off as can be.
+        if drawn > 0.0 {
+            out.behind = depth_ndc_to_view_z(drawn) - (ray.view_start + ray.view_way * along);
+        }
+    }
+    return out;
+}
+
+// What is drawn at `uv`, in linear light.
+fn drawn_at(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
+}
+#endif
+
+// What the water at `start`, which is at `uv` in the picture, mirrors along `direction`,
+// in linear light.
+fn reflection(start: vec3<f32>, uv: vec2<f32>, direction: vec3<f32>) -> vec3<f32> {
+#ifdef DEPTH_PREPASS
+    var ray: Ray;
+    ray.clip_start = view.clip_from_world * vec4(start, 1.0);
+    ray.clip_way = view.clip_from_world * vec4(direction, 0.0);
+    ray.view_start = (view.view_from_world * vec4(start, 1.0)).z;
+    ray.view_way = (view.view_from_world * vec4(direction, 0.0)).z;
+    var step = REFLECTION_FIRST_STEP;
+    // How far along the ray it is still in front of what is drawn, in metres, and where
+    // that is in the picture.
+    var clear = 0.0;
+    var clear_uv = uv;
+    for (var index = 0u; index < REFLECTION_STEPS; index++) {
+        let reached = clear + step;
+        let here = probe(ray, reached);
+        if !here.on_screen {
+            // What is at the edge where it left the picture. Not searched for: the edge
+            // nearest where the step ended is near enough to it.
+            if here.ahead {
+                return drawn_at(clamp(here.uv, vec2(0.0), vec2(1.0)));
+            }
+            return drawn_at(clear_uv);
+        }
+        if here.behind > 0.0 && here.behind < step + REFLECTION_THICKNESS {
+            var low = clear;
+            var high = reached;
+            var found = here.uv;
+            for (var halving = 0u; halving < REFLECTION_HALVINGS; halving++) {
+                let middle = (low + high) * 0.5;
+                let half = probe(ray, middle);
+                if half.behind > 0.0 {
+                    high = middle;
+                    found = half.uv;
+                } else {
+                    low = middle;
+                }
+            }
+            return drawn_at(found);
+        }
+        clear = reached;
+        clear_uv = here.uv;
+        step *= REFLECTION_GROWTH;
+    }
+#endif
+    return mirroring.sky.rgb;
+}
+#endif
+
 @fragment
 fn fragment(
     in: VertexOutput,
@@ -398,10 +553,18 @@ fn fragment(
     let facing = abs(dot(normal, pbr_input.V));
     let glancing = pow(1.0 - facing, 3.0);
     let color = pbr_input.material.base_color;
-    pbr_input.material.base_color = vec4(
-        mix(color.rgb, vec3(0.95, 0.97, 1.0), whiteness),
-        max(mix(color.a, 0.95, glancing), whiteness),
-    );
+    // The deeper the water the view goes through, the less of the ground under it shows:
+    // the alpha is how much deep water hides. Seen from under the water, the view goes
+    // out of it, into the air.
+    var murk = color.a;
+    if is_front {
+        let through = max(depth, 0.0) / max(facing, 0.2);
+        murk = color.a * (1.0 - exp(-through / WATER_CLARITY));
+    }
+    let opacity = max(mix(murk, 0.95, glancing), whiteness);
+    pbr_input.material.base_color = vec4(mix(color.rgb, vec3(0.95, 0.97, 1.0), whiteness), opacity);
+    // Only there to put the water in the transmissive pass (see `surface.rs`).
+    pbr_input.material.specular_transmission = 0.0;
 
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
 
@@ -412,9 +575,25 @@ fn fragment(
     out.color = apply_pbr_lighting(pbr_input);
     // Foam is white whatever it mirrors.
     let ruffled = 1.0 - GUST_DARKENING * gust * min(breeze, 1.5);
-    let mirror = SKY_MIRROR * glancing * (1.0 - whiteness) * ruffled;
-    out.color = vec4(mix(out.color.rgb, sky.rgb, mirror), out.color.a);
+    let mirror = MIRROR * glancing * (1.0 - whiteness) * ruffled;
+    var mirrored = mirroring.sky.rgb;
+    let uv = frag_coord_to_uv(in.position.xy);
+    // From under the water, and where it would hardly show, the sky will do.
+    if is_front && mirror > LEAST_REFLECTION && mirroring.scenery == 1u {
+        var direction = reflect(-pbr_input.V, normalize(mix(vec3(0.0, 1.0, 0.0), normal, REFLECTION_WAVINESS)));
+        // A wave can turn the ray into the water; it skims it instead.
+        direction = normalize(vec3(direction.x, max(direction.y, 0.02), direction.z));
+        mirrored = mix(
+            reflection(in.world_position.xyz, uv, direction) * REFLECTION_TINT,
+            mirroring.sky.rgb,
+            REFLECTION_HAZE,
+        );
+    }
+    out.color = vec4(mix(out.color.rgb, mirrored, mirror), 1.0);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+    // What is under the water, through it, as a see-through material would show it.
+    let under = textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
+    out.color = vec4(mix(under, out.color.rgb, opacity), 1.0);
 #endif
 
     return out;

@@ -7,6 +7,11 @@
 //! in its way (see `motion`). What is drawn of either of those is not the body itself but a
 //! copy placed between its last two physics poses (see `interpolate`).
 //!
+//! Where the ground repeats beyond the edges of the map, the objects that stay where they
+//! are put are copied round it, as the ground is: drawn as far from the map as it is
+//! (`track::DRAWN_PAST_EDGE`), and solid only where a truck on the map can reach them.
+//! Loose and moving ones are not.
+//!
 //! Some animate in place, as drawn only: textures that step through frames, and models
 //! that move by keyframes (see `animation`). Flat pictures of trees turn to face the
 //! camera (see `facing`).
@@ -34,8 +39,8 @@ use bevy::prelude::*;
 use crate::camera::CameraSystems;
 use crate::game_state::GameState;
 use crate::track::{
-    SceneryModel, SceneryMotion, TextureCycle, TileMaterial, TileTextures, Track, TrackSettings,
-    TrackSystems, tile_array,
+    DRAWN_PAST_EDGE, SceneryModel, SceneryMotion, TextureCycle, TileMaterial, TileTextures, Track,
+    TrackSettings, TrackSystems, tile_array,
 };
 
 pub struct SceneryPlugin;
@@ -77,6 +82,18 @@ impl Plugin for SceneryPlugin {
 /// Every entity of the scenery: the objects, and the drawn copies of those that move.
 #[derive(Component)]
 pub struct SceneryObject;
+
+/// On a copy of a fixed object round a map whose ground repeats, beyond an edge: it is
+/// drawn only within `reach` metres of the camera, as the ground's copies are.
+#[derive(Component)]
+struct RepeatedCopy {
+    reach: f32,
+}
+
+/// How far past an edge of the map a copy of a fixed object may reach and still be made
+/// solid, in metres: further than a truck on the map reaches over the edge before it is
+/// moved across to the other. Nearer copies are only drawn.
+const TRUCK_ROOM: f32 = 10.0;
 
 /// On a drawn object that trucks go through: a bush, a tree or a sign that isn't solid.
 /// Hiding one changes nothing but the look (`TrackSettings::decorations`).
@@ -205,6 +222,19 @@ fn spawn_scenery(
         })
         .collect();
 
+    // How far each model reaches from its origin, in metres.
+    let radii: Vec<f32> = scenery
+        .models
+        .iter()
+        .map(|model| {
+            model
+                .positions
+                .iter()
+                .map(|&position| Vec3::from(position).length())
+                .fold(0.0, f32::max)
+        })
+        .collect();
+
     for object in &scenery.objects {
         let ground = track
             .heights
@@ -237,29 +267,46 @@ fn spawn_scenery(
             (SceneryMotion::Moving { velocity }, Some(collider), _) => {
                 motion::moving(&mut commands, transform, collider.clone(), velocity)
             }
-            // A model with no volume to it, which can't tumble, stays put.
+            // A model with no volume to it, which can't tumble, stays put. Where the ground
+            // repeats, so does it, round the map: drawn as far as the ground is, and solid
+            // where a truck on the map could touch it.
             (_, collider, _) => {
-                let mut entity = commands.spawn((
-                    SceneryObject,
-                    DespawnOnExit(GameState::Racing),
-                    name,
-                    transform,
-                ));
-                if let Some(drawn) = drawn {
-                    entity.insert(drawn);
-                }
-                if let Some(morph) = morph {
-                    entity.insert(morph);
-                }
-                // A solid one keeps its yaw, so that its collider stays where it was put.
-                if object.faces_camera && collider.is_none() {
-                    entity.insert(facing::FacesCamera);
-                }
-                if collider.is_none() && looks_of_object.is_some() {
-                    entity.insert(Decoration);
-                }
-                if let Some(collider) = collider {
-                    entity.insert((RigidBody::Static, collider.clone(), bouncy()));
+                let radius = radii[object.model];
+                for copy in std::iter::once(Vec2::ZERO).chain(track.heights.copies()) {
+                    let beyond_edge = track.heights.beyond_edge(object.position + copy);
+                    let drawn_reach = DRAWN_PAST_EDGE + radius;
+                    let drawn = drawn.clone().filter(|_| beyond_edge <= drawn_reach);
+                    let solid = collider.filter(|_| beyond_edge <= radius + TRUCK_ROOM);
+                    if drawn.is_none() && solid.is_none() {
+                        continue;
+                    }
+                    let mut entity = commands.spawn((
+                        SceneryObject,
+                        DespawnOnExit(GameState::Racing),
+                        name.clone(),
+                        transform.with_translation(
+                            transform.translation + Vec3::new(copy.x, 0.0, copy.y),
+                        ),
+                    ));
+                    if copy != Vec2::ZERO {
+                        entity.insert(RepeatedCopy { reach: drawn_reach });
+                    }
+                    if let Some(drawn) = drawn {
+                        entity.insert(drawn);
+                        if let Some(morph) = morph.clone() {
+                            entity.insert(morph);
+                        }
+                    }
+                    // A solid one keeps its yaw, so that its collider stays where it was put.
+                    if object.faces_camera && collider.is_none() {
+                        entity.insert(facing::FacesCamera);
+                    }
+                    if collider.is_none() && looks_of_object.is_some() {
+                        entity.insert(Decoration);
+                    }
+                    if let Some(collider) = solid {
+                        entity.insert((RigidBody::Static, collider.clone(), bouncy()));
+                    }
                 }
                 continue;
             }
@@ -295,19 +342,25 @@ fn show_decorations(
     }
 }
 
+/// What is drawn of the scenery, and which of it are copies, with `Filter` as well.
+type DrawnObjects<'w, 's, Filter> =
+    Query<'w, 's, (Entity, Option<&'static RepeatedCopy>), (With<SceneryObject>, Filter)>;
+
 fn keep_draw_distance(
     mut commands: Commands,
     settings: Res<TrackSettings>,
-    all: Query<Entity, (With<SceneryObject>, With<Mesh3d>)>,
-    new: Query<Entity, (With<SceneryObject>, Added<Mesh3d>)>,
+    all: DrawnObjects<With<Mesh3d>>,
+    new: DrawnObjects<Added<Mesh3d>>,
 ) {
     let objects = if settings.is_changed() {
         all.iter().collect::<Vec<_>>()
     } else {
         new.iter().collect()
     };
-    let distance = settings.scenery_distance;
-    for object in objects {
+    for (object, copy) in objects {
+        let distance = copy.map_or(settings.scenery_distance, |copy| {
+            settings.scenery_distance.min(copy.reach)
+        });
         if distance.is_finite() {
             // Gone at once at the distance, rather than dithered out: a fade draws the
             // object in both of its states while it lasts.

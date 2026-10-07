@@ -64,7 +64,7 @@ pub(super) fn spawn_ice(
     let Some(level) = track.water_level else {
         return;
     };
-    let size = track.heights.size();
+    let size = super::water_width(&track);
     let ice = commands
         .spawn((
             Name::new("Ice"),

@@ -127,6 +127,9 @@ pub(super) struct ShoreUniform {
     spacing: f32,
     /// How many texels there are along a side.
     resolution: f32,
+    /// 1 where the ground repeats: past an edge of the map, the depth is that inside the
+    /// other. 0 where the map ends at its edges.
+    repeats: u32,
 }
 
 /// The map of how deep the still water at `level` is over the ground, in metres, and where
@@ -155,6 +158,7 @@ pub(super) fn depth_map(heights: &HeightGrid, level: f32) -> (Image, ShoreUnifor
         origin: Vec2::splat(depths.origin),
         spacing: depths.spacing,
         resolution: depths.resolution as f32,
+        repeats: heights.repeats() as u32,
     };
     (image, uniform)
 }

@@ -1,5 +1,10 @@
 //! The route around a track: a closed centreline with a width.
 //!
+//! On a world that repeats (`Course::repeating`), each piece goes the short way from one
+//! point to the next, which may be across an edge of the map: Monte Carlo's course leaves
+//! the map on the west and comes back on from the east. Points it gives are on the map, and
+//! the way from one place to another is `offset`.
+//!
 //! How far round the loop each piece of the centreline starts is worked out once, when the
 //! course is made, because the computer's drivers ask where they are on it many times a
 //! physics step. So the centreline can only be read, not changed.
@@ -18,6 +23,9 @@ pub struct Course {
     starts: Vec<f32>,
     /// Full drivable width in metres.
     pub width: f32,
+    /// How far apart the copies of a world that repeats are along X and Z, in metres,
+    /// centred on the origin. `None` where the world ends at its edges.
+    repeat: Option<f32>,
 }
 
 /// The closest point of the centreline to some position.
@@ -35,19 +43,59 @@ impl Course {
     /// The course along `centerline`, `width` metres wide. The centreline needs at least
     /// one point.
     pub fn new(centerline: Vec<Vec2>, width: f32) -> Self {
+        Self::build(centerline, width, None)
+    }
+
+    /// The course along `centerline` on a world that repeats every `size` metres along X
+    /// and Z, centred on the origin, as `track::HeightGrid::repeating` does. Each piece goes
+    /// the short way, so none may be longer than half of `size`.
+    pub fn repeating(centerline: Vec<Vec2>, width: f32, size: f32) -> Self {
+        Self::build(centerline, width, Some(size))
+    }
+
+    fn build(centerline: Vec<Vec2>, width: f32, repeat: Option<f32>) -> Self {
         let count = centerline.len();
-        let mut starts = Vec::with_capacity(count + 1);
-        let mut start = 0.0;
-        starts.push(start);
-        for i in 0..count {
-            start += centerline[i].distance(centerline[(i + 1) % count]);
-            starts.push(start);
-        }
-        Self {
+        let mut course = Self {
             centerline,
-            starts,
+            starts: Vec::with_capacity(count + 1),
             width,
+            repeat,
+        };
+        let mut start = 0.0;
+        course.starts.push(start);
+        for i in 0..count {
+            let (a, b) = course.segment(i);
+            start += a.distance(b);
+            course.starts.push(start);
         }
+        course
+    }
+
+    /// The shortest way from `from` to `to` (world X and Z), in metres: across an edge of
+    /// the map where the world repeats and that way is shorter, and otherwise straight.
+    pub fn offset(&self, from: Vec2, to: Vec2) -> Vec2 {
+        let offset = to - from;
+        match self.repeat {
+            Some(size) => offset - (offset / size).round() * size,
+            None => offset,
+        }
+    }
+
+    /// The place on the map that `point` is, where the world repeats: see
+    /// `HeightGrid::onto`.
+    fn onto(&self, point: Vec2) -> Vec2 {
+        let Some(size) = self.repeat else {
+            return point;
+        };
+        let half = size / 2.0;
+        let along = |world: f32| {
+            if (-half..half).contains(&world) {
+                world
+            } else {
+                (world + half).rem_euclid(size) - half
+            }
+        };
+        Vec2::new(along(point.x), along(point.y))
     }
 
     /// Points along the middle of the course on the ground plane (world X and Z), in
@@ -56,10 +104,11 @@ impl Course {
         &self.centerline
     }
 
-    /// Every straight piece of the centreline, including the one closing the loop.
+    /// Every straight piece of the centreline, including the one closing the loop. Each
+    /// starts on the map, and where the world repeats, ends the short way from there: off
+    /// the map, for a piece that crosses an edge.
     pub fn segments(&self) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
-        let count = self.centerline.len();
-        (0..count).map(move |i| (self.centerline[i], self.centerline[(i + 1) % count]))
+        (0..self.centerline.len()).map(move |i| self.segment(i))
     }
 
     /// Length of one lap along the centreline, in metres.
@@ -67,17 +116,16 @@ impl Course {
         self.starts[self.centerline.len()]
     }
 
-    /// The ends of piece `segment` of the centreline.
+    /// The ends of piece `segment` of the centreline, as `segments` gives them.
     fn segment(&self, segment: usize) -> (Vec2, Vec2) {
         let count = self.centerline.len();
-        (
-            self.centerline[segment],
-            self.centerline[(segment + 1) % count],
-        )
+        let start = self.centerline[segment];
+        let end = self.centerline[(segment + 1) % count];
+        (start, start + self.offset(start, end))
     }
 
     /// Position and direction of travel `distance` metres along the centreline from
-    /// its first point. Wraps around, so any distance is valid.
+    /// its first point. Wraps around, so any distance is valid. The position is on the map.
     pub fn point_at(&self, distance: f32) -> (Vec2, Vec2) {
         let count = self.centerline.len();
         let wanted = distance.rem_euclid(self.length());
@@ -90,7 +138,8 @@ impl Course {
         }
         let (a, b) = self.segment(segment);
         let direction = (b - a) / a.distance(b);
-        (a + direction * (wanted - self.starts[segment]), direction)
+        let point = a + direction * (wanted - self.starts[segment]);
+        (self.onto(point), direction)
     }
 
     /// `point_at` for `count` places `step` metres apart, the first `from` metres along
@@ -103,11 +152,21 @@ impl Course {
 
     /// The closest point of the centreline to `position`.
     pub fn nearest(&self, position: Vec2) -> Nearest {
-        self.segments()
-            .enumerate()
-            .map(|(segment, (a, b))| nearest_on_segment(position, a, b, segment))
+        (0..self.centerline.len())
+            .map(|segment| self.nearest_on(segment, position))
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
             .expect("a course has points")
+    }
+
+    /// The closest point of piece `segment` of the centreline to `position`. Where the
+    /// world repeats, to whichever copy of `position` is nearest the piece.
+    pub fn nearest_on(&self, segment: usize, position: Vec2) -> Nearest {
+        let (a, b) = self.segment(segment);
+        let position = match self.repeat {
+            Some(_) => a.midpoint(b) + self.offset(a.midpoint(b), position),
+            None => position,
+        };
+        nearest_on_segment(position, a, b, segment)
     }
 
     /// How far along the centreline from its first point a `nearest` is, in metres.
@@ -124,15 +183,13 @@ impl Course {
     pub fn nearest_within(&self, position: Vec2, from: f32, to: f32) -> Nearest {
         let lap = self.length();
         let stretch = to - from;
-        self.segments()
-            .enumerate()
-            .filter_map(|(segment, (a, b))| {
+        (0..self.centerline.len())
+            .filter_map(|segment| {
                 let start = self.starts[segment];
                 let length = self.starts[segment + 1] - start;
                 let begins_in_stretch = (start - from).rem_euclid(lap) <= stretch;
                 let holds_the_start = (from - start).rem_euclid(lap) < length;
-                (begins_in_stretch || holds_the_start)
-                    .then(|| nearest_on_segment(position, a, b, segment))
+                (begins_in_stretch || holds_the_start).then(|| self.nearest_on(segment, position))
             })
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
             // A stretch always holds the piece it starts in. NaN distances find none.
@@ -141,7 +198,8 @@ impl Course {
 
     /// `nearest` for every vertex of a height grid at once, row by row, for vertices
     /// within `reach` metres of the centreline. Much cheaper than asking per vertex,
-    /// because each segment only visits the vertices around it.
+    /// because each segment only visits the vertices around it. Takes no account of a world
+    /// that repeats: it is for the built-in track, which doesn't.
     pub(super) fn nearest_per_vertex(
         &self,
         resolution: usize,
@@ -282,5 +340,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// On a world 1000 m across that repeats: a 150 by 100 m loop from near the west edge,
+    /// on to the west and back on from the east, and round to the start. 500 m a lap.
+    fn across_the_edge() -> Course {
+        Course::repeating(
+            vec![
+                Vec2::new(-400.0, 0.0),
+                Vec2::new(450.0, 0.0),
+                Vec2::new(450.0, 100.0),
+                Vec2::new(-400.0, 100.0),
+            ],
+            10.0,
+            1000.0,
+        )
+    }
+
+    #[test]
+    fn a_piece_across_an_edge_goes_the_short_way() {
+        let course = across_the_edge();
+        assert!(
+            (course.length() - 500.0).abs() < 1e-3,
+            "{}",
+            course.length()
+        );
+        let (a, b) = course.segments().next().unwrap();
+        assert_eq!(a, Vec2::new(-400.0, 0.0));
+        assert!(b.distance(Vec2::new(-550.0, 0.0)) < 1e-3, "{b}");
+        // Past the edge is the far side of the map.
+        let (point, direction) = course.point_at(110.0);
+        assert!(point.distance(Vec2::new(490.0, 0.0)) < 1e-3, "{point}");
+        assert_eq!(direction, Vec2::NEG_X);
+        let (point, _) = course.point_at(125.0);
+        assert!(point.distance(Vec2::new(475.0, 0.0)) < 1e-3, "{point}");
+    }
+
+    #[test]
+    fn the_nearest_point_is_found_across_an_edge() {
+        let course = across_the_edge();
+        // Just inside the east edge, on the piece that left from the west.
+        let nearest = course.nearest(Vec2::new(480.0, 3.0));
+        assert_eq!(nearest.segment, 0);
+        assert!((nearest.distance - 3.0).abs() < 1e-3);
+        assert!((course.distance_along(&nearest) - 120.0).abs() < 1e-3);
+        let within = course.nearest_within(Vec2::new(480.0, 3.0), 50.0, 200.0);
+        assert_eq!(within.segment, 0);
+        // And the way there from just inside the west edge is across it.
+        let way = course.offset(Vec2::new(-490.0, 0.0), Vec2::new(480.0, 3.0));
+        assert!(way.distance(Vec2::new(-30.0, 3.0)) < 1e-3, "{way}");
     }
 }

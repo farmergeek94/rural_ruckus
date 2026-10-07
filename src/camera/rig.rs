@@ -129,6 +129,12 @@ impl Rig {
         }
     }
 
+    /// Moves the camera `by`, with everything it has followed: for a target that has been
+    /// moved as far, as in a world that repeats, and is to be seen going on as it was.
+    pub fn shift(&mut self, by: Vec3) {
+        self.aim += by;
+    }
+
     /// Follows `target` for a frame of `seconds`, and says where the eye wants to be,
     /// before anything has been said about the ground. Follow it with `place`.
     pub fn want(&mut self, config: &RigConfig, target: &Target, seconds: f32) -> Vec3 {
@@ -269,6 +275,36 @@ mod tests {
         assert_eq!(pose.aim, far.position + Vec3::Y * 1.5);
         // Behind it, which for a target facing +X is towards -X.
         assert!(pose.eye.distance(far.position + Vec3::new(-13.0, 5.0, 0.0)) < 1e-4);
+    }
+
+    #[test]
+    fn a_target_moved_with_the_camera_is_followed_as_if_it_had_not_been() {
+        let config = RigConfig::default();
+        let (mut stayed, mut moved) = {
+            let start = target(Vec3::ZERO, Vec3::new(20.0, 0.0, -10.0));
+            (Rig::new(&config, &start), Rig::new(&config, &start))
+        };
+        let by = Vec3::new(-2500.0, 0.0, 2500.0);
+        for frame in 1..=30 {
+            let seconds = frame as f32 / 60.0;
+            let going = target(
+                Vec3::new(20.0, 0.0, -10.0) * seconds,
+                Vec3::new(20.0, 3.0, -10.0),
+            );
+            let pose = stayed.step(&config, &going, 1.0 / 60.0);
+            // Over the edge of the world half way, and moved across.
+            if frame == 15 {
+                moved.shift(by);
+            }
+            let offset = if frame >= 15 { by } else { Vec3::ZERO };
+            let shifted = Target {
+                position: going.position + offset,
+                ..going
+            };
+            let moved_pose = moved.step(&config, &shifted, 1.0 / 60.0);
+            assert!(moved_pose.eye.distance(pose.eye + offset) < 1e-2, "{frame}");
+            assert!(moved_pose.aim.distance(pose.aim + offset) < 1e-2, "{frame}");
+        }
     }
 
     #[test]

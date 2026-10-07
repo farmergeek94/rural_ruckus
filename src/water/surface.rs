@@ -16,30 +16,42 @@
 //! leaves out what is past its edge, as the sheet leaves out what is inside it. Settled by
 //! the triangles' own edges instead, antialiasing left some of the edge's pixels to
 //! neither, which showed as a dashed line across the water.
+//!
+//! The water mirrors the scenery: `water.wgsl` follows the reflected ray across the
+//! picture drawn so far, and where it meets the scenery, shows what is there (screen-space
+//! reflections). To read that picture, the water is drawn after everything solid, in
+//! Bevy's transmissive pass, which copies the picture for it. So it is drawn solid, and
+//! mixes what is under it into its colour itself, as a see-through material would.
 
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::NotShadowCaster;
-use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::pbr::{
+    ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::render_resource::{
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+};
 use bevy::render::storage::ShaderBuffer;
-use bevy::shader::ShaderRef;
+use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use super::WaterSurface;
 use super::ripples::{Ripples, ShaderRipples};
 use super::shore::{ShoreUniform, depth_map};
 use super::wind::Wind;
+use super::{WaterSettings, WaterSurface};
 use crate::game_state::GameState;
 use crate::track::Track;
 
 /// What the water's surface looks like. Monster Truck Madness 2's tracks do not say, so
-/// it is a deep teal, a little see-through looking down into it, so that the ground under
-/// shallow water shows faintly and a road through a ford can still be followed.
+/// it is a deep blue. Its alpha is how much of the ground deep water hides: `water.wgsl`
+/// lets more show through where it is shallow (`WATER_CLARITY`), so that a road through a
+/// ford can still be followed, and less at a glancing angle.
 /// `water.wgsl` makes it less see-through at a glancing angle.
-const WATER_COLOR: Color = Color::srgba(0.04, 0.26, 0.34, 0.75);
-/// The flat water's (`WaterSettings::flat`) alpha, which has no glancing angle to make it
-/// less see-through, so is a little less see-through everywhere.
-const FLAT_WATER_ALPHA: f32 = 0.85;
+pub(super) const WATER_COLOR: Color = Color::srgba(0.03, 0.2, 0.4, 0.98);
+/// The flat water's (`WaterSettings::flat`) alpha, the same at every depth and angle:
+/// it has none of `water.wgsl`.
+const FLAT_WATER_ALPHA: f32 = 0.96;
 
 /// How far the patch of moving water round the camera reaches, in metres along a side,
 /// and how far apart its vertices are. Closer vertices shape shorter waves; the shortest
@@ -65,10 +77,8 @@ pub(super) struct WaterWaves {
     /// The ripples (`ShaderRipples`), in a buffer that both materials share.
     #[storage(100, read_only)]
     pub(super) ripples: Handle<ShaderBuffer>,
-    /// The colour of the sky, in linear light, which the water mirrors at a glancing angle.
-    /// There is no picture of the sky for it to mirror, only its colour.
     #[uniform(101)]
-    pub(super) sky: Vec4,
+    pub(super) mirroring: Mirroring,
     #[uniform(102)]
     pub(super) wind: WindUniform,
     /// Where the map of the water's depth lies, and the map, for the shore.
@@ -76,6 +86,25 @@ pub(super) struct WaterWaves {
     pub(super) shore: ShoreUniform,
     #[texture(104, filterable = false)]
     pub(super) depths: Handle<Image>,
+}
+
+/// What the water mirrors at a glancing angle, as `water.wgsl` reads it.
+#[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
+pub(super) struct Mirroring {
+    /// The colour of the sky, in linear light. There is no picture of the sky for it to
+    /// mirror, only its colour.
+    sky: Vec4,
+    /// 1 to mirror the scenery as well (`WaterSettings::reflections`), 0 for only the sky.
+    scenery: u32,
+}
+
+impl Mirroring {
+    fn new(sky: Option<&ClearColor>, settings: &WaterSettings) -> Self {
+        Self {
+            sky: sky.map_or(Color::WHITE, |sky| sky.0).to_linear().to_vec4(),
+            scenery: settings.reflections as u32,
+        }
+    }
 }
 
 /// The buffer the water's materials read the ripples from, and what was last written to it.
@@ -116,7 +145,36 @@ impl MaterialExtension for WaterWaves {
     fn deferred_fragment_shader() -> ShaderRef {
         SHADER_PATH.into()
     }
+
+    /// Leaves out the standard material's own light through glass, which only
+    /// `TRANSMISSIVE_PASS` turns on: it blurs the picture behind with many samples, and
+    /// `water.wgsl` reads the picture itself.
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            fragment.shader_defs.retain(|def| {
+                let (ShaderDefVal::Bool(name, _)
+                | ShaderDefVal::Int(name, _)
+                | ShaderDefVal::UInt(name, _)) = def;
+                !matches!(
+                    name.as_str(),
+                    "STANDARD_MATERIAL_SPECULAR_TRANSMISSION"
+                        | "STANDARD_MATERIAL_DIFFUSE_OR_SPECULAR_TRANSMISSION"
+                )
+            });
+        }
+        Ok(())
+    }
 }
+
+/// The standard material's light through glass, which puts it in Bevy's transmissive pass,
+/// so that the picture drawn so far is copied for `water.wgsl` to read. As little as can
+/// be: `WaterWaves::specialize` leaves the glass out, and the shader sets it to none.
+const TRANSMISSIVE_PASS: f32 = 1e-4;
 
 /// Where `embedded_asset!` puts `water.wgsl`: the crate's name, then the path below `src`.
 const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/water/water.wgsl";
@@ -128,6 +186,7 @@ pub(super) fn spawn_water(
     mut commands: Commands,
     track: Res<Track>,
     sky: Option<Res<ClearColor>>,
+    settings: Res<WaterSettings>,
     wind: Option<Res<Wind>>,
     // All absent in a headless app, which has no use for looks.
     meshes: Option<ResMut<Assets<Mesh>>>,
@@ -176,7 +235,9 @@ pub(super) fn spawn_water(
         materials.add(WaterMaterial {
             base: StandardMaterial {
                 base_color: WATER_COLOR,
-                alpha_mode: AlphaMode::Blend,
+                // Drawn solid: `water.wgsl` mixes in what is under the water itself.
+                alpha_mode: AlphaMode::Opaque,
+                specular_transmission: TRANSMISSIVE_PASS,
                 // Smooth, so that the sun glints off the waves that the shader makes. Little
                 // reflectance, since the sky it should mirror is not there to be: it would
                 // mirror a plain grey. `water.wgsl` mirrors the sky's colour instead.
@@ -189,11 +250,7 @@ pub(super) fn spawn_water(
             },
             extension: WaterWaves {
                 ripples: ripples.clone(),
-                sky: sky
-                    .as_ref()
-                    .map_or(Color::WHITE, |sky| sky.0)
-                    .to_linear()
-                    .to_vec4(),
+                mirroring: Mirroring::new(sky.as_deref(), &settings),
                 wind: WindUniform::new(wind, patch),
                 shore,
                 depths: depths.clone(),
@@ -202,7 +259,7 @@ pub(super) fn spawn_water(
     };
     let (sheet_material, patch_material) = (material(false), material(true));
 
-    let size = track.heights.size();
+    let size = super::water_width(&track);
     let sheet_squares = (size / SHEET_SPACING).ceil() as u32;
     commands.entity(sheet).insert((
         Mesh3d(
@@ -281,6 +338,29 @@ pub(super) fn show_waves(
     {
         data.set_data(sent.clone());
         buffer.sent = sent;
+    }
+}
+
+/// Gives the water what it mirrors as it is now, when it has changed: the sky's colour,
+/// and whether it mirrors the scenery. The water is spawned before whoever lights the sky
+/// has set it for the race, and the sky changes in the race too (lightning): a sky kept
+/// from the spawn left the water mirroring the day at night.
+pub(super) fn mirror(
+    sky: Option<Res<ClearColor>>,
+    settings: Res<WaterSettings>,
+    surfaces: Query<&MeshMaterial3d<WaterMaterial>>,
+    mut materials: ResMut<Assets<WaterMaterial>>,
+) {
+    let mirroring = Mirroring::new(sky.as_deref(), &settings);
+    for surface in &surfaces {
+        // Compared first: changing a material sends all of it to the GPU again.
+        if materials
+            .get(&surface.0)
+            .is_some_and(|material| material.extension.mirroring != mirroring)
+            && let Some(mut material) = materials.get_mut(&surface.0)
+        {
+            material.extension.mirroring = mirroring;
+        }
     }
 }
 
