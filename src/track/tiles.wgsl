@@ -12,9 +12,8 @@
 // heights (`track/shading.rs`), covering the whole track. With `ground.lit_smoothly` set, each
 // pixel is lit by the normal there instead of by its flat triangle's.
 //
-// It can also carry a map of its cells (`track/blend.rs`). With `ground.blend_width` above
-// 0, a pixel near the edge of its cell fades into the tile across it, blurred
-// (`blend_ground_edges`).
+// It can also carry a map of its cells (`track/blend.rs`). With `ground.fade` above 0, the
+// tiles of two cells fade into each other across the line between them (`faded_ground`).
 //
 // With `lighting.simple` set, a lit material is lit the cheap way (`simple_lighting`): the
 // sun, its shadows and the light from all round, on a plain matte surface. No shine, no
@@ -58,9 +57,9 @@ struct GroundShading {
     lit_smoothly: u32,
     // Cells along each side of the track.
     cells: u32,
-    // How far into a cell its neighbours' tiles are faded in, as a share of its side. 0
-    // for not at all.
-    blend_width: f32,
+    // How far into a cell, from each edge, the tile across it is faded in, in cells. 0 for
+    // not at all.
+    fade: f32,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<uniform> ground: GroundShading;
 
@@ -96,91 +95,53 @@ fn ground_cell(at: vec2<i32>) -> Cell {
     return Cell(i32(round(first.x)), first.yz, second.xy, second.zw);
 }
 
-// The tile of the cell `at` drawn at `place` (in cells from the track's corner). Where
-// `place` is just across one or two of the cell's edges, the tile is mirrored back across
-// them, so that at the edge it shows the same colours as it does in its own cell. `ddx`
-// and `ddy` are how `place` changes from pixel to pixel: given, because which cell a
-// pixel reads differs from its neighbours', and the graphics card can't work them out
-// itself. Larger ones read a smaller, blurrier copy of the tile.
-fn tile_at(cell: Cell, at: vec2<i32>, place: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec4<f32> {
-    var local = place - vec2<f32>(at);
-    var flip = vec2<f32>(1.0);
-    if local.x < 0.0 {
-        local.x = -local.x;
-        flip.x = -1.0;
-    } else if local.x > 1.0 {
-        local.x = 2.0 - local.x;
-        flip.x = -1.0;
-    }
-    if local.y < 0.0 {
-        local.y = -local.y;
-        flip.y = -1.0;
-    } else if local.y > 1.0 {
-        local.y = 2.0 - local.y;
-        flip.y = -1.0;
-    }
+// Cell `cell`'s tile at `local`, its place in the cell from 0 to 1 across X and Z. `ddx`
+// and `ddy` are how the place in cells changes from pixel to pixel: given, because which
+// cell a pixel reads differs from its neighbours', and the graphics card can't work them
+// out itself.
+fn tile_in(cell: Cell, local: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec4<f32> {
     let uv = cell.origin + cell.along_x * local.x + cell.along_z * local.y;
-    let gx = ddx * flip;
-    let gy = ddy * flip;
     return textureSampleGrad(
         tiles, tiles_sampler, uv, cell.tile,
-        cell.along_x * gx.x + cell.along_z * gx.y,
-        cell.along_x * gy.x + cell.along_z * gy.y,
+        cell.along_x * ddx.x + cell.along_z * ddx.y,
+        cell.along_x * ddy.x + cell.along_z * ddy.y,
     );
 }
 
-// How much blurrier the tiles are at a cell's edge than in its middle, as how many times
-// further apart the texels they are read from are. Each doubling is one mipmap smaller.
-// 4 is two mipmaps: soft, but the tiles' patterns still show. 1 for no blur, only the
-// fade. Without mipmaps there are no smaller copies, and only the fade shows.
-const BLEND_BLUR: f32 = 4.0;
-
 // The colour of the ground at `world` (X and Z, in metres), given `own`, the colour of the
-// pixel's own tile there. Near an edge of its cell, the tile across it is faded in, half
-// and half at the edge and to nothing `ground.blend_width` into the cell, and all of them
-// are read blurred. Near a corner, the cell along X is faded in first, then the row of
-// cells along Z, so that all four cells round a corner agree about it whichever one the
-// pixel is in.
-fn blend_ground_edges(own: vec4<f32>, world: vec2<f32>) -> vec4<f32> {
+// pixel's own tile there. Within `ground.fade` of the edge of its cell, it is faded into
+// the tile across that edge, half and half on the edge, so the line between two cells is
+// soft instead of hard. The tile across is read at its own edge, stretched the little way
+// past it. Near a corner, the tile across the edge along X is faded in, then the one
+// across the edge along Z. Off the track a cell's neighbour is itself.
+fn faded_ground(own: vec4<f32>, world: vec2<f32>) -> vec4<f32> {
     let cells = i32(ground.cells);
     let place = (world / ground.size + 0.5) * f32(ground.cells);
     // Here, before the branches below that differ from pixel to pixel.
     let ddx = dpdx(place);
     let ddy = dpdy(place);
 
-    let at = clamp(vec2<i32>(floor(place)), vec2<i32>(0), vec2<i32>(cells - 1));
-    let within = place - vec2<f32>(at);
-    let upper = within >= vec2<f32>(0.5);
-    let from_edge = select(within, 1.0 - within, upper);
-    // 1 at an edge, 0 from `blend_width` in.
-    let nearness = 1.0 - smoothstep(vec2<f32>(0.0), vec2<f32>(ground.blend_width), from_edge);
-    if all(nearness <= vec2<f32>(0.0)) {
+    let last = vec2<i32>(cells - 1);
+    let at = clamp(vec2<i32>(floor(place)), vec2<i32>(0), last);
+    let local = place - vec2<f32>(at);
+    let upper = local >= vec2<f32>(0.5);
+    let to_edge = select(local, 1.0 - local, upper);
+    if all(to_edge >= vec2<f32>(ground.fade)) {
         return own;
     }
-    let share = 0.5 * nearness;
-    let blur = mix(1.0, BLEND_BLUR, max(nearness.x, nearness.y));
-    let blur_x = ddx * blur;
-    let blur_y = ddy * blur;
-
-    // Across the nearer edge along X (b), the nearer one along Z (c), and the corner (d).
-    // Off the track, a cell's neighbour is itself, mirrored.
     let toward = select(vec2<i32>(-1), vec2<i32>(1), upper);
-    let b_at = clamp(at + vec2<i32>(toward.x, 0), vec2<i32>(0), vec2<i32>(cells - 1));
-    let c_at = clamp(at + vec2<i32>(0, toward.y), vec2<i32>(0), vec2<i32>(cells - 1));
-    let d_at = clamp(at + toward, vec2<i32>(0), vec2<i32>(cells - 1));
-
-    var row = tile_at(ground_cell(at), at, place, blur_x, blur_y);
-    if share.x > 0.0 {
-        row = mix(row, tile_at(ground_cell(b_at), b_at, place, blur_x, blur_y), share.x);
+    var color = own;
+    if to_edge.x < ground.fade {
+        let across = clamp(at + vec2<i32>(toward.x, 0), vec2<i32>(0), last);
+        let there = clamp(place - vec2<f32>(across), vec2<f32>(0.0), vec2<f32>(1.0));
+        color = mix(color, tile_in(ground_cell(across), there, ddx, ddy), 0.5 * (1.0 - to_edge.x / ground.fade));
     }
-    if share.y > 0.0 {
-        var other_row = tile_at(ground_cell(c_at), c_at, place, blur_x, blur_y);
-        if share.x > 0.0 {
-            other_row = mix(other_row, tile_at(ground_cell(d_at), d_at, place, blur_x, blur_y), share.x);
-        }
-        row = mix(row, other_row, share.y);
+    if to_edge.y < ground.fade {
+        let across = clamp(at + vec2<i32>(0, toward.y), vec2<i32>(0), last);
+        let there = clamp(place - vec2<f32>(across), vec2<f32>(0.0), vec2<f32>(1.0));
+        color = mix(color, tile_in(ground_cell(across), there, ddx, ddy), 0.5 * (1.0 - to_edge.y / ground.fade));
     }
-    return row;
+    return color;
 }
 
 #ifndef PREPASS_PIPELINE
@@ -234,8 +195,8 @@ fn fragment(
     let cycle = min(u32(round(in.uv_b.y)), 31u);
     let tile = i32(round(in.uv_b.x)) + i32(cycles.offsets[cycle / 4u][cycle % 4u]);
     var tile_color = textureSample(tiles, tiles_sampler, in.uv, tile);
-    if ground.blend_width > 0.0 {
-        tile_color = blend_ground_edges(tile_color, in.world_position.xz);
+    if ground.fade > 0.0 {
+        tile_color = faded_ground(tile_color, in.world_position.xz);
     }
     pbr_input.material.base_color *= tile_color;
 #endif

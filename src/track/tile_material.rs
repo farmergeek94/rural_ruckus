@@ -54,7 +54,7 @@ pub struct TileTextures {
     #[uniform(106)]
     pub lighting: TileLighting,
     /// For the ground only: its cells' tiles, from `track/blend.rs`. Used when
-    /// `ground.blend_width` says so. Read texel by texel, so it is never filtered.
+    /// `ground.fade` says so. Read texel by texel, so it is never filtered.
     #[texture(107, filterable = false)]
     pub ground_cells: Option<Handle<Image>>,
 }
@@ -110,9 +110,9 @@ pub struct GroundShading {
     pub lit_smoothly: u32,
     /// Ground cells along each side of the track, in `ground_cells`.
     pub cells: u32,
-    /// How far into a cell, from each edge, the tile across it is faded in, as a share of
-    /// the cell's side. 0 to leave every tile's edge hard, as MTM2 does.
-    pub blend_width: f32,
+    /// How far into a cell, from each edge, the tile across the edge is faded in, in cells
+    /// (`track/blend.rs`). 0 to leave the line between cells hard, as MTM2 does.
+    pub fade: f32,
 }
 
 impl MaterialExtension for TileTextures {

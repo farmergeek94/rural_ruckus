@@ -1105,7 +1105,7 @@ const OPTIONS: &[OptionLine] = &[
         key: "option.blend_ground",
         section: GRAPHICS,
         label: "Blended ground",
-        detail: "Fades and softens the ground's textures where they meet, instead of the hard edges that Monster Truck Madness 2 has. Costs time on the graphics card. On at Best quality. From the next race.",
+        detail: "Fades the ground's textures into each other where they meet, instead of the hard edges that Monster Truck Madness 2 has. Costs time on the graphics card. On at Best quality. From the next race.",
         values: &["Off", "On"],
         get: |options| options.track.blend_ground as usize,
         set: |options, value| options.track.blend_ground = value == 1,

@@ -80,10 +80,10 @@ pub struct TrackSettings {
     /// Creases too sharp to round off, such as the lip of a ramp over a cliff, stay sharp.
     /// Read as each race begins.
     pub smooth_terrain: bool,
-    /// Fades the textures of neighbouring ground cells into each other where they meet,
-    /// blurred a little (`blend`), where Monster Truck Madness 2 draws each cell's texture
-    /// edge to edge with a hard line between. Costs more texture reads for the pixels of
-    /// ground near the edge of a cell, and no time on the CPU while racing. On by default,
+    /// Fades the textures of two ground cells into each other across the line between them
+    /// (`blend`), where Monster Truck Madness 2 draws each cell's texture edge to edge with
+    /// a hard line between. Costs a second texture read for the pixels of ground on the
+    /// line, and no time on the CPU while racing. On by default,
     /// as part of the front end's Best quality; every lower level turns it off. Read as each
     /// race begins.
     pub blend_ground: bool,
@@ -276,7 +276,7 @@ fn spawn_terrain(
                 .then(|| images.add(blend::cell_map(ground)));
             if cells.is_some() {
                 shading.cells = ground.cells_per_side() as u32;
-                shading.blend_width = blend::BLEND_WIDTH;
+                shading.fade = blend::FADE * shading.cells as f32 / track.heights.size();
             }
             let material = tile_materials.add(TileMaterial {
                 base: surface.clone(),
