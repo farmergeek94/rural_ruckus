@@ -1,9 +1,12 @@
 //! The dirt that trucks throw up as they drive: clods off the tread, and dust.
 //!
 //! A tire on the ground throws dirt while it moves: more the faster it goes, the more it
-//! slides sideways, and the harder it is driven from slow, when it spins. Clods are small
-//! dark lumps, thrown up behind and out to the side, that tumble, fall, and are gone when
-//! they come down on the ground. Dust is big, faint puffs that rise a little, spread, and
+//! slides sideways, and the harder it is driven from slow, when it spins. Mud comes off the
+//! tread low on the back of the tire and goes the way the tread goes there: straight back,
+//! low, faster the faster the tread turns. A monster truck's tire is about
+//! 2 m high. Clods are dark lumps, up to the size of a football, that tumble, fall, and are
+//! gone when they come down on the ground; with each go small bits of splatter, the same
+//! shapes, which fly further. Dust is big, faint puffs that rise a little, spread, and
 //! fade, each drawn long behind its tire, back into the one before, so that the puffs run
 //! together in a stream. The dirt is the colour of the ground under the tire: the average
 //! of its tile on a track that has ground textures, plain brown on one that has not.
@@ -16,8 +19,8 @@
 //! water, ice and snow throw nothing.
 //!
 //! Each piece is a flat square turned to the camera, drawn only, which touches nothing.
-//! Clods and dust are two pools of particles (`crate::particles`), which the graphics card
-//! moves: here they are only thrown. Where the truck is comes from how it is drawn
+//! Clods, splatter and dust are three pools of particles (`crate::particles`), which the
+//! graphics card moves: here they are only thrown. Where the truck is comes from how it is drawn
 //! (`TruckVisual`), so that the dirt leaves the tires where they are seen; how fast it
 //! goes, from its body.
 //!
@@ -66,20 +69,30 @@ const DUST_TRAIL: f32 = 1.5;
 const DUST_MOST_TRAIL: f32 = 2.0;
 /// How fast a truck goes, in m/s, before its tires stop spinning at full throttle.
 const SPIN_SPEED: f32 = 8.0;
-/// The most clods, and the most puffs of dust, in the air at once, over all the trucks.
-/// Past it, no more are thrown until some have gone. Each is a square in a mesh, drawn
-/// whether it is in the air or not.
+/// The most clods, drops of splatter and puffs of dust in the air at once, over all the
+/// trucks. Past it, no more are thrown until some have gone. Each is a square in a mesh,
+/// drawn whether it is in the air or not.
 const CLOD_SLOTS: usize = 1200;
+const SPLATTER_SLOTS: usize = 2400;
 const DUST_SLOTS: usize = 2000;
 
-/// How big a clod is, in metres of radius: the smallest and the largest.
-const CLOD_SIZE: [f32; 2] = [0.04, 0.11];
-/// How fast a clod leaves the tire, for each m/s the tire goes over the ground, straight
-/// up: the least and the most. A truck at 10 m/s throws them a few tenths of a metre up.
-const CLOD_LIFT: [f32; 2] = [0.08, 0.2];
-/// How fast a spinning tire throws clods back, at full throttle, in m/s: the least and the
-/// most.
-const CLOD_KICK: [f32; 2] = [1.0, 4.0];
+/// How big a clod of mud is, in metres of radius for each metre of its tire's radius: the
+/// smallest and the largest. A monster truck's tire, about 1 m, throws lumps from the size
+/// of a fist to that of a football.
+const CLOD_SIZE: [f32; 2] = [0.05, 0.16];
+/// Where round the back of its tire mud comes off the tread, in radians up from the bottom:
+/// low, just behind where the tread leaves the ground. It goes the way the tread goes there,
+/// which is back and a little up: higher throws it up, towards a rooster tail.
+const MUD_RELEASE: [f32; 2] = [0.08, 0.4];
+/// How much of the tread's speed a clod keeps as it comes off, the least and the most: mud
+/// slips on the tread. Splatter, which is thin, keeps more.
+const CLOD_FLING: [f32; 2] = [0.4, 0.8];
+const SPLATTER_FLING: [f32; 2] = [0.6, 1.0];
+/// How fast a tire's tread goes round its hub at full throttle from standing, where it
+/// spins, in m/s; and the fastest that throws mud, in m/s, so that at speed the mud does not
+/// go out of sight.
+const SPIN_TREAD: f32 = 12.0;
+const MOST_FLING: f32 = 14.0;
 /// How long a clod may stay up, in seconds, if it doesn't come down on the ground first,
 /// and how fast it tumbles at the most, in radians a second.
 const CLOD_LIFE: f32 = 2.0;
@@ -88,6 +101,15 @@ const CLOD_TUMBLE: f32 = 12.0;
 const CLOD_SHADE: f32 = 0.6;
 /// How much of its speed through the air a clod loses each second.
 const CLOD_DRAG: f32 = 0.3;
+/// How many bits of splatter a tire throws with each clod: small bits of wet mud, the same
+/// shapes as the clods. Drawn as streaks, they looked unnatural.
+const SPLATTER_PER_CLOD: usize = 2;
+/// How big a bit of splatter is, in metres of radius: the smallest and the largest.
+const SPLATTER_SIZE: [f32; 2] = [0.03, 0.07];
+/// How long a bit of splatter may stay up, in seconds, and how much of its speed through
+/// the air it loses each second.
+const SPLATTER_LIFE: f32 = 1.2;
+const SPLATTER_DRAG: f32 = 0.6;
 
 /// How big a puff of dust is when it is thrown, in metres of radius, and how fast it
 /// spreads, in metres of radius each second.
@@ -173,9 +195,16 @@ pub struct Dirt;
 #[derive(Component)]
 struct Clods;
 
+/// On the pool of splatter.
+#[derive(Component)]
+struct Splatter;
+
 /// On the pool of dust.
 #[derive(Component)]
 struct Dust;
+
+/// The pool marked `A`, and not `B` or `C`, so that the three can be borrowed at once.
+type Only<A, B, C> = (With<A>, Without<B>, Without<C>);
 
 /// How clods move: thrown, and pulled down, until they come down on the ground.
 const CLOD_MOTION: Motion = Motion {
@@ -186,6 +215,22 @@ const CLOD_MOTION: Motion = Motion {
     spread: 0.0,
     fade_from: CLOD_LIFE,
     shrink_from: CLOD_LIFE,
+    shapes: SHAPES_ACROSS,
+    soft: 0.0,
+    exposure: 0.0,
+    near_camera: NEAR_CAMERA,
+};
+
+/// How splatter moves: thrown, and pulled down, until it comes down on the ground.
+const SPLATTER_MOTION: Motion = Motion {
+    gravity: GRAVITY,
+    drag: SPLATTER_DRAG,
+    life: SPLATTER_LIFE,
+    lands: true,
+    spread: 0.0,
+    fade_from: SPLATTER_LIFE,
+    shrink_from: SPLATTER_LIFE,
+    shapes: SHAPES_ACROSS,
     soft: 0.0,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
@@ -200,12 +245,13 @@ const DUST_MOTION: Motion = Motion {
     spread: DUST_SPREAD,
     fade_from: DUST_HOLD,
     shrink_from: DUST_LIFE,
+    shapes: SHAPES_ACROSS,
     soft: DUST_SOFT,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
 };
 
-/// What dirt is drawn with: one picture of each kind.
+/// What dirt is drawn with: the clods' shapes, which splatter shares, and the dust's.
 #[derive(Resource)]
 struct DirtLooks {
     clod: Handle<Image>,
@@ -223,8 +269,8 @@ struct Owed([f32; 4]);
 
 fn make_looks(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(DirtLooks {
-        clod: images.add(picture(clod_opacity)),
-        dust: images.add(picture(dust_opacity)),
+        clod: images.add(picture(SHAPES_ACROSS, clod_opacity)),
+        dust: images.add(picture(SHAPES_ACROSS, dust_opacity)),
     });
 }
 
@@ -235,18 +281,20 @@ fn spawn_dirt(
     looks: Res<DirtLooks>,
     mut assets: particles::PoolAssets,
 ) {
-    for (slots, motion, picture, is_clods) in [
-        (CLOD_SLOTS, CLOD_MOTION, &looks.clod, true),
-        (DUST_SLOTS, DUST_MOTION, &looks.dust, false),
-    ] {
+    let mut spawn = |slots, motion, picture: &Handle<Image>| {
         let pool = particles::pool(&mut assets, slots, motion, Air::STILL, picture.clone());
-        let mut pool = commands.spawn((pool, Dirt, DespawnOnExit(GameState::Racing)));
-        if is_clods {
-            pool.insert(Clods);
-        } else {
-            pool.insert(Dust);
-        }
-    }
+        commands
+            .spawn((pool, Dirt, DespawnOnExit(GameState::Racing)))
+            .id()
+    };
+    let pools = [
+        spawn(CLOD_SLOTS, CLOD_MOTION, &looks.clod),
+        spawn(SPLATTER_SLOTS, SPLATTER_MOTION, &looks.clod),
+        spawn(DUST_SLOTS, DUST_MOTION, &looks.dust),
+    ];
+    commands.entity(pools[0]).insert(Clods);
+    commands.entity(pools[1]).insert(Splatter);
+    commands.entity(pools[2]).insert(Dust);
     let colors = match &track.ground {
         Some(ground) => ground
             .tiles
@@ -298,15 +346,18 @@ fn throw_dirt(
         &TruckConfig,
         Option<&TruckInput>,
     )>,
-    mut clods: Query<&mut Particles, (With<Clods>, Without<Dust>)>,
-    mut dust: Query<&mut Particles, (With<Dust>, Without<Clods>)>,
+    mut clods: Query<&mut Particles, Only<Clods, Splatter, Dust>>,
+    mut splatter: Query<&mut Particles, Only<Splatter, Clods, Dust>>,
+    mut dust: Query<&mut Particles, Only<Dust, Clods, Splatter>>,
     mut owed: Local<EntityHashMap<Owed>>,
     mut random: Local<Random>,
 ) {
     if !settings.on {
         return;
     }
-    let (Ok(mut clods), Ok(mut dust)) = (clods.single_mut(), dust.single_mut()) else {
+    let (Ok(mut clods), Ok(mut splatter), Ok(mut dust)) =
+        (clods.single_mut(), splatter.single_mut(), dust.single_mut())
+    else {
         return;
     };
     let dt = time.delta_secs();
@@ -353,11 +404,14 @@ fn throw_dirt(
             let (clod_color, dust_color) = dirt_colors(ground_rgb);
             // Behind the tire, where the tread leaves the ground, on its outside.
             let outwards = right * rest.x.signum();
-            let back = if moving.dot(forward) >= 0.0 {
-                -forward
+            // The way the tire rolls: from the throttle when it is too slow to tell.
+            let rolls_forward = if speed > 1.0 {
+                moving.dot(forward) >= 0.0
             } else {
-                forward
+                throttle >= 0.0
             };
+            let back = if rolls_forward { -forward } else { forward };
+            let tread = tread_speed(speed, throttle);
             let at = bottom
                 + back * config.wheel_radius * 0.5
                 + outwards * config.wheel_width * 0.3
@@ -378,18 +432,54 @@ fn throw_dirt(
                         // Back from the tire: one that reached forward came in over the
                         // tire, which flickered as each one appeared.
                         trail: dust_trail(moving, rate),
+                        shape: random.shape(),
                     };
                     dust.throw(now, puff, ground)
                 } else {
+                    // Off the tread low on the back of the tire, across its width.
+                    let release = random.between(MUD_RELEASE[0], MUD_RELEASE[1]);
+                    let across = outwards * config.wheel_width * random.between(-0.4, 0.5);
+                    let (off_hub, velocity) = fling(
+                        release,
+                        config.wheel_radius,
+                        moving,
+                        back,
+                        up,
+                        tread * random.between(CLOD_FLING[0], CLOD_FLING[1]),
+                    );
                     let clod = Particle {
-                        at,
-                        velocity: clod_velocity(&mut random, moving, back, outwards, throttle),
-                        size: random.between(CLOD_SIZE[0], CLOD_SIZE[1]),
+                        at: hub + off_hub + across,
+                        velocity,
+                        size: config.wheel_radius * random.between(CLOD_SIZE[0], CLOD_SIZE[1]),
                         turned: random.between(0.0, std::f32::consts::TAU),
                         turning: random.between(-CLOD_TUMBLE, CLOD_TUMBLE),
                         color: clod_color,
                         trail: Vec3::ZERO,
+                        shape: random.shape(),
                     };
+                    for _ in 0..SPLATTER_PER_CLOD {
+                        let release = random.between(MUD_RELEASE[0], MUD_RELEASE[1]);
+                        let across = outwards * config.wheel_width * random.between(-0.5, 0.5);
+                        let (off_hub, velocity) = fling(
+                            release,
+                            config.wheel_radius,
+                            moving,
+                            back,
+                            up,
+                            tread * random.between(SPLATTER_FLING[0], SPLATTER_FLING[1]),
+                        );
+                        let drop = Particle {
+                            at: hub + off_hub + across,
+                            velocity,
+                            size: random.between(SPLATTER_SIZE[0], SPLATTER_SIZE[1]),
+                            turned: random.between(0.0, std::f32::consts::TAU),
+                            turning: random.between(-CLOD_TUMBLE, CLOD_TUMBLE),
+                            color: clod_color,
+                            trail: Vec3::ZERO,
+                            shape: random.shape(),
+                        };
+                        splatter.throw(now, drop, ground);
+                    }
                     clods.throw(now, clod, ground)
                 };
                 if !thrown {
@@ -446,68 +536,124 @@ fn dust_trail(moving: Vec3, rate: f32) -> Vec3 {
     -along.normalize_or_zero() * (gap * DUST_TRAIL).min(DUST_MOST_TRAIL)
 }
 
-/// How fast a clod leaves a tire that is going at `moving`, with `back` pointing behind
-/// the way it goes and `outwards` away from the truck's side, at `throttle`: on with the
-/// truck at some of its speed, so that it falls behind; out to the side; a little up; and,
-/// the harder the tire is driven, kicked back.
-fn clod_velocity(
-    random: &mut Random,
-    moving: Vec3,
-    back: Vec3,
-    outwards: Vec3,
-    throttle: f32,
-) -> Vec3 {
-    let along = moving.with_y(0.0);
-    let speed = along.length();
-    along * random.between(0.2, 0.6)
-        + back * random.between(CLOD_KICK[0], CLOD_KICK[1]) * throttle.abs()
-        + outwards * random.between(0.2, 1.2)
-        + Vec3::Y * (random.between(0.8, 1.6) + speed * random.between(CLOD_LIFT[0], CLOD_LIFT[1]))
+/// How fast a tire's tread goes round its hub, in m/s, going `speed` m/s over the ground at
+/// `throttle` (-1 to 1): as fast as the tire rolls, and faster the harder it is driven from
+/// slow, where it spins. No faster than `MOST_FLING`.
+fn tread_speed(speed: f32, throttle: f32) -> f32 {
+    let spin = throttle.abs() * (1.0 - speed / SPIN_SPEED).max(0.0) * SPIN_TREAD;
+    (speed + spin).min(MOST_FLING)
 }
 
-/// How many texels the pictures have along a side.
-const PICTURE_SIZE: u32 = 32;
+/// Where mud comes off a tire, from its hub, and how fast it goes: `angle` radians round
+/// the back from the bottom, off a tire of `radius` metres whose hub goes at `moving`, with
+/// `back` pointing behind the way it rolls and `up` up from its hub, and whose tread
+/// throws it at `thrown` m/s round the hub. It goes the way the tread goes there.
+fn fling(angle: f32, radius: f32, moving: Vec3, back: Vec3, up: Vec3, thrown: f32) -> (Vec3, Vec3) {
+    let (sin, cos) = angle.sin_cos();
+    let off_hub = (back * sin - up * cos) * radius;
+    let tread_way = back * cos + up * sin;
+    (off_hub, moving + tread_way * thrown)
+}
 
-/// A white picture, as solid as `opacity` says at each point of it, from -1 to 1 across
-/// and up.
-fn picture(opacity: fn(Vec2) -> f32) -> Image {
+/// How many texels each picture has along a side.
+const PICTURE_SIZE: u32 = 32;
+/// How many shapes of clod, and of puff of dust, along each side of their pictures: each
+/// clod or puff is one of `SHAPES_ACROSS` squared, at random, so that not all look alike.
+const SHAPES_ACROSS: u32 = 2;
+
+/// A white picture of `across` by `across` shapes, each as solid as `opacity` says at each
+/// point of it, from -1 to 1 across and up, for that shape, counted across the rows from the
+/// top left.
+fn picture(across: u32, opacity: fn(Vec2, u32) -> f32) -> Image {
+    let side = PICTURE_SIZE * across;
     Image::new(
         Extent3d {
-            width: PICTURE_SIZE,
-            height: PICTURE_SIZE,
+            width: side,
+            height: side,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        picture_texels(PICTURE_SIZE, opacity),
+        picture_texels(PICTURE_SIZE, across, opacity),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     )
 }
 
-fn picture_texels(size: u32, opacity: fn(Vec2) -> f32) -> Vec<u8> {
+fn picture_texels(size: u32, across: u32, opacity: fn(Vec2, u32) -> f32) -> Vec<u8> {
     let middle = size as f32 / 2.0;
-    let mut texels = Vec::with_capacity((size * size * 4) as usize);
-    for row in 0..size {
-        for col in 0..size {
+    let side = size * across;
+    let mut texels = Vec::with_capacity((side * side * 4) as usize);
+    for row in 0..side {
+        for col in 0..side {
+            let shape = (row / size) * across + col / size;
+            let (row, col) = (row % size, col % size);
             let point = Vec2::new(col as f32 + 0.5 - middle, middle - row as f32 - 0.5) / middle;
-            let alpha = (opacity(point).clamp(0.0, 1.0) * 255.0).round() as u8;
+            let alpha = (opacity(point, shape).clamp(0.0, 1.0) * 255.0).round() as u8;
             texels.extend_from_slice(&[255, 255, 255, alpha]);
         }
     }
     texels
 }
 
-/// A clod: a lump, round but lopsided, with a ragged edge.
-fn clod_opacity(point: Vec2) -> f32 {
+/// A clod: a lump with a ragged edge, round, long or knobbly, or an angular stone.
+fn clod_opacity(point: Vec2, shape: u32) -> f32 {
+    // How much longer than wide, how many bumps round its edge, big and small, and where
+    // they start, in radians.
+    let (squash, bumps, start) = match shape % 4 {
+        0 => (1.0, [3.0, 7.0], [0.0, 1.0]),
+        1 => (1.35, [2.0, 5.0], [1.3, 0.4]),
+        2 => (1.1, [5.0, 9.0], [2.1, 2.9]),
+        _ => return stone_opacity(point),
+    };
+    // Kept inside its square however long it is.
+    let point = Vec2::new(point.x * squash, point.y / squash) * squash;
     let angle = point.y.atan2(point.x);
-    let edge = 0.75 + 0.12 * (3.0 * angle).sin() + 0.06 * (7.0 * angle + 1.0).sin();
+    let edge = 0.72
+        + 0.12 * (bumps[0] * angle + start[0]).sin()
+        + 0.06 * (bumps[1] * angle + start[1]).sin();
     1.0 - smoothstep(edge - 0.1, edge, point.length())
 }
 
-/// Dust: thickest in the middle and thinning all the way out.
-fn dust_opacity(point: Vec2) -> f32 {
-    let thinning = (1.0 - point.length_squared()).max(0.0);
-    thinning * thinning
+/// An angular stone: five flat sides, a little lopsided.
+fn stone_opacity(point: Vec2) -> f32 {
+    const SIDES: f32 = 5.0;
+    let point = Vec2::new(point.x * 1.15, point.y / 1.15);
+    let sector = std::f32::consts::TAU / SIDES;
+    let angle = (point.y.atan2(point.x) + 0.4).rem_euclid(sector) - sector / 2.0;
+    let edge = 0.8 * (sector / 2.0).cos() / angle.cos();
+    1.0 - smoothstep(edge - 0.06, edge, point.length())
+}
+
+/// Dust: a soft round puff, thickest in the middle and thinning all the way out, or a
+/// billow of a few such puffs run together.
+fn dust_opacity(point: Vec2, shape: u32) -> f32 {
+    // Each puff of a shape: where its middle is and its radius, inside the square.
+    const BILLOWS: [[(Vec2, f32); 3]; 4] = [
+        [(Vec2::ZERO, 1.0), (Vec2::ZERO, 0.0), (Vec2::ZERO, 0.0)],
+        [
+            (Vec2::new(0.05, 0.05), 0.7),
+            (Vec2::new(-0.4, -0.25), 0.5),
+            (Vec2::new(0.45, -0.3), 0.45),
+        ],
+        [
+            (Vec2::new(-0.1, 0.0), 0.72),
+            (Vec2::new(0.4, 0.35), 0.5),
+            (Vec2::new(0.3, -0.45), 0.4),
+        ],
+        [
+            (Vec2::new(0.0, -0.1), 0.7),
+            (Vec2::new(-0.35, 0.45), 0.45),
+            (Vec2::new(0.5, 0.2), 0.45),
+        ],
+    ];
+    BILLOWS[shape as usize % BILLOWS.len()]
+        .iter()
+        .filter(|(_, radius)| *radius > 0.0)
+        .map(|(middle, radius)| {
+            let thinning = (1.0 - ((point - *middle) / *radius).length_squared()).max(0.0);
+            thinning * thinning
+        })
+        .fold(0.0, f32::max)
 }
 
 fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
@@ -535,6 +681,12 @@ impl Random {
 
     fn between(&mut self, low: f32, high: f32) -> f32 {
         low + (high - low) * self.next()
+    }
+
+    /// One of the `SHAPES_ACROSS` squared shapes of a picture.
+    fn shape(&mut self) -> u32 {
+        let shapes = SHAPES_ACROSS * SHAPES_ACROSS;
+        ((self.next() * shapes as f32) as u32).min(shapes - 1)
     }
 }
 
@@ -583,24 +735,34 @@ mod tests {
     }
 
     #[test]
-    fn clods_go_up_out_and_fall_behind() {
-        let mut random = Random::default();
+    fn mud_comes_off_low_on_the_tire_and_goes_out_behind() {
         let moving = Vec3::new(0.0, 0.0, -10.0);
-        for _ in 0..100 {
-            let velocity = clod_velocity(&mut random, moving, Vec3::Z, Vec3::X, 1.0);
-            assert!(velocity.y > 0.0);
-            assert!(velocity.x > 0.0);
-            // Slower than the truck, so that it falls behind.
-            assert!(velocity.z > moving.z);
-            // Low: under a metre and a half up.
+        let (back, up) = (Vec3::Z, Vec3::Y);
+        let tread = tread_speed(10.0, 0.0);
+        assert_eq!(tread, 10.0);
+        for angle in MUD_RELEASE {
+            let thrown = tread * CLOD_FLING[1];
+            let (off_hub, velocity) = fling(angle, 1.0, moving, back, up, thrown);
+            // Behind the hub and low on the tire, going a little up, and slower than the
+            // truck: back more than up, from where the truck is.
+            assert!(off_hub.z > 0.0 && off_hub.y < -0.5, "{off_hub}");
+            assert!(velocity.y > 0.0, "{velocity}");
+            assert!(velocity.z - moving.z > velocity.y, "{velocity}");
+            // Low: under a metre up.
             assert!(
-                velocity.y * velocity.y / (2.0 * GRAVITY) < 1.5,
+                velocity.y * velocity.y / (2.0 * GRAVITY) < 1.0,
                 "{velocity}"
             );
         }
-        // A spinning tire kicks them back.
-        let still = clod_velocity(&mut random, Vec3::ZERO, Vec3::Z, Vec3::X, 1.0);
-        assert!(still.z > 0.0);
+        // The tread at the bottom of a tire that rolls is still on the ground.
+        let (_, still) = fling(0.0, 1.0, moving, back, up, tread);
+        assert!(still.length() < 1e-5, "{still}");
+        // A tire spun from standing throws it back.
+        let spun = tread_speed(0.0, 1.0);
+        assert_eq!(spun, SPIN_TREAD);
+        let (_, velocity) = fling(0.3, 1.0, Vec3::ZERO, back, up, spun * 0.6);
+        assert!(velocity.z > 0.0 && velocity.y > 0.0);
+        assert_eq!(tread_speed(100.0, 1.0), MOST_FLING);
     }
 
     #[test]
@@ -611,14 +773,28 @@ mod tests {
 
     #[test]
     fn pictures_are_solid_in_the_middle_and_clear_at_the_corners() {
-        for opacity in [clod_opacity as fn(Vec2) -> f32, dust_opacity] {
-            let texels = picture_texels(16, opacity);
-            let alpha = |col: usize, row: usize| texels[(row * 16 + col) * 4 + 3];
-            assert!(alpha(8, 8) > 200);
-            assert_eq!(alpha(0, 0), 0);
-            assert_eq!(alpha(15, 15), 0);
+        for opacity in [clod_opacity as fn(Vec2, u32) -> f32, dust_opacity] {
+            let texels = picture_texels(16, SHAPES_ACROSS, opacity);
+            let side = 16 * SHAPES_ACROSS as usize;
+            let alpha = |col: usize, row: usize| texels[(row * side + col) * 4 + 3];
+            // Every shape, each in its own square of the picture.
+            for (first_col, first_row) in [(0, 0), (16, 0), (0, 16), (16, 16)] {
+                let at = |col: usize, row: usize| alpha(first_col + col, first_row + row);
+                assert!(at(8, 8) > 200, "{first_col} {first_row}");
+                for corner in [(0, 0), (15, 0), (0, 15), (15, 15)] {
+                    assert_eq!(at(corner.0, corner.1), 0, "{first_col} {first_row}");
+                }
+            }
         }
         // A clod is solid most of the way out; dust thins all the way.
-        assert!(clod_opacity(Vec2::new(0.5, 0.0)) > dust_opacity(Vec2::new(0.5, 0.0)));
+        let halfway = Vec2::new(0.5, 0.0);
+        assert!(clod_opacity(halfway, 0) > dust_opacity(halfway, 0));
+        // The shapes differ.
+        let aside = Vec2::new(0.6, 0.0);
+        assert!(clod_opacity(aside, 0) > 0.9 && clod_opacity(aside, 1) == 0.0);
+        assert_ne!(
+            dust_opacity(Vec2::new(0.6, 0.3), 0),
+            dust_opacity(Vec2::new(0.6, 0.3), 2)
+        );
     }
 }

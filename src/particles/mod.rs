@@ -26,6 +26,9 @@
 //! the line, as the camera sees it, and no thinner, so that particles thrown along a path
 //! run together.
 //!
+//! A pool's picture can be a grid of pictures (`Motion::shapes`), of which each particle
+//! draws the one it is given (`Particle::shape`), so that not every particle looks the same.
+//!
 //! A pool's particles can fade out where they come near what is behind them
 //! (`Motion::soft`), so that one cut through by the ground or a truck has no hard edge.
 //! That needs the camera's depth prepass; without it they are cut off as before.
@@ -144,6 +147,9 @@ pub struct Motion {
     /// How old one is when it starts to shrink away, in seconds: it is gone at `life`. At
     /// `life` or later, it doesn't shrink.
     pub shrink_from: f32,
+    /// How many pictures along each side the pool's picture has, as a grid of them, of
+    /// which each particle draws its `shape`. 1 for one picture.
+    pub shapes: u32,
     /// How near what is behind it one starts to fade out, in metres, so that where the
     /// ground or a truck cuts through it there is no hard edge. At 0, it is cut off.
     pub soft: f32,
@@ -256,6 +262,9 @@ pub struct Particle {
     /// end of the line, as long as the line as the camera sees it, and no thinner. Zero for
     /// one as long as it is wide. Not for a streak.
     pub trail: Vec3,
+    /// Which of its pool's pictures it is drawn with, counted across the grid's rows from
+    /// the top left (see `Motion::shapes`).
+    pub shape: u32,
 }
 
 /// How the particles of a pool move, for `particles.wgsl`.
@@ -281,6 +290,7 @@ struct Slot {
     life: Vec2,
     turning: f32,
     trail: Vec3,
+    shape: u32,
 }
 
 impl Slot {
@@ -294,6 +304,7 @@ impl Slot {
             life: Vec2::from(life),
             turning: particle.turning,
             trail: particle.trail,
+            shape: particle.shape,
         }
     }
 }
@@ -338,6 +349,7 @@ struct MotionUniform {
     exposure: f32,
     near_camera: f32,
     soft: f32,
+    shapes: u32,
 }
 
 impl MotionUniform {
@@ -356,6 +368,7 @@ impl MotionUniform {
             exposure: motion.exposure,
             near_camera: motion.near_camera,
             soft: motion.soft,
+            shapes: motion.shapes,
         }
     }
 }
@@ -598,6 +611,7 @@ mod tests {
         spread: 0.0,
         fade_from: 1.6,
         shrink_from: 1.0,
+        shapes: 1,
         soft: 0.0,
         exposure: 0.04,
         near_camera: 6.0,
@@ -623,6 +637,7 @@ mod tests {
             turning: 0.0,
             color: LinearRgba::WHITE,
             trail: Vec3::ZERO,
+            shape: 0,
         }
     }
 
@@ -729,7 +744,7 @@ mod tests {
         assert_eq!(Slot::SHADER_SIZE.get(), 80);
         let shader = include_str!("particles.wgsl");
         let fields = [
-            "at", "size", "velocity", "turned", "color", "life", "turning", "trail",
+            "at", "size", "velocity", "turned", "color", "life", "turning", "trail", "shape",
         ];
         let mut from = shader.find("struct Slot {").expect("struct Slot");
         for field in fields {
@@ -757,6 +772,7 @@ mod tests {
             "exposure",
             "near_camera",
             "soft",
+            "shapes",
         ];
         let mut from = shader.find("struct Motion {").expect("struct Motion");
         for field in fields {

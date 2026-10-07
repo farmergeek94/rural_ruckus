@@ -48,6 +48,8 @@ struct Motion {
     near_camera: f32,
     // How near what is behind it one starts to fade out, in metres. At 0, it doesn't.
     soft: f32,
+    // How many pictures along each side the pool's picture has, as a grid of them.
+    shapes: u32,
 }
 
 // One particle, as `Slot` in `mod.rs` writes it.
@@ -65,6 +67,8 @@ struct Slot {
     turning: f32,
     // The line it trails along from where it is, in metres.
     trail: vec3<f32>,
+    // Which of the pool's pictures it draws, across the grid's rows from the top left.
+    shape: u32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> motion: Motion;
@@ -82,9 +86,6 @@ fn air_now(time: f32) -> vec3<f32> {
 fn vertex(mesh_vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
     out.world_normal = vec3(0.0, 1.0, 0.0);
-#ifdef VERTEX_UVS_A
-    out.uv = mesh_vertex.uv;
-#endif
 #ifdef VERTEX_UVS_B
     out.uv_b = mesh_vertex.uv_b;
 #endif
@@ -93,6 +94,13 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
 #endif
 
     let particle = slots[u32(mesh_vertex.uv_b.x)];
+#ifdef VERTEX_UVS_A
+    // Its own picture, of the grid of them in the pool's picture.
+    let shapes = max(motion.shapes, 1u);
+    let cell = particle.shape % (shapes * shapes);
+    let first = vec2(f32(cell % shapes), f32(cell / shapes));
+    out.uv = (mesh_vertex.uv + first) / f32(shapes);
+#endif
     let now = globals.time;
     let thrown = particle.life.x;
     let goes = particle.life.y;

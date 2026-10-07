@@ -140,6 +140,7 @@ const DROP_MOTION: Motion = Motion {
     spread: 0.0,
     fade_from: DROPLET_LIFE,
     shrink_from: DROPLET_LIFE * 2.0 / 3.0,
+    shapes: 1,
     soft: 0.0,
     exposure: EXPOSURE,
     near_camera: NEAR_CAMERA,
@@ -154,6 +155,7 @@ const MIST_MOTION: Motion = Motion {
     spread: MIST_SPREAD,
     fade_from: MIST_HOLD,
     shrink_from: MIST_LIFE,
+    shapes: 1,
     soft: 0.0,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
@@ -550,6 +552,7 @@ pub(super) fn throw_droplet(
         turning: 0.0,
         color: Color::srgba(SPRAY_COLOR.x, SPRAY_COLOR.y, SPRAY_COLOR.z, opacity).into(),
         trail: Vec3::ZERO,
+        shape: 0,
     };
     pool.throw(now, droplet, floor)
 }
