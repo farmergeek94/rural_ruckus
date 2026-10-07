@@ -5,15 +5,22 @@
 // the camera, this works out where the corner is, as `mod.rs` explains. A slot with no
 // particle in it now puts its four corners at one point, which draws nothing.
 //
-// The rest is the standard material's: the picture, the colour, and the fog.
+// The fragment is the standard material's, unlit: the picture, the colour, and the fog.
+// With the camera's depth prepass, it fades out near what is behind it.
 
 #import bevy_pbr::{
     mesh_view_bindings::{globals, view},
-    view_transformations::position_world_to_clip,
+    pbr_fragment::pbr_input_from_standard_material,
+    pbr_functions::{alpha_discard, main_pass_post_lighting_processing},
+    view_transformations::{depth_ndc_to_view_z, position_world_to_clip},
 }
 
+#ifdef DEPTH_PREPASS
+#import bevy_pbr::prepass_utils::prepass_depth
+#endif
+
 // Only the main pass: see-through things are not drawn in the prepass.
-#import bevy_pbr::forward_io::{Vertex, VertexOutput}
+#import bevy_pbr::forward_io::{FragmentOutput, Vertex, VertexOutput}
 
 struct Motion {
     // How fast the air goes between gusts, in m/s.
@@ -39,6 +46,8 @@ struct Motion {
     exposure: f32,
     // How near the camera one starts to look smaller the nearer it comes, in metres.
     near_camera: f32,
+    // How near what is behind it one starts to fade out, in metres. At 0, it doesn't.
+    soft: f32,
 }
 
 // One particle, as `Slot` in `mod.rs` writes it.
@@ -54,6 +63,8 @@ struct Slot {
     life: vec2<f32>,
     // How fast it turns, in radians a second.
     turning: f32,
+    // The line it trails along from where it is, in metres.
+    trail: vec3<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> motion: Motion;
@@ -134,14 +145,27 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
         let width = size * sqrt(size / long);
         offset = side * corner.x * width + along * corner.y * long;
     } else {
-        // Flat to the camera, turned in its own plane.
-        let turned = particle.turned + particle.turning * age;
-        let c = cos(turned);
-        let s = sin(turned);
-        let turn = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
-        let right = view.world_from_view[0].xyz;
-        let up = view.world_from_view[1].xyz;
-        offset = (right * turn.x + up * turn.y) * size;
+        // Half its trail, as the camera sees it. Seen end on, it is as long as it is wide.
+        let towards_eye = (eye - at) / distance;
+        let half = particle.trail * 0.5 * shrink * near;
+        let across = half - towards_eye * dot(half, towards_eye);
+        let long = length(across);
+        if long > 1e-3 {
+            // Its middle half way along its trail, turned to the camera, with the top of the
+            // picture along the trail, and as wide as it would be without one.
+            let along = across / long;
+            let side = cross(along, towards_eye);
+            offset = half + side * corner.x * size + along * corner.y * (size + long);
+        } else {
+            // Flat to the camera, turned in its own plane.
+            let turned = particle.turned + particle.turning * age;
+            let c = cos(turned);
+            let s = sin(turned);
+            let turn = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
+            let right = view.world_from_view[0].xyz;
+            let up = view.world_from_view[1].xyz;
+            offset = (right * turn.x + up * turn.y) * size;
+        }
     }
     let world_position = at + offset;
 
@@ -150,5 +174,24 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
 #ifdef VERTEX_COLORS
     out.color = vec4(particle.color.rgb, particle.color.a * fade);
 #endif
+    return out;
+}
+
+@fragment
+fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+    var pbr_input = pbr_input_from_standard_material(in, is_front);
+    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    var out: FragmentOutput;
+    // Particles are not lit (see `mod.rs`).
+    out.color = pbr_input.material.base_color;
+#ifdef DEPTH_PREPASS
+    if motion.soft > 0.0 {
+        // How far behind this point the nearest solid thing is, in metres. The first
+        // sample only: reading each sample of a multisampled picture would shade each.
+        let behind = depth_ndc_to_view_z(in.position.z) - depth_ndc_to_view_z(prepass_depth(in.position, 0u));
+        out.color.a *= clamp(behind / motion.soft, 0.0, 1.0);
+    }
+#endif
+    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

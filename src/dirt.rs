@@ -4,8 +4,9 @@
 //! slides sideways, and the harder it is driven from slow, when it spins. Clods are small
 //! dark lumps, thrown up behind and out to the side, that tumble, fall, and are gone when
 //! they come down on the ground. Dust is big, faint puffs that rise a little, spread, and
-//! fade. The dirt is the colour of the ground under the tire: the average of its tile on a
-//! track that has ground textures, plain brown on one that has not.
+//! fade, each drawn long behind its tire, back into the one before, so that the puffs run
+//! together in a stream. The dirt is the colour of the ground under the tire: the average
+//! of its tile on a track that has ground textures, plain brown on one that has not.
 //!
 //! A tire touches the ground when the bottom of it is within `TOUCHING` of the ground's
 //! height. On a bridge, on another truck or in the air it throws nothing, nor in water,
@@ -20,8 +21,8 @@
 //! (`TruckVisual`), so that the dirt leaves the tires where they are seen; how fast it
 //! goes, from its body.
 //!
-//! Dust rises only off dry ground: in clear or overcast weather. In fog, rain and snow the
-//! tires throw clods alone.
+//! Dust rises only off dry ground: in clear or overcast weather. Clods come only off wet
+//! ground: in fog, rain, storms and snow.
 //!
 //! Uses the `track` slice for the ground, the `truck` slice for the trucks, and the
 //! `weather` slice, if it is there, for whether the ground is dry. Does nothing in an app
@@ -53,15 +54,23 @@ const CLODS_PER_SPEED: f32 = 4.0;
 const CLODS_PER_SLIDE: f32 = 12.0;
 const CLODS_SPINNING: f32 = 40.0;
 const MOST_CLODS: f32 = 120.0;
-/// How many puffs of dust a tire throws for each clod.
-const DUST_PER_CLOD: f32 = 0.2;
+/// How many puffs of dust a tire throws for each clod it would throw on wet ground. Many
+/// faint puffs close together, so that the stream leaves the tire smoothly: a few strong
+/// ones far apart left it in steps, which flickered by the tire.
+const DUST_PER_CLOD: f32 = 1.0;
+/// How far a puff of dust trails back from where it is thrown, along the way its tire goes,
+/// as a share of the gap to the tire's puff before. Past 1 it reaches into the one before,
+/// so that the puffs run together in a stream; higher overlaps them more. And the furthest
+/// it trails, in metres, so that the few puffs of a slow tire are not long thin streaks.
+const DUST_TRAIL: f32 = 1.5;
+const DUST_MOST_TRAIL: f32 = 2.0;
 /// How fast a truck goes, in m/s, before its tires stop spinning at full throttle.
 const SPIN_SPEED: f32 = 8.0;
 /// The most clods, and the most puffs of dust, in the air at once, over all the trucks.
 /// Past it, no more are thrown until some have gone. Each is a square in a mesh, drawn
 /// whether it is in the air or not.
 const CLOD_SLOTS: usize = 1200;
-const DUST_SLOTS: usize = 400;
+const DUST_SLOTS: usize = 2000;
 
 /// How big a clod is, in metres of radius: the smallest and the largest.
 const CLOD_SIZE: [f32; 2] = [0.04, 0.11];
@@ -88,13 +97,18 @@ const DUST_SPREAD: f32 = 1.2;
 /// thrown. It fades out over the rest.
 const DUST_LIFE: f32 = 1.6;
 const DUST_HOLD: f32 = 0.3;
+/// How near the ground or a truck behind it a puff of dust starts to fade out, in metres.
+/// At 0, a puff that a tire or the ground cuts through has a hard edge there; higher is
+/// softer, but thins the dust near the ground.
+const DUST_SOFT: f32 = 0.5;
 /// How quickly the air slows dust, as a share of its speed each second, and how fast it
 /// rises, in m/s²: it is warm, fine, and carried more than it falls.
 const DUST_DRAG: f32 = 2.0;
 const DUST_RISE: f32 = 0.3;
-/// How see-through dust is when it is thrown, from 0 (not there) to 1 (solid), and how
-/// much paler than the ground it is.
-const DUST_OPACITY: f32 = 0.3;
+/// How see-through each puff of dust is when it is thrown, from 0 (not there) to 1 (solid),
+/// and how much paler than the ground it is. Puffs overlap about twice as many deep as at
+/// 0.2 puffs for each clod and 0.3 here, which this matches.
+const DUST_OPACITY: f32 = 0.15;
 const DUST_PALENESS: f32 = 0.4;
 /// How much brighter dust is than its ground's colour. Dust is not lit, and sunlit ground
 /// is brighter than its colour: at 1, dust looked darker than the ground, like smoke.
@@ -172,6 +186,7 @@ const CLOD_MOTION: Motion = Motion {
     spread: 0.0,
     fade_from: CLOD_LIFE,
     shrink_from: CLOD_LIFE,
+    soft: 0.0,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
 };
@@ -185,6 +200,7 @@ const DUST_MOTION: Motion = Motion {
     spread: DUST_SPREAD,
     fade_from: DUST_HOLD,
     shrink_from: DUST_LIFE,
+    soft: DUST_SOFT,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
 };
@@ -323,7 +339,12 @@ fn throw_dirt(
             let moving = linear.0 + angular.0.cross(hub - transform.translation);
             let speed = moving.xz().length();
             let slide = moving.dot(right).abs();
-            owed.0[index] += clod_rate(speed, slide, throttle) * dt;
+            let rate = if dusty {
+                dust_rate(speed, slide, throttle)
+            } else {
+                clod_rate(speed, slide, throttle)
+            };
+            owed.0[index] += rate * dt;
             if owed.0[index] < 1.0 {
                 continue;
             }
@@ -343,18 +364,7 @@ fn throw_dirt(
                 + up * 0.1;
             while owed.0[index] >= 1.0 {
                 owed.0[index] -= 1.0;
-                let clod = Particle {
-                    at,
-                    velocity: clod_velocity(&mut random, moving, back, outwards, throttle),
-                    size: random.between(CLOD_SIZE[0], CLOD_SIZE[1]),
-                    turned: random.between(0.0, std::f32::consts::TAU),
-                    turning: random.between(-CLOD_TUMBLE, CLOD_TUMBLE),
-                    color: clod_color,
-                };
-                if !clods.throw(now, clod, ground) {
-                    break;
-                }
-                if dusty && random.next() < DUST_PER_CLOD {
+                let thrown = if dusty {
                     let velocity = moving.with_y(0.0) * random.between(0.1, 0.4)
                         + outwards * random.between(0.0, 1.0)
                         + Vec3::Y * random.between(0.3, 1.0);
@@ -365,8 +375,25 @@ fn throw_dirt(
                         turned: random.between(0.0, std::f32::consts::TAU),
                         turning: random.between(-0.5, 0.5),
                         color: dust_color,
+                        // Back from the tire: one that reached forward came in over the
+                        // tire, which flickered as each one appeared.
+                        trail: dust_trail(moving, rate),
                     };
-                    dust.throw(now, puff, ground);
+                    dust.throw(now, puff, ground)
+                } else {
+                    let clod = Particle {
+                        at,
+                        velocity: clod_velocity(&mut random, moving, back, outwards, throttle),
+                        size: random.between(CLOD_SIZE[0], CLOD_SIZE[1]),
+                        turned: random.between(0.0, std::f32::consts::TAU),
+                        turning: random.between(-CLOD_TUMBLE, CLOD_TUMBLE),
+                        color: clod_color,
+                        trail: Vec3::ZERO,
+                    };
+                    clods.throw(now, clod, ground)
+                };
+                if !thrown {
+                    break;
                 }
             }
             // With no room, what is owed is dropped rather than thrown all at once later.
@@ -400,6 +427,23 @@ fn clod_rate(speed: f32, slide: f32, throttle: f32) -> f32 {
     let sliding = slide * CLODS_PER_SLIDE;
     let spinning = throttle.abs() * (1.0 - speed / SPIN_SPEED).max(0.0) * CLODS_SPINNING;
     (rolling + sliding + spinning).min(MOST_CLODS)
+}
+
+/// How many puffs of dust a tire throws each second, going `speed` m/s over the ground,
+/// sliding `slide` m/s sideways, at `throttle` (-1 to 1).
+fn dust_rate(speed: f32, slide: f32, throttle: f32) -> f32 {
+    clod_rate(speed, slide, throttle) * DUST_PER_CLOD
+}
+
+/// The trail of a puff of dust from a tire going at `moving`, which throws `rate` puffs each
+/// second: back the way the tire came, towards the puff before, `speed / rate` metres back.
+fn dust_trail(moving: Vec3, rate: f32) -> Vec3 {
+    let along = moving.with_y(0.0);
+    if rate <= 0.0 {
+        return Vec3::ZERO;
+    }
+    let gap = along.length() / rate;
+    -along.normalize_or_zero() * (gap * DUST_TRAIL).min(DUST_MOST_TRAIL)
 }
 
 /// How fast a clod leaves a tire that is going at `moving`, with `back` pointing behind
@@ -520,6 +564,22 @@ mod tests {
             clod_rate(SPIN_SPEED, 0.0, 0.0)
         );
         assert_eq!(clod_rate(1000.0, 1000.0, 1.0), MOST_CLODS);
+    }
+
+    #[test]
+    fn a_puff_of_dust_reaches_into_the_one_before_along_the_way_its_tire_goes() {
+        let moving = Vec3::new(0.0, 1.0, -10.0);
+        let rate = dust_rate(10.0, 0.0, 0.0);
+        let trail = dust_trail(moving, rate);
+        let gap = 10.0 / rate;
+        assert!(trail.length() > gap, "{trail} {gap}");
+        assert!(trail.normalize().dot(Vec3::Z) > 0.999);
+        // A slow tire's few puffs trail only so far; a still one's not at all.
+        let slow = Vec3::new(0.0, 0.0, -2.1);
+        let slow_trail = dust_trail(slow, dust_rate(2.1, 0.0, 0.0));
+        assert_eq!(slow_trail.length(), DUST_MOST_TRAIL);
+        assert_eq!(dust_trail(Vec3::ZERO, dust_rate(0.0, 0.0, 1.0)), Vec3::ZERO);
+        assert_eq!(dust_trail(slow, 0.0), Vec3::ZERO);
     }
 
     #[test]

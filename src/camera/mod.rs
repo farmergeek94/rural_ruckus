@@ -21,6 +21,7 @@ mod views;
 use avian3d::prelude::LinearVelocity;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
+use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 
@@ -164,6 +165,9 @@ fn spawn_camera(mut commands: Commands, settings: Res<CameraSettings>) {
             // Until the truck has been seen, which is before anything is drawn.
             Transform::from_xyz(0.0, 8.0, 14.0).looking_at(Vec3::ZERO, Vec3::Y),
             ChaseCamera::new(settings.rig.clone()),
+            // So that particles can fade where they meet what is behind them (see
+            // `particles`), rather than be cut off along a hard line.
+            DepthPrepass,
         ))
         .id();
     if settings.bloom {

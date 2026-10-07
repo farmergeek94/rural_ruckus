@@ -22,6 +22,14 @@
 //! on the CPU when it is thrown, by following its path, so that the shader needs no map of
 //! the ground. The path is followed without the air, which only moves it across the ground.
 //!
+//! A particle can trail along a line from where it is (`Particle::trail`): drawn as long as
+//! the line, as the camera sees it, and no thinner, so that particles thrown along a path
+//! run together.
+//!
+//! A pool's particles can fade out where they come near what is behind them
+//! (`Motion::soft`), so that one cut through by the ground or a truck has no hard edge.
+//! That needs the camera's depth prepass; without it they are cut off as before.
+//!
 //! The squares of one pool are not sorted against each other: the particles are small, soft
 //! and see-through, and drawn in the order they are in the mesh. The pool's entity is kept
 //! at the camera, so that it is sorted with what is nearest, over the water.
@@ -136,6 +144,9 @@ pub struct Motion {
     /// How old one is when it starts to shrink away, in seconds: it is gone at `life`. At
     /// `life` or later, it doesn't shrink.
     pub shrink_from: f32,
+    /// How near what is behind it one starts to fade out, in metres, so that where the
+    /// ground or a truck cuts through it there is no hard edge. At 0, it is cut off.
+    pub soft: f32,
     /// How long the eye sees one for, in seconds: above 0, it is drawn as a streak along
     /// the way it seems to go, as long as the way it goes in that time. At 0, it is a
     /// square turned to the camera.
@@ -236,11 +247,15 @@ pub struct Particle {
     /// Its radius, in metres.
     pub size: f32,
     /// How far it is turned in the picture, in radians, and how fast it turns, in radians a
-    /// second. Not for a streak, which lies along the way it goes.
+    /// second. Not for a streak, which lies along the way it goes, nor for one that trails.
     pub turned: f32,
     pub turning: f32,
     /// Its colour, times the pool's picture, and how solid it is, from 0 to 1.
     pub color: LinearRgba,
+    /// The line it trails along from where it is, in metres: it is drawn from there to the
+    /// end of the line, as long as the line as the camera sees it, and no thinner. Zero for
+    /// one as long as it is wide. Not for a streak.
+    pub trail: Vec3,
 }
 
 /// How the particles of a pool move, for `particles.wgsl`.
@@ -253,7 +268,7 @@ pub struct ParticleMotion {
     slots: Handle<ShaderBuffer>,
 }
 
-/// One particle as the shader reads it, as `Slot` in `particles.wgsl`: 64 bytes, in the
+/// One particle as the shader reads it, as `Slot` in `particles.wgsl`: 80 bytes, in the
 /// buffer at `slot * Slot::SHADER_SIZE`.
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
 struct Slot {
@@ -265,6 +280,7 @@ struct Slot {
     /// When it was thrown and when it goes, on the shader's clock.
     life: Vec2,
     turning: f32,
+    trail: Vec3,
 }
 
 impl Slot {
@@ -277,6 +293,7 @@ impl Slot {
             color: particle.color.to_vec4(),
             life: Vec2::from(life),
             turning: particle.turning,
+            trail: particle.trail,
         }
     }
 }
@@ -298,6 +315,10 @@ impl MaterialExtension for ParticleMotion {
     fn vertex_shader() -> ShaderRef {
         SHADER_PATH.into()
     }
+
+    fn fragment_shader() -> ShaderRef {
+        SHADER_PATH.into()
+    }
 }
 
 /// As `Motion` in `particles.wgsl`, where each is explained. Each `Vec3` is followed by
@@ -316,6 +337,7 @@ struct MotionUniform {
     shrink_from: f32,
     exposure: f32,
     near_camera: f32,
+    soft: f32,
 }
 
 impl MotionUniform {
@@ -333,6 +355,7 @@ impl MotionUniform {
             shrink_from: motion.shrink_from,
             exposure: motion.exposure,
             near_camera: motion.near_camera,
+            soft: motion.soft,
         }
     }
 }
@@ -575,6 +598,7 @@ mod tests {
         spread: 0.0,
         fade_from: 1.6,
         shrink_from: 1.0,
+        soft: 0.0,
         exposure: 0.04,
         near_camera: 6.0,
     };
@@ -598,6 +622,7 @@ mod tests {
             turned: 0.0,
             turning: 0.0,
             color: LinearRgba::WHITE,
+            trail: Vec3::ZERO,
         }
     }
 
@@ -700,11 +725,11 @@ mod tests {
     #[test]
     fn the_shader_reads_a_slot_in_the_order_it_is_written() {
         // WGSL lays out a struct as encase does, so the fields in the same order give the
-        // same 64 bytes.
-        assert_eq!(Slot::SHADER_SIZE.get(), 64);
+        // same 80 bytes.
+        assert_eq!(Slot::SHADER_SIZE.get(), 80);
         let shader = include_str!("particles.wgsl");
         let fields = [
-            "at", "size", "velocity", "turned", "color", "life", "turning",
+            "at", "size", "velocity", "turned", "color", "life", "turning", "trail",
         ];
         let mut from = shader.find("struct Slot {").expect("struct Slot");
         for field in fields {
@@ -731,6 +756,7 @@ mod tests {
             "shrink_from",
             "exposure",
             "near_camera",
+            "soft",
         ];
         let mut from = shader.find("struct Motion {").expect("struct Motion");
         for field in fields {
