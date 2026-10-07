@@ -487,8 +487,11 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
         "Low"
     );
 
-    // And all put back at once, from the options screen.
+    // And all put back at once, from the options screen and the advanced one: each puts
+    // back its own lines.
     player_does(&mut second, Action::Show(Screen::Options));
+    player_does(&mut second, Action::RestoreDefaults);
+    player_does(&mut second, Action::Show(Screen::Advanced));
     player_does(&mut second, Action::RestoreDefaults);
     assert_eq!(
         *second.world().resource::<DisplaySettings>(),
@@ -507,22 +510,15 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
     assert!(second.world().resource::<DirtSettings>().on);
 }
 
-/// The INTEGRATED GRAPHICS button beside RESTORE DEFAULTS turns down what costs most on a
-/// processor's built-in graphics, and leaves the other lines as they were.
+/// Quality's Balanced level turns down what costs most on a processor's built-in graphics,
+/// as `--integrated-graphics` does, and leaves the other lines as they were.
 #[test]
-fn integrated_graphics_is_a_preset_on_the_options_screen() {
+fn balanced_quality_is_integrated_graphics() {
     let mut app = headless_app(nowhere(), None);
     app.update();
     player_does(&mut app, Action::Show(Screen::Options));
     set_option(&mut app, "option.mipmaps", "Off");
-    let preset = app
-        .world()
-        .resource::<monster_truck_rural_ruckus::ui::Presets>()
-        .0
-        .iter()
-        .position(|preset| preset.label == "INTEGRATED GRAPHICS")
-        .expect("the preset is offered");
-    player_does(&mut app, Action::ApplyPreset(preset));
+    set_option(&mut app, "option.quality", "Balanced");
 
     let mut camera = CameraSettings::default();
     let mut environment = EnvironmentSettings::default();
