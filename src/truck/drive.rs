@@ -459,7 +459,7 @@ const SLIP_UPHILL: f32 = 0.1;
 /// locked tire slides at `handbrake_grip` times its load, which is less than `brake_force`
 /// on a truck at rest on its springs, so higher than 1 matters only on a tire pressed
 /// down hard, as in a landing.
-const HANDBRAKE_REAR_BRAKE: f32 = 2.0;
+const HANDBRAKE_REAR_BRAKE: f32 = 0.5;
 
 /// The speed at which the rear wheels' steering has faded to `REAR_STEER_FLOOR`, in m/s.
 /// Their counter-steer is at its full `rear_steer_ratio` at a standstill and fades here,
