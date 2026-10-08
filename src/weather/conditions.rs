@@ -96,8 +96,9 @@ impl Weather {
                     speed: 9.0,
                     wind: 2.0,
                 }),
-                // Wet dirt: the tires slide sooner.
-                grip: 0.85,
+                // Wet dirt: the tires slide a little sooner. Monster-truck tires dig through
+                // the wet top, so keep it near the dry figure: 0.85 was too slippery to drive.
+                grip: 0.93,
                 ..clear
             },
             Weather::Storm => Conditions {
@@ -112,7 +113,8 @@ impl Weather {
                     speed: 11.0,
                     wind: 6.0,
                 }),
-                grip: 0.8,
+                // Wetter than rain, and still well above snow.
+                grip: 0.88,
                 lightning: true,
             },
             Weather::Snow => Conditions {

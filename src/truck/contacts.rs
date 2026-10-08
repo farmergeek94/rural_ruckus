@@ -50,6 +50,10 @@
 //! launch and not a climb. Seven computer trucks racing on Alpine for two minutes were
 //! then tipped past 60 degrees in 3 of 1912 samples, where they had been in 61.
 //!
+//! A wheel's core also touches another truck's body (see `collision_groups`), and that
+//! contact is kept as the physics makes it: the tire may slide up the other truck, but goes
+//! into its body no further than the core is inside the tire. Not measured yet.
+//!
 //! Light loose scenery -- a cone, a sign, a small rock (`drive::LIGHT_LOOSE`) -- is met as
 //! another truck is, and for the same reason: `drive` does not sweep onto it (see its
 //! notes), so every contact a tire has with it is kept, and one low on the tire is made a

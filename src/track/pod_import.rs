@@ -489,9 +489,13 @@ fn box_faces(faces: &[pod::TextureCell; 6], tiles: &mut TileSet) -> Option<BoxFa
 
 /// Which way trucks drive through a checkpoint. Its authored heading gives the line it
 /// lies on, but track makers didn't always point it the right way along that line, so
-/// the course the computer trucks follow has the casting vote when it passes nearby.
+/// the course the computer trucks follow has the casting vote when it passes nearby: the
+/// heading is turned round where the course near it runs against it, and nowhere near it
+/// runs with it. A course can pass a checkpoint twice, once each way: Lands Between's goes
+/// through its first checkpoint eastwards, as the file's heading says, and passes it again
+/// westwards 2.7 m from its middle, nearer than the first time (4.3 m).
 fn travel_direction(center: Vec2, authored: Vec2, course: &[(Vec2, Vec2)]) -> Vec2 {
-    let nearest = course
+    let pieces: Vec<(f32, Vec2)> = course
         .iter()
         .map(|&(start, end)| {
             let along = end - start;
@@ -501,13 +505,28 @@ fn travel_direction(center: Vec2, authored: Vec2, course: &[(Vec2, Vec2)]) -> Ve
                 along.normalize_or_zero(),
             )
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0));
-
-    match nearest {
-        // Only a course that runs roughly along the authored heading can flip it; one
-        // that crosses it says nothing about which way is forwards.
-        Some((_, course_direction)) if authored.dot(course_direction) < -0.5 => -authored,
-        _ => authored,
+        .collect();
+    let Some(nearest) = pieces.iter().map(|piece| piece.0).min_by(f32::total_cmp) else {
+        return authored;
+    };
+    // As near as the nearest, give or take half the width of the course. Where the course
+    // passes both ways, the pass the heading agrees with is up to 7.2 m further than the
+    // nearest (Lands Between's fourth checkpoint); in the drag arenas Tacoma Dome and Trans
+    // World Dome, where the heading is the wrong way, the course runs with it 15.5 m further.
+    let near = || {
+        pieces
+            .iter()
+            .filter(move |piece| piece.0 <= nearest + COURSE_WIDTH_FEET * METRES_PER_FOOT / 2.0)
+            .map(|piece| piece.1)
+    };
+    // Only a course that runs roughly along the authored heading can flip it; one that
+    // crosses it says nothing about which way is forwards.
+    let against = near().any(|direction| authored.dot(direction) < -0.5);
+    let with = near().any(|direction| authored.dot(direction) > 0.5);
+    if against && !with {
+        -authored
+    } else {
+        authored
     }
 }
 
@@ -544,6 +563,17 @@ mod tests {
         assert_eq!(travel_direction(center, -north, &[]), -north);
     }
 
+    #[test]
+    fn a_checkpoint_the_course_passes_both_ways_keeps_its_own_heading() {
+        // Northwards past it 5 m to the west, and back southwards 3 m to the east.
+        let course = [
+            (Vec2::new(-5.0, 100.0), Vec2::new(-5.0, -100.0)),
+            (Vec2::new(3.0, -100.0), Vec2::new(3.0, 100.0)),
+        ];
+        let (north, south) = (Vec2::NEG_Y, Vec2::Y);
+        assert_eq!(travel_direction(Vec2::ZERO, north, &course), north);
+        assert_eq!(travel_direction(Vec2::ZERO, south, &course), south);
+    }
     #[test]
     fn grid_places_too_near_another_are_skipped() {
         let place = |x: f32| StartPosition {

@@ -23,6 +23,8 @@ pub const WHEEL_CORES: LayerMask = LayerMask(1 << 3);
 /// The ground boxes, which are in `GROUND` as well. Their sides are upright, as no face of
 /// the terrain is, and a tire meets one as a wall (see `truck/contacts.rs`).
 pub const GROUND_BOXES: LayerMask = LayerMask(1 << 4);
+/// A truck's body, so that the wheel cores of other trucks can touch it.
+pub const TRUCK_BODIES: LayerMask = LayerMask(1 << 5);
 
 /// For the terrain: touches everything.
 pub fn ground() -> CollisionLayers {
@@ -42,9 +44,18 @@ pub fn wheel() -> CollisionLayers {
     CollisionLayers::new(WHEELS, LayerMask::ALL)
 }
 
-/// For a wheel's core: the ground alone. Walls, scenery and other trucks are the tire's.
+/// For a wheel's core: the ground, and the bodies of trucks. Walls, scenery and other
+/// trucks' tires are the tire's. The tire's contacts with another truck are shaped for it
+/// to ride up and over (see `truck/contacts.rs`), and without the core nothing held it out
+/// of the other truck's body. The physics never lets two colliders of one body touch, so
+/// a core never meets its own truck's body.
 pub fn wheel_core() -> CollisionLayers {
-    CollisionLayers::new(WHEEL_CORES, GROUND)
+    CollisionLayers::new(WHEEL_CORES, LayerMask(GROUND.0 | TRUCK_BODIES.0))
+}
+
+/// For a truck's body: touches everything.
+pub fn truck_body() -> CollisionLayers {
+    CollisionLayers::new(TRUCK_BODIES, LayerMask::ALL)
 }
 
 #[cfg(test)]
@@ -53,7 +64,7 @@ mod tests {
 
     #[test]
     fn no_layer_is_the_one_every_collider_is_in_by_default() {
-        for layer in [GROUND, WHEELS, WHEEL_CORES, GROUND_BOXES] {
+        for layer in [GROUND, WHEELS, WHEEL_CORES, GROUND_BOXES, TRUCK_BODIES] {
             assert_eq!(layer & LayerMask::DEFAULT, LayerMask::NONE);
         }
     }

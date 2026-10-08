@@ -140,6 +140,8 @@ fn spawn_truck(
         .insert((
             RigidBody::Dynamic,
             collider,
+            // So that other trucks' wheel cores touch it (see `collision_groups`).
+            crate::collision_groups::truck_body(),
             // The truck's own figures, whatever its colliders would make of them.
             (
                 Mass(config.mass),

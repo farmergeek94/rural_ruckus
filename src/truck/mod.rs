@@ -236,13 +236,14 @@ pub(crate) struct WheelCollider {
     pub(super) rolling_over: Option<Entity>,
 }
 
-/// A solid ball inside a wheel, at its hub, that touches the ground and nothing else. The
-/// ground under a tire is the suspension's, and a tire driven into it harder than the
+/// A solid ball inside a wheel, at its hub, that touches the ground and the bodies of
+/// other trucks, and nothing else. The ground under a tire is the suspension's, and a tire driven into it harder than the
 /// suspension can answer in a step went on through; the core cannot, so a tire sinks into
 /// the ground no further than the core is inside it, and then stands on the core, which
 /// rolls over the surface (see `contacts`) and bounces off it as a tire does. Measured on
 /// Alpine, two minutes of 7 trucks: without cores an axle went under the ground 9 times,
-/// with them never.
+/// with them never. Another truck's body it meets rigidly, so that a tire which rides up
+/// that truck does not go into its body further than the core is inside the tire.
 #[derive(Component)]
 pub(crate) struct WheelCore;
 

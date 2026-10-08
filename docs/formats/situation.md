@@ -221,11 +221,45 @@ scenery and the water again there.
   `MyTrack.pod` the last of 2 is 77 ft in front of the grid, and in `AlpineMtns.pod` the
   last of 10 is 295 ft from pole position while the other nine are all over 1400 ft away.
   (**Reference** treats the first as the start/finish instead.)
+- The finish line is just in front of the grid, and the first checkpoint in the file comes
+  after it. **Measured** on 33 of the 34 tracks with a course and more than two
+  checkpoints (the 11 user tracks and the base game's): the last checkpoint is 9 to 116 m
+  from pole position. The exception is Lands Between (`landsbetween.pod`), see below.
 - **Reference** warns that a checkpoint's `psi` is not always written with a consistent
-  sign. In our two tracks it always is: all 12 checkpoints face the way the nearest
-  course segment runs. The game still takes only the line of the gate from `psi` and
-  lets the course decide which way along it is forwards, which costs nothing when they
-  agree.
+  sign. The game takes the line of the gate from `psi` and lets the course decide which way
+  along it is forwards: it turns `psi` round where a piece of course near the checkpoint
+  runs against it, and none near it runs with it. "Near" is within half the course's width
+  (9.75 m) of the nearest piece. **Measured** on 40 tracks, against the way the course
+  passes each checkpoint in lap order: a course can pass a checkpoint twice, once each
+  way. Lands Between passes its first checkpoint eastwards, as `psi` says, 4.3 m from its
+  middle, and westwards 2.7 m from it; its fourth, with `psi`, 7.2 m further than the
+  nearest pass; The Tight Corners' fifth, 0.3 m further. Taking the nearest piece alone
+  turned all three the wrong way. In the drag arenas Tacoma Dome and Trans World Dome,
+  checkpoints 1 to 3 have `psi` the wrong way, and the course runs with it only 15.5 m
+  further than the nearest piece.
+
+### Lands Between
+
+**Measured** on `landsbetween.pod`, whose own picture (`UI\LANDSBES.BMP`) calls it "Lands
+Between [Beta]":
+
+- Its grid was never set out: eight places in a line 10 ft apart, all at a height of 200
+  ft and a heading of 0. On every other track the places are 16.8 ft apart or more. The
+  game skips every other place, as it does any place too near another (`PLACE_CLEARANCE`).
+- Its last checkpoint, the finish, is 1268 m from pole position and 8854 m round the
+  course; the first is 231 m away. Past the finish the course goes off a cliff 107 m (350
+  ft) high, which falls between two neighbouring samples of the heightmap, into the sea,
+  and 4 km round by sea back to the grid. So the race the game runs, which begins at the
+  start line, sends the trucks across country to it first. What MTM2 does on such a track
+  is **open**.
+- Its ground is islands in a sea 2 ft deep: the heightmap is 0 on two thirds of the map,
+  and the water height is 4 (2 ft), where every other track with water has 40 to 388.
+- The ground, the scenery and the course agree as terrain.md reads them: 96 % of its 324
+  boxes stand 0 to 40 ft above the ground, and the boxes of one model agree to 0.7 ft;
+  transposed, mirrored, turned or shifted, 7 to 15 % do. The heights of the course's
+  points (`cstart`, `cend`) are the ground's: the median difference is 0.0 ft, as on Monte
+  Carlo. Its Course section holds three courses of 43 pieces each, a little different;
+  the game reads the first.
 - The starting grid has eight places in both tracks, and all eight face the same way.
   **Measured.** Its shape changes from track to track: `MyTrack.pod` has four rows of two
   (30 ft between the two, 30 to 34 ft between rows), and `AlpineMtns.pod` has two rows of four, with 17 to
@@ -279,5 +313,9 @@ CROKDROP.BIN
 - Whether MTM2 draws anything for a ramp with no model (see "Ramps").
 - What box types 1 to 5 and 9 mean. The game goes by `mass` alone, whatever the type.
 - What MTM2 does with a moving box at the edge of the map (see "Moving boxes").
-- `Track Race Type` (2 in our file): presumably circuit, rally or drag.
+- `Track Race Type` (2 in our file): 0 on the hill climb practice, 1 on the five drag
+  arenas, 2 on 20 circuits, 3 on 11 tracks that include Highlands Rally, and 4 on the three
+  Summit Rumble arenas. **Measured** on 40 track files, the user tracks and the base game's.
+  So 3 is very likely a rally. How a rally differs from a circuit is **open**: 10 of the
+  11 have their grid just behind their last checkpoint, as circuits do.
 - The extra courses after `Extended Course Definitions`.
