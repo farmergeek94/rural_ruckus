@@ -13,13 +13,13 @@
 //!
 //! A tire touches the ground when the bottom of it is within `TOUCHING` of the ground's
 //! height. On a bridge, on another truck or in the air it throws nothing, nor in water,
-//! which throws its own spray (see the `water` slice). It throws up only loose ground
+//! which throws its own spray (see `spray`). It throws up only loose ground
 //! (`track::TrackData::loose_at`): dirt, mud, sand, grass and rocky ground, as the track's
 //! texture types say, or, where they say nothing, as the ground's colour does. Road, rock,
 //! water, ice and snow throw nothing.
 //!
 //! Each piece is a flat square turned to the camera, drawn only, which touches nothing.
-//! Clods, splatter and dust are three pools of particles (`crate::particles`), which the
+//! Clods, splatter and dust are three pools of particles (`pool`), which the
 //! graphics card moves: here they are only thrown. Where the truck is comes from how it is drawn
 //! (`TruckVisual`), so that the dirt leaves the tires where they are seen; how fast it
 //! goes, from its body.
@@ -27,22 +27,19 @@
 //! Dust rises only off dry ground: in clear or overcast weather. Clods come only off wet
 //! ground: in fog, rain, storms and snow.
 //!
-//! Uses the `track` slice for the ground, the `truck` slice for the trucks, and the
-//! `weather` slice, if it is there, for whether the ground is dry. Does nothing in an app
-//! that cannot draw. The values are the game's own: Monster Truck
-//! Madness 2's dirt has not been measured.
+//! The `weather` slice, if it is there, says whether the ground is dry. The values are the
+//! game's own: Monster Truck Madness 2's dirt has not been measured.
 
 use avian3d::prelude::{AngularVelocity, LinearVelocity};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::entity::EntityHashMap;
-use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
+use super::pool::{self, Air, Motion, Particle, Particles};
 use crate::game_state::GameState;
-use crate::particles::{self, Air, Motion, Particle, Particles};
-use crate::track::{Track, TrackSystems};
-use crate::truck::{TruckConfig, TruckInput, TruckSystems, TruckVisual};
+use crate::track::Track;
+use crate::truck::{TruckConfig, TruckInput, TruckVisual};
 use crate::weather::WeatherSettings;
 
 /// How near the ground the bottom of a tire must be to throw dirt, in metres. A tire sinks
@@ -143,36 +140,6 @@ const PLAIN_DIRT: Vec3 = Vec3::new(0.45, 0.36, 0.25);
 const NEAR_CAMERA: f32 = 6.0;
 const GRAVITY: f32 = 9.81;
 
-pub struct DirtPlugin;
-
-impl Plugin for DirtPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<DirtSettings>();
-        // Dirt is only a look. An app that cannot draw has no use for it.
-        if !app.is_plugin_added::<PbrPlugin>() {
-            return;
-        }
-        particles::add(app);
-        // Made on entering the first race, not at `Startup`: a race begun from the command
-        // line enters `Racing` before `Startup` runs.
-        app.add_systems(
-            OnEnter(GameState::Racing),
-            (
-                make_looks.run_if(not(resource_exists::<DirtLooks>)),
-                spawn_dirt,
-            )
-                .chain()
-                .after(TrackSystems::Prepare),
-        )
-        .add_systems(
-            Update,
-            throw_dirt
-                .after(TruckSystems::PlaceVisuals)
-                .run_if(in_state(GameState::Racing)),
-        );
-    }
-}
-
 /// Choices about the dirt. Change it at any time.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct DirtSettings {
@@ -193,15 +160,15 @@ pub struct Dirt;
 
 /// On the pool of clods.
 #[derive(Component)]
-struct Clods;
+pub(super) struct Clods;
 
 /// On the pool of splatter.
 #[derive(Component)]
-struct Splatter;
+pub(super) struct Splatter;
 
 /// On the pool of dust.
 #[derive(Component)]
-struct Dust;
+pub(super) struct Dust;
 
 /// The pool marked `A`, and not `B` or `C`, so that the three can be borrowed at once.
 type Only<A, B, C> = (With<A>, Without<B>, Without<C>);
@@ -219,6 +186,7 @@ const CLOD_MOTION: Motion = Motion {
     soft: 0.0,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
+    lies_on: None,
 };
 
 /// How splatter moves: thrown, and pulled down, until it comes down on the ground.
@@ -234,6 +202,7 @@ const SPLATTER_MOTION: Motion = Motion {
     soft: 0.0,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
+    lies_on: None,
 };
 
 /// How dust moves: soon slowed, rising a little, spreading, and fading after a while.
@@ -249,25 +218,26 @@ const DUST_MOTION: Motion = Motion {
     soft: DUST_SOFT,
     exposure: 0.0,
     near_camera: NEAR_CAMERA,
+    lies_on: None,
 };
 
 /// What dirt is drawn with: the clods' shapes, which splatter shares, and the dust's.
 #[derive(Resource)]
-struct DirtLooks {
+pub(super) struct DirtLooks {
     clod: Handle<Image>,
     dust: Handle<Image>,
 }
 
 /// The colours of this track's ground: one for each ground tile, or `PLAIN_DIRT` alone.
 #[derive(Resource, Default)]
-struct GroundColors(Vec<Vec3>);
+pub(super) struct GroundColors(Vec<Vec3>);
 
 /// What `throw_dirt` remembers of each truck from one frame to the next: per wheel, the
 /// pieces it owes, carried over as a fraction.
 #[derive(Default)]
-struct Owed([f32; 4]);
+pub(super) struct Owed([f32; 4]);
 
-fn make_looks(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+pub(super) fn make_looks(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(DirtLooks {
         clod: images.add(picture(SHAPES_ACROSS, clod_opacity)),
         dust: images.add(picture(SHAPES_ACROSS, dust_opacity)),
@@ -275,14 +245,14 @@ fn make_looks(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 }
 
 /// Makes the race's pools of dirt, and works out the colours of the ground of its track.
-fn spawn_dirt(
+pub(super) fn spawn_dirt(
     mut commands: Commands,
     track: Res<Track>,
     looks: Res<DirtLooks>,
-    mut assets: particles::PoolAssets,
+    mut assets: pool::PoolAssets,
 ) {
     let mut spawn = |slots, motion, picture: &Handle<Image>| {
-        let pool = particles::pool(&mut assets, slots, motion, Air::STILL, picture.clone());
+        let pool = pool::pool(&mut assets, slots, motion, Air::STILL, picture.clone());
         commands
             .spawn((pool, Dirt, DespawnOnExit(GameState::Racing)))
             .id()
@@ -333,7 +303,7 @@ fn average_color(rgba: &[u8]) -> Vec3 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn throw_dirt(
+pub(super) fn throw_dirt(
     time: Res<Time>,
     track: Res<Track>,
     colors: Res<GroundColors>,
@@ -361,7 +331,7 @@ fn throw_dirt(
         return;
     };
     let dt = time.delta_secs();
-    let now = particles::clock(&time);
+    let now = pool::clock(&time);
     // Without the weather, the ground is dry.
     let dusty = weather.is_none_or(|weather| weather.weather.dusty());
     let ground = |at: Vec2| track.heights.height_at(at.x, at.y);
@@ -564,7 +534,7 @@ const SHAPES_ACROSS: u32 = 2;
 /// A white picture of `across` by `across` shapes, each as solid as `opacity` says at each
 /// point of it, from -1 to 1 across and up, for that shape, counted across the rows from the
 /// top left.
-fn picture(across: u32, opacity: fn(Vec2, u32) -> f32) -> Image {
+pub(super) fn picture(across: u32, opacity: fn(Vec2, u32) -> f32) -> Image {
     let side = PICTURE_SIZE * across;
     Image::new(
         Extent3d {
@@ -662,7 +632,7 @@ fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
 }
 
 /// A small, quick source of numbers that only have to look random (xorshift).
-struct Random(u64);
+pub(super) struct Random(u64);
 
 impl Default for Random {
     fn default() -> Self {

@@ -26,8 +26,10 @@ mod settle;
 mod shading;
 mod tile_material;
 
+use std::path::{Path, PathBuf};
+
 use avian3d::prelude::*;
-use bevy::asset::embedded_asset;
+use bevy::asset::io::embedded::EmbeddedAssetRegistry;
 use bevy::camera::primitives::MeshAabb;
 use bevy::camera::visibility::VisibilityRange;
 use bevy::ecs::change_detection::Tick;
@@ -167,8 +169,27 @@ impl Plugin for TrackPlugin {
         // Only an app that draws things can use a material. A headless one has neither
         // the renderer nor anywhere to put a shader.
         if app.is_plugin_added::<PbrPlugin>() {
-            embedded_asset!(app, "tiles.wgsl");
-            embedded_asset!(app, "tiles_prepass.wgsl");
+            // In `src/shaders`, with the game's other shaders: `embedded_asset!` takes only
+            // a path below this file's folder.
+            let embedded = app.world_mut().resource_mut::<EmbeddedAssetRegistry>();
+            for (path, file, bytes) in [
+                (
+                    tile_material::SHADER_PATH,
+                    "src/shaders/tiles.wgsl",
+                    include_bytes!("../shaders/tiles.wgsl").as_slice(),
+                ),
+                (
+                    tile_material::PREPASS_SHADER_PATH,
+                    "src/shaders/tiles_prepass.wgsl",
+                    include_bytes!("../shaders/tiles_prepass.wgsl").as_slice(),
+                ),
+            ] {
+                embedded.insert_asset(
+                    PathBuf::from(file),
+                    Path::new(path.trim_start_matches("embedded://")),
+                    bytes,
+                );
+            }
             app.add_plugins(MaterialPlugin::<TileMaterial>::default());
         }
         app.add_systems(

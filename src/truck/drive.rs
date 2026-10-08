@@ -1306,7 +1306,12 @@ fn spin_in_the_air(speed: f32, throttle: f32, locked: bool, top_speed: f32, dt: 
 /// `SLIP_SPIN` faster than that the way the throttle pushes: trying to go, and slipping.
 fn tread_on_the_ground(speed: f32, ground: f32, slip_throttle: f32, dt: f32) -> f32 {
     if slip_throttle != 0.0 {
-        towards(speed, ground + slip_throttle * SLIP_SPIN, SLIP_SPIN_UP_TIME, dt)
+        towards(
+            speed,
+            ground + slip_throttle * SLIP_SPIN,
+            SLIP_SPIN_UP_TIME,
+            dt,
+        )
     } else {
         towards(speed, ground, GRIP_CATCH_TIME, dt)
     }
@@ -1600,8 +1605,9 @@ mod tests {
     fn a_slipping_tire_spins_the_way_the_throttle_pushes_and_catches_up_when_it_grips() {
         let dt = 1.0 / 120.0;
         let run = |seconds: f32, speed: f32, ground: f32, throttle: f32| {
-            (0..(seconds / dt).round() as usize)
-                .fold(speed, |speed, _| tread_on_the_ground(speed, ground, throttle, dt))
+            (0..(seconds / dt).round() as usize).fold(speed, |speed, _| {
+                tread_on_the_ground(speed, ground, throttle, dt)
+            })
         };
         // Sliding back down a hill at 2 m/s under full throttle: the tread goes forwards.
         assert!(close(run(3.0, -2.0, -2.0, 1.0), -2.0 + SLIP_SPIN));

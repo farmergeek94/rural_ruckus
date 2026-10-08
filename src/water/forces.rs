@@ -67,7 +67,7 @@ pub(super) fn push_trucks(
 /// One of the four upright parts of a truck that the water meets, from the bottom of a
 /// tire to the roof above it, in world space.
 ///
-/// `splash` uses it too, to tell where a truck breaks the surface.
+/// `wake` uses it too, to tell where a truck breaks the surface.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Column {
     pub(super) bottom: Vec3,

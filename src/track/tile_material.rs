@@ -134,10 +134,11 @@ impl MaterialExtension for TileTextures {
     }
 }
 
-/// Where `embedded_asset!` puts `tiles.wgsl` and `tiles_prepass.wgsl`: the crate's name,
-/// then the path below `src`.
-const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/track/tiles.wgsl";
-const PREPASS_SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/track/tiles_prepass.wgsl";
+/// Where `tiles.wgsl` and `tiles_prepass.wgsl` are among the embedded assets (see
+/// `TrackPlugin`).
+pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/tiles.wgsl";
+pub(super) const PREPASS_SHADER_PATH: &str =
+    "embedded://monster_truck_rural_ruckus/shaders/tiles_prepass.wgsl";
 
 /// The most anisotropic filtering a sampler can ask for.
 const MOST_ANISOTROPY: u16 = 16;
@@ -315,8 +316,8 @@ mod tests {
     /// Or a shadow would be cut out by the wrong tile.
     #[test]
     fn the_prepass_shader_finds_the_tile_as_the_main_shader_does() {
-        let main = include_str!("tiles.wgsl");
-        let prepass = include_str!("tiles_prepass.wgsl");
+        let main = include_str!("../shaders/tiles.wgsl");
+        let prepass = include_str!("../shaders/tiles_prepass.wgsl");
         for line in [
             "    let cycle = min(u32(round(in.uv_b.y)), 31u);",
             "    let tile = i32(round(in.uv_b.x)) + i32(cycles.offsets[cycle / 4u][cycle % 4u]);",

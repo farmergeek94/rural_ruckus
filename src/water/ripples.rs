@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn the_shader_holds_as_many_ripples_as_are_sent() {
-        let shader = include_str!("water.wgsl");
+        let shader = include_str!("../shaders/water.wgsl");
         assert!(shader.contains(&format!("array<vec4<f32>, {MAX_RIPPLES}>")));
     }
 }

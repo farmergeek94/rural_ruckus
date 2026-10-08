@@ -11,7 +11,7 @@
 
 use bevy::prelude::*;
 
-use crate::particles::Air;
+use super::shore::{SwellWave, swell_waves};
 
 /// Which way the wind blows, on the ground plane (world X and Z). Across most courses at
 /// some point, and the same on every track.
@@ -27,8 +27,9 @@ const GUST_PERIODS: [f32; 3] = [11.0, 4.7, 2.3];
 /// quick ones ripple on top.
 const GUST_WEIGHTS: [f32; 3] = [0.55, 0.3, 0.15];
 
+/// The wind, which the `particles` slice carries the spray on. Only in an app that can draw.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
-pub(super) struct Wind {
+pub struct Wind {
     /// Which way it blows, of length 1.
     pub(super) towards: Vec2,
 }
@@ -42,15 +43,38 @@ impl Default for Wind {
 }
 
 impl Wind {
-    /// The air it moves, gusts and all, on the ground plane, for the spray it carries.
-    pub(super) fn air(&self) -> Air {
-        let along = Vec3::new(self.towards.x, 0.0, self.towards.y);
-        Air {
-            steady: along * WIND_SPEED,
-            gusts: along * GUSTINESS,
-            periods: GUST_PERIODS,
-            weights: GUST_WEIGHTS,
-        }
+    /// How long each of the gusts' three swings takes, in seconds, and how much of `gusts`
+    /// each is.
+    pub const GUST_PERIODS: [f32; 3] = GUST_PERIODS;
+    pub const GUST_WEIGHTS: [f32; 3] = GUST_WEIGHTS;
+
+    /// The swell that this wind raises, as the water's surface is drawn with it.
+    pub fn swell(&self) -> [SwellWave; 3] {
+        swell_waves(self.towards)
+    }
+
+    /// How it blows between gusts, on the ground plane, in m/s.
+    pub fn steady(&self) -> Vec3 {
+        self.along() * WIND_SPEED
+    }
+
+    /// How far a full gust takes it from `steady`, in m/s.
+    pub fn gusts(&self) -> Vec3 {
+        self.along() * GUSTINESS
+    }
+
+    /// How it blows when the shader's clock reads `time`, in m/s: `steady`, and `gusts`
+    /// times a mix of three swings of the clock. As `water.wgsl` has it.
+    pub fn at(&self, time: f32) -> Vec3 {
+        let tau = std::f32::consts::TAU;
+        let swing: f32 = (0..3)
+            .map(|index| GUST_WEIGHTS[index] * (tau * time / GUST_PERIODS[index]).sin())
+            .sum();
+        self.steady() + self.gusts() * swing
+    }
+
+    fn along(&self) -> Vec3 {
+        Vec3::new(self.towards.x, 0.0, self.towards.y)
     }
 }
 
@@ -60,7 +84,7 @@ mod tests {
 
     /// How hard the wind blows when the shader's clock reads `time`, in m/s.
     fn wind_speed(time: f32) -> f32 {
-        Wind::default().air().at(time).length()
+        Wind::default().at(time).length()
     }
 
     #[test]
@@ -94,14 +118,14 @@ mod tests {
         assert!((wind.towards.length() - 1.0).abs() < 1e-6);
         let along = Vec3::new(wind.towards.x, 0.0, wind.towards.y);
         for time in [3.0, 40.0] {
-            let air = wind.air().at(time);
+            let air = wind.at(time);
             assert!(air.normalize().distance(along) < 1e-5, "{air}");
         }
     }
 
     #[test]
     fn the_water_gusts_as_the_spray_does() {
-        let shader = include_str!("water.wgsl");
+        let shader = include_str!("../shaders/water.wgsl");
         assert!(shader.contains(&format!("const WIND_SPEED: f32 = {WIND_SPEED:?};")));
         assert!(shader.contains(&format!("const GUSTINESS: f32 = {GUSTINESS:?};")));
         let [slow, middle, quick] = GUST_PERIODS;

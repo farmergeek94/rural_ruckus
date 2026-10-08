@@ -39,6 +39,14 @@ pub struct Wheel {
     pub(super) tilt: f32,
 }
 
+impl Wheel {
+    /// How fast the tread goes round, in m/s, forwards positive: as fast as the tire rolls
+    /// over the ground, and faster while it spins.
+    pub fn tread_speed(&self) -> f32 {
+        self.tread_speed
+    }
+}
+
 /// How much of the speed a tire meets something at it comes back off with, from 0 (a dead
 /// stop) to 1 (all of it). Higher and trucks ricochet off each other.
 const TIRE_BOUNCE: f32 = 0.8;

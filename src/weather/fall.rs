@@ -35,12 +35,11 @@ use bevy::render::render_resource::{
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 
-use super::WeatherSettings;
 use super::conditions::{Fall, FallKind};
 use super::cover::{COVER_CELL, COVER_CELLS, Cover};
+use super::{ParticleLight, WeatherSettings};
 use crate::camera::ChaseCamera;
 use crate::game_state::GameState;
-use crate::particles::ParticleLight;
 
 /// The size of the box of rain round the camera, in metres: across, up and along. Fog
 /// hides what is further off, and a bigger box spreads the same drops thinner.
@@ -75,8 +74,8 @@ const SNOW_OPACITY: f32 = 0.9;
 /// How near the camera a drop starts to look smaller the nearer it comes, in metres.
 const NEAR_CAMERA: f32 = 3.0;
 
-/// Where `embedded_asset!` puts `fall.wgsl`: the crate's name, then the path below `src`.
-const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/weather/fall.wgsl";
+/// Where `fall.wgsl` is among the embedded assets (see `WeatherPlugin`).
+pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/fall.wgsl";
 
 pub(super) type FallMaterial = ExtendedMaterial<StandardMaterial, FallMotion>;
 
@@ -397,7 +396,7 @@ mod tests {
 
     #[test]
     fn the_shader_reads_the_fall_in_the_order_it_is_written() {
-        let shader = include_str!("fall.wgsl");
+        let shader = include_str!("../shaders/fall.wgsl");
         let fields = [
             "velocity",
             "snow",

@@ -448,7 +448,11 @@ mod tests {
     fn each_shot_distance_is_in_range_and_they_spread_over_it() {
         let picked: Vec<_> = (0..200).map(|seed| shot_distance(stir(seed))).collect();
         let (nearest, furthest) = SHOT_DISTANCE;
-        assert!(picked.iter().all(|share| (nearest..furthest).contains(share)));
+        assert!(
+            picked
+                .iter()
+                .all(|share| (nearest..furthest).contains(share))
+        );
         let middle = (nearest + furthest) / 2.0;
         assert!(picked.iter().any(|share| *share < nearest + 0.1));
         assert!(picked.iter().any(|share| *share > furthest - 0.1));

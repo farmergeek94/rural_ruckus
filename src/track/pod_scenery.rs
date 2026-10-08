@@ -536,7 +536,9 @@ fn cut_out(rgba: &mut [u8], size: usize) {
         match (pixels.first(), pixels.get(size.wrapping_sub(1))) {
             (Some(left), Some(right))
                 if left[..3] == right[..3]
-                    && left[..3].iter().all(|&channel| channel <= DARKEST_CORNER_KEY) =>
+                    && left[..3]
+                        .iter()
+                        .all(|&channel| channel <= DARKEST_CORNER_KEY) =>
             {
                 [left[0], left[1], left[2]]
             }

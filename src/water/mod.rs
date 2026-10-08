@@ -7,9 +7,12 @@
 //!   that rolls downwind, and a chop that the wind's gusts ruffle as they sweep over it.
 //! - `wind`: the wind that raises the waves and carries the spray, which gusts.
 //! - `ripples`: the rings that spread from where trucks disturb it, which the shader draws.
-//! - `splash`: the spray and splashes that trucks throw up, and the ripples they leave.
+//! - `wake`: where trucks' tires break the surface, and the ripples they leave.
 //! - `shore`: where the water meets the land: the foam and surf that `water.wgsl` draws
-//!   there, and the spray thrown up where the swell and the trucks' ripples come in.
+//!   there, and where the swell and the trucks' ripples break on it.
+//!
+//! The spray is the `particles` slice's. This slice tells it where the water is broken
+//! (`TireInWater`, `Surf`), in `WaterSystems::Waves`, and gives it the wind (`Wind`).
 //! - With `WaterSettings::flat`, `surface` draws a plain flat plane instead of both.
 //! - `underwater`: the tint over the picture while the camera is under the surface.
 //! - `ice`: in snow the water is frozen, a solid sheet of ice that trucks drive on. Then
@@ -20,8 +23,8 @@
 //! Only the look moves. Trucks meet the water at its still level: the swell is a few tenths
 //! of a metre, which the forces and the splashes pass over.
 //!
-//! The forces work in any app. What is drawn (the surface's look, ripples and spray) only
-//! in an app that can draw.
+//! The forces work in any app. What is drawn (the surface's look and ripples), and what is
+//! told to the spray, only in an app that can draw.
 //!
 //! Uses the `track` slice for where the water is, the `truck` slice for the trucks, and the
 //! `weather` slice, if it is there, for whether the water is frozen.
@@ -31,18 +34,25 @@ mod forces;
 mod ice;
 mod ripples;
 mod shore;
-mod splash;
 mod surface;
 mod underwater;
+mod wake;
 mod wind;
 
-use bevy::asset::embedded_asset;
+use std::path::{Path, PathBuf};
+
+use bevy::asset::io::embedded::EmbeddedAssetRegistry;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 
 use crate::game_state::GameState;
 use crate::track::{DRAWN_PAST_EDGE, TrackData, TrackSystems};
 use crate::truck::TruckSystems;
+
+pub use shore::SwellWave;
+pub use surface::WATER_COLOR;
+pub use wake::SPLASH_SPEED;
+pub use wind::Wind;
 
 pub struct WaterPlugin;
 
@@ -70,31 +80,32 @@ impl Plugin for WaterPlugin {
         // Only an app that draws things can use a material. A headless one has neither
         // the renderer nor anywhere to put a shader.
         if app.is_plugin_added::<PbrPlugin>() {
-            embedded_asset!(app, "water.wgsl");
-            crate::particles::add(app);
+            // In `src/shaders`, with the game's other shaders: `embedded_asset!` takes only
+            // a path below this file's folder.
+            app.world_mut()
+                .resource_mut::<EmbeddedAssetRegistry>()
+                .insert_asset(
+                    PathBuf::from("src/shaders/water.wgsl"),
+                    Path::new(surface::SHADER_PATH.trim_start_matches("embedded://")),
+                    include_bytes!("../shaders/water.wgsl").as_slice(),
+                );
             app.add_plugins(MaterialPlugin::<surface::WaterMaterial>::default())
                 .init_resource::<ripples::Ripples>()
-                .init_resource::<wind::Wind>()
-                // On entering the first race, for one begun before `Startup` (see `dirt`).
+                .init_resource::<Wind>()
+                .add_message::<TireInWater>()
+                .add_message::<Surf>()
+                // On entering the first race, for one begun before `Startup` (see
+                // `particles`).
                 .add_systems(
                     OnEnter(GameState::Racing),
-                    (
-                        shore::find_shore,
-                        underwater::spawn_tint,
-                        (
-                            splash::make_droplet_looks
-                                .run_if(not(resource_exists::<splash::DropletLooks>)),
-                            splash::spawn_spray,
-                        )
-                            .chain(),
-                    )
-                        .after(TrackSystems::Prepare),
+                    (shore::find_shore, underwater::spawn_tint).after(TrackSystems::Prepare),
                 )
                 .add_systems(
                     Update,
                     (
-                        (splash::make_waves, shore::splash_shore).run_if(not(ice::frozen)),
-                        splash::spread_rings,
+                        (wake::wade, shore::find_surf)
+                            .run_if(not(ice::frozen))
+                            .in_set(WaterSystems::Waves),
                         surface::show_waves,
                         surface::mirror,
                         underwater::tint_under_water,
@@ -105,6 +116,79 @@ impl Plugin for WaterPlugin {
                 );
         }
     }
+}
+
+/// What the water does each frame, for others to order against.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum WaterSystems {
+    /// Where the trucks and the swell break the water: `TireInWater` and `Surf` are
+    /// written, and the trucks' ripples left. In `Update`.
+    Waves,
+}
+
+/// A tire breaking the water's surface this frame. Only in an app that can draw, and only
+/// while `WaterSettings::splashes` is on.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct TireInWater {
+    /// The truck, as it is drawn (`truck::TruckVisual`).
+    pub truck: Entity,
+    /// Which of its wheels, as `truck::TruckConfig::wheel_rest` counts them.
+    pub wheel: usize,
+    /// Where the tire meets the water, on the outside of the tire, at the still level.
+    pub at: Vec3,
+    /// The middle of the wheel.
+    pub hub: Vec3,
+    /// Out from the truck's side, of length 1.
+    pub outwards: Vec3,
+    /// The way the truck faces, of length 1.
+    pub forward: Vec3,
+    /// How fast the tire goes, in m/s.
+    pub moving: Vec3,
+    /// How fast its tread goes round, in m/s, forwards positive (`truck::Wheel::tread_speed`):
+    /// faster than `moving` while the tire spins.
+    pub tread: f32,
+    /// How far up the tire the water comes, from 0 (at its bottom) to 1 (over its top).
+    pub wet: f32,
+    /// The tire's radius and width, in metres.
+    pub wheel_radius: f32,
+    pub wheel_width: f32,
+    /// Whether it was out of the water the frame before.
+    pub entered: bool,
+    /// When it came down into the water fast enough to splash: how.
+    pub plunge: Option<Plunge>,
+}
+
+/// How a tire came down into the water.
+#[derive(Clone, Copy, Debug)]
+pub struct Plunge {
+    /// How fast it came down, in m/s.
+    pub speed: f32,
+    /// The surface under its hub, on the swell as it is drawn.
+    pub under_hub: Vec3,
+}
+
+/// The water breaking on the shore near the camera this frame. Only in an app that can
+/// draw, and only while `WaterSettings::splashes` is on.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Surf {
+    /// Where, on the water's surface.
+    pub at: Vec3,
+    /// How far along the shore it breaks, in metres, centred on `at`.
+    pub width: f32,
+    /// Which way the water comes in, on the ground plane (world X and Z), of length 1.
+    pub inwards: Vec2,
+    /// How steep the bank is, in metres of rise for each metre across.
+    pub steepness: f32,
+    pub kind: SurfKind,
+}
+
+/// What breaks on the shore.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SurfKind {
+    /// A crest of the swell.
+    Swell,
+    /// A truck's ripple, `height` metres high where it comes in.
+    Ripple { height: f32 },
 }
 
 /// Choices about the water. Change it at any time.

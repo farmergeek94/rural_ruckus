@@ -145,7 +145,7 @@ fn each_key_reaches_what_is_already_spawned() {
     press(&mut app, KeyCode::F3);
     assert_eq!(cameras.single(app.world()).unwrap(), (&Msaa::Off, true));
 
-    // Shadow distance: 150 m to 300 m, with the four cascades it began with.
+    // Shadow distance: 300 m goes round to 50 m, with the four cascades it began with.
     press(&mut app, KeyCode::F5);
     let mut suns = app
         .world_mut()
@@ -154,7 +154,7 @@ fn each_key_reaches_what_is_already_spawned() {
     assert!(light.shadow_maps_enabled);
     assert_eq!(cascades.bounds.len(), 4);
     // The bounds are worked out as powers, so only nearly.
-    assert!((cascades.bounds[3] - 300.0).abs() < 0.01);
+    assert!((cascades.bounds[3] - 50.0).abs() < 0.01);
 
     // Shadow cascades: 4 goes round to none.
     press(&mut app, KeyCode::F4);

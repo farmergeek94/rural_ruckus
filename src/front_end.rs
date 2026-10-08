@@ -27,7 +27,7 @@
 //!
 //! The options screen, and the ADVANCED screen beside it, show settings that belong to
 //! other slices: the window's (`display`), the graphics (`camera`, `environment`, `track`,
-//! `water`, `dirt`, `backdrop`), the `weather`, and a few more. The options screen's
+//! `water`, `particles`, `backdrop`), the `weather`, and a few more. The options screen's
 //! Quality line stands for the graphics that cost most, which are on the ADVANCED screen
 //! with the physics, the scenery's among them, and sets them all at once. Each line of `OPTIONS` says which value of which slice's settings resource it stands for. A change
 //! goes to that resource at once, and to the store, and what the store holds is set when
@@ -60,11 +60,11 @@ use crate::base_game::{self, BaseGame};
 use crate::backdrop::BackdropSettings;
 use crate::camera::{Antialiasing, CameraSettings};
 use crate::controls_help::ControlsHelpSettings;
-use crate::dirt::DirtSettings;
 use crate::display::{DisplaySettings, ScreenMode, Vsync};
 use crate::environment::{EnvironmentSettings, Lighting};
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
+use crate::particles::DirtSettings;
 use crate::physics::PhysicsSettings;
 use crate::race::{RaceCancelled, RacePause, RaceSettings};
 use crate::store::{self, Store};
@@ -1376,9 +1376,10 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
             &mut options.track,
         );
     },
-    // High: the defaults, with the scenery drawn to 600 m, less filtering, and the ground's
-    // textures meeting edge to edge.
+    // High: the defaults, with the shadows reaching 150 m, the scenery drawn to 600 m, less
+    // filtering, and the ground's textures meeting edge to edge.
     |options| {
+        options.environment.shadow_distance = 150.0;
         options.track.anisotropy = 8;
         options.track.scenery_distance = 600.0;
         options.track.blend_ground = false;

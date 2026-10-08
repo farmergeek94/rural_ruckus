@@ -1,10 +1,10 @@
-//! The dirt slice in a headless app. Dirt is only a look, so an app that cannot draw gets
-//! none, and the slice must not stop such an app from racing.
+//! The particles slice in a headless app. Particles are only a look, so an app that cannot
+//! draw gets none, and the slice must not stop such an app from racing.
 //!
-//! How the dirt looks is checked by driving (see AGENTS.md).
+//! How the dirt and the spray look is checked by driving (see AGENTS.md).
 
 use bevy::prelude::*;
-use monster_truck_rural_ruckus::dirt::{Dirt, DirtPlugin};
+use monster_truck_rural_ruckus::particles::{Dirt, ParticlesPlugin};
 use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, builtin_track};
 use monster_truck_rural_ruckus::truck::TruckPlugin;
@@ -22,7 +22,7 @@ fn a_headless_app_races_with_no_dirt() {
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
         .init_resource::<ButtonInput<KeyCode>>()
-        .add_plugins((TrackPlugin, TruckPlugin, DirtPlugin));
+        .add_plugins((TrackPlugin, TruckPlugin, ParticlesPlugin));
     // Avian makes some of its resources in `Plugin::finish`, which `App::update` never
     // calls (see `physics`).
     app.finish();

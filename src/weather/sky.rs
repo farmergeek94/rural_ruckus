@@ -13,10 +13,9 @@ use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
 use super::conditions::Conditions;
-use super::{TimeOfDay, Weather, WeatherSettings};
+use super::{ParticleLight, TimeOfDay, Weather, WeatherSettings};
 use crate::camera::ChaseCamera;
 use crate::environment::{SKY, SUN_FROM, SUNLIGHT, Sun};
-use crate::particles::ParticleLight;
 
 /// The light from all round that lights particles fully on its own, in candela per square
 /// metre: about the brightest of the weathers'. With the sun's share, a clear day, overcast

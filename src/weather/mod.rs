@@ -30,7 +30,9 @@ mod fall;
 mod grip;
 mod sky;
 
-use bevy::asset::embedded_asset;
+use std::path::{Path, PathBuf};
+
+use bevy::asset::io::embedded::EmbeddedAssetRegistry;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 
@@ -45,6 +47,7 @@ impl Plugin for WeatherPlugin {
     fn build(&self, app: &mut App) {
         // `TrackPlugin` and `TruckPlugin`, which this slice needs, have made sure of the state.
         app.init_resource::<WeatherSettings>()
+            .init_resource::<ParticleLight>()
             .init_resource::<TruckLamps>()
             .init_resource::<KeyBindings>()
             .add_systems(OnEnter(GameState::Racing), pick_the_weather)
@@ -62,7 +65,15 @@ impl Plugin for WeatherPlugin {
         if !app.is_plugin_added::<PbrPlugin>() {
             return;
         }
-        embedded_asset!(app, "fall.wgsl");
+        // In `src/shaders`, with the game's other shaders: `embedded_asset!` takes only a
+        // path below this file's folder.
+        app.world_mut()
+            .resource_mut::<EmbeddedAssetRegistry>()
+            .insert_asset(
+                PathBuf::from("src/shaders/fall.wgsl"),
+                Path::new(fall::SHADER_PATH.trim_start_matches("embedded://")),
+                include_bytes!("../shaders/fall.wgsl").as_slice(),
+            );
         app.add_plugins(MaterialPlugin::<fall::FallMaterial>::default())
             .add_systems(Startup, fall::make_looks)
             .add_systems(OnExit(GameState::Racing), sky::clear_the_sky)
@@ -96,6 +107,18 @@ pub struct WeatherSettings {
     /// `weather` and `time_of_day`.
     pub random: bool,
     pub time_of_day: TimeOfDay,
+}
+
+/// How brightly what is not lit is drawn (the dust, the spray, the rain and the snow), from
+/// 0 (black) to 1 (its own colours, as in full daylight), as the weather and the time of
+/// day light the world.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct ParticleLight(pub f32);
+
+impl Default for ParticleLight {
+    fn default() -> Self {
+        Self(1.0)
+    }
 }
 
 /// When in the day a race is. The game's own light: MTM2 offered a dusk and a night sky

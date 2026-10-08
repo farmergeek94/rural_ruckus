@@ -72,11 +72,12 @@ impl Lighting {
 }
 
 impl Default for EnvironmentSettings {
-    /// Bevy's own defaults.
+    /// Bevy's own defaults, with the shadows reaching twice as far, which is the options
+    /// screen's Best quality.
     fn default() -> Self {
         Self {
             shadow_cascades: 4,
-            shadow_distance: 150.0,
+            shadow_distance: 300.0,
             lighting: Lighting::Full,
         }
     }

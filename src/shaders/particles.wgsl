@@ -5,6 +5,9 @@
 // the camera, this works out where the corner is, as `mod.rs` explains. A slot with no
 // particle in it now puts its four corners at one point, which draws nothing.
 //
+// Particles that lie flat (`Motion::lies_on`) are squares on a surface that waves move up
+// and down, which each corner is lifted onto.
+//
 // The fragment is the standard material's, unlit: the picture, the colour, and the fog.
 // With the camera's depth prepass, it fades out near what is behind it.
 
@@ -50,6 +53,14 @@ struct Motion {
     soft: f32,
     // How many pictures along each side the pool's picture has, as a grid of them.
     shapes: u32,
+    // 1 when the particles lie flat on the surface the waves below make.
+    flat: u32,
+    // Per wave of that surface: the way it rolls along X and along Z, in radians a metre,
+    // how many radians it goes through a second, and how high its crests stand, in metres.
+    wave_x: vec3<f32>,
+    wave_z: vec3<f32>,
+    wave_rates: vec3<f32>,
+    wave_heights: vec3<f32>,
 }
 
 // One particle, as `Slot` in `mod.rs` writes it.
@@ -80,6 +91,13 @@ const TAU: f32 = 6.283185307179586;
 // `mod.rs`.
 fn air_now(time: f32) -> vec3<f32> {
     return motion.air + motion.gusts * dot(motion.gust_weights, sin(TAU * time / motion.gust_periods));
+}
+
+// How high the surface that flat particles lie on stands at `position` (world X and Z) when
+// the clock reads `time`, in metres. As `Waves::height_at` in `pool.rs`.
+fn surface_height(position: vec2<f32>, time: f32) -> f32 {
+    let phase = motion.wave_x * position.x + motion.wave_z * position.y - motion.wave_rates * time;
+    return dot(motion.wave_heights, sin(phase));
 }
 
 @vertex
@@ -134,7 +152,18 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
     // Across and up the picture, from -1 to 1, the top of the picture up.
     let corner = vec2(mesh_vertex.uv.x * 2.0 - 1.0, 1.0 - mesh_vertex.uv.y * 2.0);
     var offset: vec3<f32>;
-    if motion.exposure > 0.0 {
+    if motion.flat == 1u {
+        // Flat on the surface, turned about the up axis, the top of the picture to -Z
+        // before it is turned. Each corner on the surface where it is, so that the square
+        // tilts with the waves under it.
+        let turned = particle.turned + particle.turning * age;
+        let c = cos(turned);
+        let s = sin(turned);
+        let turn = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
+        offset = vec3(turn.x, 0.0, -turn.y) * size;
+        let corner_at = at.xz + offset.xz;
+        offset.y = surface_height(corner_at, now);
+    } else if motion.exposure > 0.0 {
         // Turned to the camera, with the top of the picture along the way it seems to go,
         // and as long as the way it goes while the eye sees it: thinner the longer, as a
         // streak of the same water is.

@@ -48,7 +48,7 @@ use crate::track::Track;
 /// lets more show through where it is shallow (`WATER_CLARITY`), so that a road through a
 /// ford can still be followed, and less at a glancing angle.
 /// `water.wgsl` makes it less see-through at a glancing angle.
-pub(super) const WATER_COLOR: Color = Color::srgba(0.03, 0.2, 0.4, 0.98);
+pub const WATER_COLOR: Color = Color::srgba(0.03, 0.2, 0.4, 0.98);
 /// The flat water's (`WaterSettings::flat`) alpha, the same at every depth and angle:
 /// it has none of `water.wgsl`.
 const FLAT_WATER_ALPHA: f32 = 0.96;
@@ -176,8 +176,8 @@ impl MaterialExtension for WaterWaves {
 /// be: `WaterWaves::specialize` leaves the glass out, and the shader sets it to none.
 const TRANSMISSIVE_PASS: f32 = 1e-4;
 
-/// Where `embedded_asset!` puts `water.wgsl`: the crate's name, then the path below `src`.
-const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/water/water.wgsl";
+/// Where `water.wgsl` is among the embedded assets (see `WaterPlugin`).
+pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/water.wgsl";
 
 /// Spawns the surface. In an app that can't draw it is still there, bare, as a marker that
 /// the track has water.
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn the_shader_knows_the_patch() {
-        let shader = include_str!("water.wgsl");
+        let shader = include_str!("../shaders/water.wgsl");
         assert!(shader.contains(&format!("const PATCH_SIZE: f32 = {PATCH_SIZE:?};")));
         assert!(shader.contains(&format!("const PATCH_SPACING: f32 = {PATCH_SPACING:?};")));
     }

@@ -1,0 +1,964 @@
+//! Particles moved on the graphics card.
+//!
+//! A pool of particles is one mesh of small squares, one for each slot, and a storage
+//! buffer on the graphics card with one record for each slot. When a particle is thrown,
+//! the CPU writes its record once: where it starts, how fast it goes, when it was thrown
+//! and when it goes. `particles.wgsl` works out where it is, and turns and sizes it, every
+//! frame from those and the time. So the CPU's work goes with how many are thrown, not
+//! with how many are in the air: as entities, one each, the particles cost a transform, a
+//! cull, an extraction and a sort each, every frame.
+//!
+//! Only the records thrown in a frame go to the graphics card, straight into their place in
+//! the buffer, from the render world (`upload`). The mesh never changes after it is made.
+//! When the particles were in the mesh, one particle thrown sent the whole mesh again: with
+//! 2000 slots, half a megabyte, nearly every frame while driving.
+//!
+//! How a particle moves has an exact answer: gravity, and drag towards the moving air,
+//! which the shader works out for any age (see `Motion::at`). The air is the same for a
+//! whole pool, and gusts (`Air`): the shader works out how it moves now from its clock, so
+//! that a gusting wind sends nothing to the graphics card, and a gust moves all the pool's
+//! particles a little. When a particle comes down on the ground or the water is worked out
+//! on the CPU when it is thrown, by following its path, so that the shader needs no map of
+//! the ground. The path is followed without the air, which only moves it across the ground.
+//!
+//! A particle can trail along a line from where it is (`Particle::trail`): drawn as long as
+//! the line, as the camera sees it, and no thinner, so that particles thrown along a path
+//! run together.
+//!
+//! A pool's picture can be a grid of pictures (`Motion::shapes`), of which each particle
+//! draws the one it is given (`Particle::shape`), so that not every particle looks the same.
+//!
+//! A pool's particles can fade out where they come near what is behind them
+//! (`Motion::soft`), so that one cut through by the ground or a truck has no hard edge.
+//! That needs the camera's depth prepass; without it they are cut off as before.
+//!
+//! A pool's particles can lie flat on a surface (`Motion::lies_on`) instead of turning to the
+//! camera: foam on water. The surface rises and falls with up to three waves (`Waves`),
+//! which the shader works out at each corner from its clock, so that a particle keeps to
+//! the moving surface it lies on all its life. Such a pool is drawn before the others, under
+//! what is in the air over it.
+//!
+//! The squares of one pool are not sorted against each other: the particles are small, soft
+//! and see-through, and drawn in the order they are in the mesh. The pool's entity is kept
+//! at the camera, so that it is sorted with what is nearest, over the water.
+//!
+//! The shader's clock (`globals.time`) goes back to 0 every hour, when the particles in the
+//! air are lost.
+//!
+//! Particles are not lit, as lit squares turned to the camera would light oddly. So that
+//! they do not shine in the dark, every pool is as bright as it is told (`light`), by
+//! whoever knows how the world is lit.
+//!
+//! Knows nothing of the game: the `particles` slice spawns the pools and throws into them.
+//! Only for an app that can draw.
+
+use std::path::{Path, PathBuf};
+
+use bevy::asset::RenderAssetUsages;
+use bevy::asset::io::embedded::EmbeddedAssetRegistry;
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::ecs::system::SystemParam;
+use bevy::light::{NotShadowCaster, NotShadowReceiver};
+use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::prelude::*;
+use bevy::render::render_asset::RenderAssets;
+use bevy::render::render_resource::encase::StorageBuffer;
+use bevy::render::render_resource::{AsBindGroup, ShaderSize, ShaderType};
+use bevy::render::renderer::RenderQueue;
+use bevy::render::storage::{GpuShaderBuffer, ShaderBuffer};
+use bevy::render::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems};
+use bevy::shader::ShaderRef;
+
+/// Where `particles.wgsl` is among the embedded assets (see `add`).
+const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/particles.wgsl";
+
+/// How far apart, in seconds, the points of its path are that a particle is looked for
+/// under the ground at when it is thrown. Between the one above and the one under, the
+/// place it comes down is then found to within a sixteenth of this.
+const PATH_STEP: f32 = 1.0 / 30.0;
+const PATH_HALVINGS: usize = 4;
+
+pub type ParticleMaterial = ExtendedMaterial<StandardMaterial, ParticleMotion>;
+
+/// Makes particles work in `app`: their material, and what writes them to their meshes.
+pub fn add(app: &mut App) {
+    // In `src/shaders`, with the game's other shaders: `embedded_asset!` takes only a path
+    // below this file's folder.
+    app.world_mut()
+        .resource_mut::<EmbeddedAssetRegistry>()
+        .insert_asset(
+            PathBuf::from("src/shaders/particles.wgsl"),
+            Path::new(SHADER_PATH.trim_start_matches("embedded://")),
+            include_bytes!("../shaders/particles.wgsl").as_slice(),
+        );
+    app.add_plugins(MaterialPlugin::<ParticleMaterial>::default())
+        .init_resource::<Uploads>()
+        // After every slice's `Update`, where they are thrown, so that they are drawn in
+        // the frame they are thrown in.
+        .add_systems(PostUpdate, draw);
+    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+        render_app
+            .init_resource::<Uploads>()
+            .add_systems(ExtractSchedule, extract_uploads)
+            // After the buffers are made, which a pool's first frame may need.
+            .add_systems(Render, upload.in_set(RenderSystems::PrepareResources));
+    }
+}
+
+/// Makes every pool as bright as `level` says, from 0 (black) to 1 (their own colours, as
+/// in full daylight). Only a real change is sent.
+pub fn light(level: f32, pools: &Query<&Particles>, materials: &mut Assets<ParticleMaterial>) {
+    let level = level.clamp(0.0, 1.0);
+    let color = Color::linear_rgb(level, level, level);
+    for pool in pools {
+        if materials
+            .get(&pool.material)
+            .is_some_and(|material| material.base.base_color != color)
+            && let Some(mut material) = materials.get_mut(&pool.material)
+        {
+            material.base.base_color = color;
+        }
+    }
+}
+
+/// How the particles of one pool move and look.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Motion {
+    /// How fast they fall, in m/s². Below 0, they rise.
+    pub gravity: f32,
+    /// How much of their speed through the air they lose each second. Above 0.
+    pub drag: f32,
+    /// How long one lasts, in seconds, if it doesn't come down first.
+    pub life: f32,
+    /// Whether one is gone when it comes down on the ground or the water, rather than going
+    /// on through it.
+    pub lands: bool,
+    /// How fast they spread, in metres of radius each second.
+    pub spread: f32,
+    /// How old one is when it starts to fade out, in seconds: it is clear at `life`. At
+    /// `life` or later, it doesn't fade.
+    pub fade_from: f32,
+    /// How old one is when it starts to shrink away, in seconds: it is gone at `life`. At
+    /// `life` or later, it doesn't shrink.
+    pub shrink_from: f32,
+    /// How many pictures along each side the pool's picture has, as a grid of them, of
+    /// which each particle draws its `shape`. 1 for one picture.
+    pub shapes: u32,
+    /// How near what is behind it one starts to fade out, in metres, so that where the
+    /// ground or a truck cuts through it there is no hard edge. At 0, it is cut off.
+    pub soft: f32,
+    /// How long the eye sees one for, in seconds: above 0, it is drawn as a streak along
+    /// the way it seems to go, as long as the way it goes in that time. At 0, it is a
+    /// square turned to the camera.
+    pub exposure: f32,
+    /// How near the camera one starts to look smaller the nearer it comes, in metres, so
+    /// that none go past the camera as big blobs.
+    pub near_camera: f32,
+    /// The surface they lie flat on, if they do: each is a flat square on it, as high as it
+    /// is thrown plus as high as the waves stand there, turned only about the up axis. So
+    /// they must not be thrown up or down, nor fall. Not with `exposure` or a trail.
+    pub lies_on: Option<Waves>,
+}
+
+impl Motion {
+    /// Where a particle thrown from `from` at `velocity`, in air going at `air`, is `age`
+    /// seconds later, and how fast it goes then. As `particles.wgsl` works it out.
+    ///
+    /// The air slows it by `drag` times its speed through the air, and gravity pulls it
+    /// down: so it tends to the speed at which the two balance, `settle`, and closes on it
+    /// by the same share each second.
+    pub fn at(&self, from: Vec3, velocity: Vec3, air: Vec3, age: f32) -> (Vec3, Vec3) {
+        let settle = air - Vec3::Y * self.gravity / self.drag;
+        let decay = (-self.drag * age).exp();
+        let at = from + settle * age + (velocity - settle) * (1.0 - decay) / self.drag;
+        (at, settle + (velocity - settle) * decay)
+    }
+
+    /// How long a particle thrown from `from` at `velocity` lasts: until it comes down
+    /// below `floor` (the height under a point of the ground plane), if it lands, and no
+    /// longer than its life.
+    fn lifetime(&self, from: Vec3, velocity: Vec3, floor: impl Fn(Vec2) -> f32) -> f32 {
+        if !self.lands {
+            return self.life;
+        }
+        let under = |age: f32| {
+            let (at, velocity) = self.at(from, velocity, Vec3::ZERO, age);
+            velocity.y < 0.0 && at.y < floor(at.xz())
+        };
+        let mut age = PATH_STEP;
+        while age < self.life {
+            if under(age) {
+                // Back to just under, between the step above and this one.
+                let (mut above, mut below) = (age - PATH_STEP, age);
+                for _ in 0..PATH_HALVINGS {
+                    let middle = (above + below) / 2.0;
+                    if under(middle) {
+                        below = middle;
+                    } else {
+                        above = middle;
+                    }
+                }
+                return below;
+            }
+            age += PATH_STEP;
+        }
+        self.life
+    }
+}
+
+/// How the air moves that carries the particles of a pool: steadily, and in gusts on top,
+/// which are `gusts` times a mix of three swings of the shader's clock. `particles.wgsl`
+/// works it out every frame (`Air::at`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Air {
+    /// How it moves between gusts, in m/s.
+    pub steady: Vec3,
+    /// How far a full gust takes it from `steady`, in m/s.
+    pub gusts: Vec3,
+    /// How long each of the three swings takes, in seconds. Above 0.
+    pub periods: [f32; 3],
+    /// How much of `gusts` each swing is.
+    pub weights: [f32; 3],
+}
+
+impl Air {
+    /// Air that doesn't move.
+    pub const STILL: Air = Air {
+        steady: Vec3::ZERO,
+        gusts: Vec3::ZERO,
+        periods: [1.0; 3],
+        weights: [0.0; 3],
+    };
+
+    /// How fast it goes, in m/s, when the shader's clock reads `time`. As `air_now` in
+    /// `particles.wgsl`, which only the tests need on the CPU.
+    #[cfg(test)]
+    pub fn at(&self, time: f32) -> Vec3 {
+        let tau = std::f32::consts::TAU;
+        let swing: f32 = (0..3)
+            .map(|index| self.weights[index] * (tau * time / self.periods[index]).sin())
+            .sum();
+        self.steady + self.gusts * swing
+    }
+}
+
+/// A surface that rises and falls with three waves rolling across it, each a sine of where
+/// and when. As `surface_height` in `particles.wgsl`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Waves {
+    /// Per wave: the way it rolls, on the ground plane (world X and Z), times how many
+    /// radians it goes through for each metre that way.
+    pub travel: [Vec2; 3],
+    /// Per wave: how many radians it goes through each second at any one place.
+    pub rates: [f32; 3],
+    /// Per wave: how high its crests stand, in metres.
+    pub heights: [f32; 3],
+}
+
+impl Waves {
+    /// A surface with no waves on it.
+    pub const FLAT: Waves = Waves {
+        travel: [Vec2::ZERO; 3],
+        rates: [0.0; 3],
+        heights: [0.0; 3],
+    };
+
+    /// How high the surface stands at `position` (world X and Z) when the shader's clock
+    /// reads `time`, in metres. As `surface_height` in `particles.wgsl`, which only the tests
+    /// need on the CPU.
+    #[cfg(test)]
+    pub fn height_at(&self, position: Vec2, time: f32) -> f32 {
+        (0..3)
+            .map(|wave| {
+                let phase = self.travel[wave].dot(position) - self.rates[wave] * time;
+                self.heights[wave] * phase.sin()
+            })
+            .sum()
+    }
+}
+
+/// How much further off than the other pools a pool that lies flat is sorted, in metres,
+/// so that it is drawn before them: foam on the water under the spray over it. All pools
+/// are kept at the camera, so a little is enough. Bevy also adds a material's depth bias to
+/// its depth, but only the whole part, which is none.
+const FLAT_SORT: f32 = -0.01;
+
+/// One particle, as it is thrown.
+#[derive(Clone, Copy, Debug)]
+pub struct Particle {
+    /// Where it starts, in metres.
+    pub at: Vec3,
+    /// How fast it goes, in m/s.
+    pub velocity: Vec3,
+    /// Its radius, in metres.
+    pub size: f32,
+    /// How far it is turned in the picture, in radians, and how fast it turns, in radians a
+    /// second. Not for a streak, which lies along the way it goes, nor for one that trails.
+    pub turned: f32,
+    pub turning: f32,
+    /// Its colour, times the pool's picture, and how solid it is, from 0 to 1.
+    pub color: LinearRgba,
+    /// The line it trails along from where it is, in metres: it is drawn from there to the
+    /// end of the line, as long as the line as the camera sees it, and no thinner. Zero for
+    /// one as long as it is wide. Not for a streak.
+    pub trail: Vec3,
+    /// Which of its pool's pictures it is drawn with, counted across the grid's rows from
+    /// the top left (see `Motion::shapes`).
+    pub shape: u32,
+}
+
+/// How the particles of a pool move, for `particles.wgsl`.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct ParticleMotion {
+    #[uniform(100)]
+    motion: MotionUniform,
+    /// One `Slot` for each square of the pool's mesh.
+    #[storage(101, read_only)]
+    slots: Handle<ShaderBuffer>,
+}
+
+/// One particle as the shader reads it, as `Slot` in `particles.wgsl`: 80 bytes, in the
+/// buffer at `slot * Slot::SHADER_SIZE`.
+#[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
+struct Slot {
+    at: Vec3,
+    size: f32,
+    velocity: Vec3,
+    turned: f32,
+    color: Vec4,
+    /// When it was thrown and when it goes, on the shader's clock.
+    life: Vec2,
+    turning: f32,
+    trail: Vec3,
+    shape: u32,
+}
+
+impl Slot {
+    fn new(particle: &Particle, life: [f32; 2]) -> Self {
+        Self {
+            at: particle.at,
+            size: particle.size,
+            velocity: particle.velocity,
+            turned: particle.turned,
+            color: particle.color.to_vec4(),
+            life: Vec2::from(life),
+            turning: particle.turning,
+            trail: particle.trail,
+            shape: particle.shape,
+        }
+    }
+}
+
+/// Writes of slots to a pool's buffer: in the main world, those of this frame, which the
+/// render world takes at extraction and writes to the graphics card. Sheets (`sheet`) send
+/// their rows the same way.
+#[derive(Resource, Default)]
+pub(super) struct Uploads(Vec<Upload>);
+
+impl Uploads {
+    /// Writes `bytes` into `buffer`, `offset` bytes in, at the end of this frame.
+    pub(super) fn send(&mut self, buffer: AssetId<ShaderBuffer>, offset: u64, bytes: Vec<u8>) {
+        self.0.push(Upload {
+            buffer,
+            offset,
+            bytes,
+        });
+    }
+}
+
+/// A run of neighbouring slots, written as one.
+struct Upload {
+    buffer: AssetId<ShaderBuffer>,
+    /// Where the first slot starts in the buffer, in bytes.
+    offset: u64,
+    bytes: Vec<u8>,
+}
+
+impl MaterialExtension for ParticleMotion {
+    fn vertex_shader() -> ShaderRef {
+        SHADER_PATH.into()
+    }
+
+    fn fragment_shader() -> ShaderRef {
+        SHADER_PATH.into()
+    }
+}
+
+/// As `Motion` in `particles.wgsl`, where each is explained. Each `Vec3` is followed by
+/// an `f32`, which fills out its 16 bytes.
+#[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
+struct MotionUniform {
+    air: Vec3,
+    gravity: f32,
+    gusts: Vec3,
+    drag: f32,
+    gust_periods: Vec3,
+    life: f32,
+    gust_weights: Vec3,
+    spread: f32,
+    fade_from: f32,
+    shrink_from: f32,
+    exposure: f32,
+    near_camera: f32,
+    soft: f32,
+    shapes: u32,
+    /// 1 when the particles lie flat on the surface the waves below make, else 0.
+    flat: u32,
+    /// Per wave, as `Waves` has them: its `travel` along X and along Z, its rate and its
+    /// height.
+    wave_x: Vec3,
+    wave_z: Vec3,
+    wave_rates: Vec3,
+    wave_heights: Vec3,
+}
+
+impl MotionUniform {
+    fn new(motion: Motion, air: Air) -> Self {
+        Self {
+            air: air.steady,
+            gravity: motion.gravity,
+            gusts: air.gusts,
+            drag: motion.drag,
+            gust_periods: Vec3::from(air.periods),
+            life: motion.life,
+            gust_weights: Vec3::from(air.weights),
+            spread: motion.spread,
+            fade_from: motion.fade_from,
+            shrink_from: motion.shrink_from,
+            exposure: motion.exposure,
+            near_camera: motion.near_camera,
+            soft: motion.soft,
+            shapes: motion.shapes,
+            flat: 0,
+            wave_x: Vec3::ZERO,
+            wave_z: Vec3::ZERO,
+            wave_rates: Vec3::ZERO,
+            wave_heights: Vec3::ZERO,
+        }
+        .lying_on(motion.lies_on)
+    }
+
+    /// This, with its particles lying flat on `surface`, or not, without one.
+    fn lying_on(self, surface: Option<Waves>) -> Self {
+        let waves = surface.unwrap_or(Waves::FLAT);
+        Self {
+            flat: surface.is_some().into(),
+            wave_x: Vec3::from_array(waves.travel.map(|travel| travel.x)),
+            wave_z: Vec3::from_array(waves.travel.map(|travel| travel.y)),
+            wave_rates: Vec3::from(waves.rates),
+            wave_heights: Vec3::from(waves.heights),
+            ..self
+        }
+    }
+}
+
+/// A pool of particles, on the entity that draws them.
+#[derive(Component)]
+pub struct Particles {
+    motion: Motion,
+    /// Per slot: when its particle was thrown and when it goes, on the shader's clock.
+    lives: Vec<[f32; 2]>,
+    /// Where to start looking for a free slot.
+    next: usize,
+    /// The particles thrown since they were last sent to the buffer, and their slots.
+    thrown: Vec<(usize, Particle, [f32; 2])>,
+    buffer: Handle<ShaderBuffer>,
+    material: Handle<ParticleMaterial>,
+}
+
+impl Particles {
+    /// How many more particles could be thrown now. `now` is `clock(time)`.
+    pub fn room(&self, now: f32) -> usize {
+        self.lives
+            .iter()
+            .filter(|life| is_free(**life, now))
+            .count()
+    }
+
+    /// Has the particles, thrown and to come, lie on `waves` from now: they keep to the
+    /// surface as it changes. Only for a pool whose particles lie flat (`Motion::lies_on`).
+    pub fn lie_on(&mut self, waves: Waves, materials: &mut Assets<ParticleMaterial>) {
+        if self.motion.lies_on == Some(waves) {
+            return;
+        }
+        self.motion.lies_on = Some(waves);
+        if let Some(mut material) = materials.get_mut(&self.material) {
+            material.extension.motion = material.extension.motion.lying_on(Some(waves));
+        }
+    }
+
+    /// Throws `particle` now (`clock(time)`), if there is room. It comes down where it goes
+    /// below `floor`, the height under a point of the ground plane, if its pool's
+    /// particles land. Returns whether it was thrown.
+    pub fn throw(&mut self, now: f32, particle: Particle, floor: impl Fn(Vec2) -> f32) -> bool {
+        let slots = self.lives.len();
+        let Some(slot) = (0..slots)
+            .map(|step| (self.next + step) % slots)
+            .find(|slot| is_free(self.lives[*slot], now))
+        else {
+            return false;
+        };
+        self.next = (slot + 1) % slots;
+        let lasts = self.motion.lifetime(particle.at, particle.velocity, floor);
+        let life = [now, now + lasts];
+        self.lives[slot] = life;
+        self.thrown.push((slot, particle, life));
+        true
+    }
+}
+
+/// The time on the shader's clock, in seconds, for `Particles::throw` and `Particles::room`.
+pub fn clock(time: &Time) -> f32 {
+    time.elapsed_secs_wrapped()
+}
+
+/// Whether a slot whose particle was thrown and goes at `life` is free `now`. After the
+/// clock goes back to 0, one thrown before is gone.
+fn is_free([thrown, goes]: [f32; 2], now: f32) -> bool {
+    now >= goes || now < thrown
+}
+
+/// Where a pool's mesh, material and buffer are kept: what `pool` needs.
+#[derive(SystemParam)]
+pub struct PoolAssets<'w> {
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<ParticleMaterial>>,
+    buffers: ResMut<'w, Assets<ShaderBuffer>>,
+}
+
+/// A pool of `slots` particles that move as `motion` says, carried by `air`, drawn with
+/// `picture`: a picture in white, with its top at the front of a streak. Spawn it with what
+/// else the slice needs on it.
+pub fn pool(
+    assets: &mut PoolAssets,
+    slots: usize,
+    motion: Motion,
+    air: Air,
+    picture: Handle<Image>,
+) -> impl Bundle {
+    let mesh = assets.meshes.add(squares(slots));
+    // Made on the graphics card, where it starts as zeros: every slot empty. Nothing is
+    // kept on the CPU; `upload` writes the slots as they are thrown.
+    let buffer = assets.buffers.add(ShaderBuffer::with_size(
+        slots * Slot::SHADER_SIZE.get() as usize,
+        RenderAssetUsages::default(),
+    ));
+    let material = assets.materials.add(ParticleMaterial {
+        base: StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(picture),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            // Seen from either side: a streak turns its face to the camera only about its
+            // length.
+            cull_mode: None,
+            depth_bias: if motion.lies_on.is_some() {
+                FLAT_SORT
+            } else {
+                0.0
+            },
+            ..default()
+        },
+        extension: ParticleMotion {
+            motion: MotionUniform::new(motion, air),
+            slots: buffer.clone(),
+        },
+    });
+    (
+        Particles {
+            motion,
+            lives: vec![[0.0, 0.0]; slots],
+            next: 0,
+            thrown: Vec::new(),
+            buffer,
+            material: material.clone(),
+        },
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::default(),
+        // Placed by the shader, so never outside the view as a whole.
+        NoFrustumCulling,
+        NotShadowCaster,
+        NotShadowReceiver,
+    )
+}
+
+/// A mesh of `slots` squares. Its first UV is which corner of its square a corner is, the
+/// top of the picture at the first two, and its second which slot the square is, which
+/// the shader reads the particle from. It never changes, so it is only on the graphics
+/// card. It has colours, all zero, only so that the standard material takes the colour the
+/// shader gives each corner.
+fn squares(slots: usize) -> Mesh {
+    let corners: Vec<[f32; 2]> = (0..slots)
+        .flat_map(|_| [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+        .collect();
+    // Exact as a float up to 2^24 slots.
+    let slot_of_corner: Vec<[f32; 2]> = (0..slots)
+        .flat_map(|slot| [[slot as f32, 0.0]; 4])
+        .collect();
+    let indices: Vec<u32> = (0..slots as u32)
+        .flat_map(|square| {
+            let first = square * 4;
+            [first, first + 2, first + 1, first, first + 3, first + 2]
+        })
+        .collect();
+    let vertices = slots * 4;
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; vertices])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, corners)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, slot_of_corner)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0f32; 4]; vertices])
+    .with_inserted_indices(Indices::U32(indices))
+}
+
+/// Hands the particles thrown this frame to the render world, and keeps each pool at the
+/// camera.
+fn draw(
+    mut uploads: ResMut<Uploads>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    mut pools: Query<(&mut Particles, &mut Transform)>,
+) {
+    let eye = cameras
+        .iter()
+        .find(|(camera, _)| camera.is_active)
+        .map(|(_, transform)| transform.translation());
+    for (mut pool, mut transform) in &mut pools {
+        if let Some(eye) = eye {
+            transform.translation = eye;
+        }
+        if pool.thrown.is_empty() {
+            continue;
+        }
+        let thrown = std::mem::take(&mut pool.thrown);
+        let buffer = pool.buffer.id();
+        uploads
+            .0
+            .extend(runs(&thrown).into_iter().map(|(offset, bytes)| Upload {
+                buffer,
+                offset,
+                bytes,
+            }));
+    }
+}
+
+/// `thrown` as runs of neighbouring slots, each as where it starts in the buffer, in
+/// bytes, and its records. Slots are taken in turn, so what is thrown in one frame is
+/// mostly one run.
+fn runs(thrown: &[(usize, Particle, [f32; 2])]) -> Vec<(u64, Vec<u8>)> {
+    let mut sorted: Vec<_> = thrown.iter().collect();
+    // Stable, so that of a slot written twice in one frame, the later one wins.
+    sorted.sort_by_key(|(slot, ..)| *slot);
+    let size = Slot::SHADER_SIZE.get();
+    let mut runs: Vec<(u64, Vec<u8>)> = Vec::new();
+    let mut next_slot = None;
+    for (slot, particle, life) in sorted {
+        let mut bytes = StorageBuffer::new(Vec::with_capacity(size as usize));
+        bytes
+            .write(&Slot::new(particle, *life))
+            .expect("a slot fits in its own bytes");
+        let bytes = bytes.into_inner();
+        match runs.last_mut() {
+            // The same slot again: the later particle replaces the earlier.
+            Some((_, run)) if next_slot == Some(*slot + 1) => {
+                let at = run.len() - size as usize;
+                run[at..].copy_from_slice(&bytes);
+            }
+            Some((_, run)) if next_slot == Some(*slot) => run.extend_from_slice(&bytes),
+            _ => runs.push((*slot as u64 * size, bytes)),
+        }
+        next_slot = Some(*slot + 1);
+    }
+    runs
+}
+
+/// Takes this frame's uploads from the main world.
+fn extract_uploads(mut main_world: ResMut<MainWorld>, mut uploads: ResMut<Uploads>) {
+    if let Some(mut thrown) = main_world.get_resource_mut::<Uploads>() {
+        uploads.0.append(&mut thrown.0);
+    }
+}
+
+/// Writes this frame's slots into their pools' buffers. A pool's buffer is made in the
+/// frame the pool is, before this; one that is gone takes nothing.
+fn upload(
+    mut uploads: ResMut<Uploads>,
+    buffers: Res<RenderAssets<GpuShaderBuffer>>,
+    queue: Res<RenderQueue>,
+) {
+    for upload in uploads.0.drain(..) {
+        if let Some(buffer) = buffers.get(upload.buffer) {
+            queue.write_buffer(&buffer.buffer, upload.offset, &upload.bytes);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const THROWN: Motion = Motion {
+        gravity: 9.81,
+        drag: 0.6,
+        life: 1.6,
+        lands: true,
+        spread: 0.0,
+        fade_from: 1.6,
+        shrink_from: 1.0,
+        shapes: 1,
+        soft: 0.0,
+        exposure: 0.04,
+        near_camera: 6.0,
+        lies_on: None,
+    };
+
+    fn pool(slots: usize, motion: Motion) -> Particles {
+        Particles {
+            motion,
+            lives: vec![[0.0, 0.0]; slots],
+            next: 0,
+            thrown: Vec::new(),
+            buffer: Handle::default(),
+            material: Handle::default(),
+        }
+    }
+
+    fn particle(velocity: Vec3) -> Particle {
+        Particle {
+            at: Vec3::ZERO,
+            velocity,
+            size: 0.1,
+            turned: 0.0,
+            turning: 0.0,
+            color: LinearRgba::WHITE,
+            trail: Vec3::ZERO,
+            shape: 0,
+        }
+    }
+
+    #[test]
+    fn a_particle_moves_as_small_steps_of_gravity_and_drag_would_move_it() {
+        let air = Vec3::new(4.0, 0.0, -3.0);
+        let (from, velocity) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(-2.0, 6.0, 1.0));
+        for motion in [
+            THROWN,
+            Motion {
+                gravity: -0.3,
+                drag: 2.0,
+                ..THROWN
+            },
+        ] {
+            let (mut at, mut moving) = (from, velocity);
+            let dt = 1e-4;
+            for step in 1..=10_000 {
+                moving += (Vec3::NEG_Y * motion.gravity - (moving - air) * motion.drag) * dt;
+                at += moving * dt;
+                if step % 2500 == 0 {
+                    let (exact_at, exact_moving) = motion.at(from, velocity, air, step as f32 * dt);
+                    assert!(at.distance(exact_at) < 2e-3, "{at} {exact_at}");
+                    assert!(
+                        moving.distance(exact_moving) < 2e-3,
+                        "{moving} {exact_moving}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_particle_that_lands_lasts_until_it_comes_down() {
+        let up = particle(Vec3::Y * 4.0);
+        let lasts = THROWN.lifetime(up.at, up.velocity, |_| 0.0);
+        // Back down, and no later than the path's steps find it there.
+        let (at, moving) = THROWN.at(up.at, up.velocity, Vec3::ZERO, lasts);
+        assert!(at.y < 0.0 && moving.y < 0.0);
+        let (before, _) = THROWN.at(up.at, up.velocity, Vec3::ZERO, lasts - PATH_STEP / 16.0);
+        assert!(before.y >= 0.0, "{before}");
+        // Over ground it never comes down to, it lasts its life; and so does one that
+        // doesn't land.
+        assert_eq!(THROWN.lifetime(up.at, up.velocity, |_| -100.0), THROWN.life);
+        let floating = Motion {
+            lands: false,
+            ..THROWN
+        };
+        assert_eq!(floating.lifetime(up.at, up.velocity, |_| 0.0), THROWN.life);
+    }
+
+    #[test]
+    fn a_particle_needs_a_free_slot() {
+        let mut pool = pool(3, THROWN);
+        let never_lands = |_: Vec2| -100.0;
+        assert_eq!(pool.room(10.0), 3);
+        for _ in 0..3 {
+            assert!(pool.throw(10.0, particle(Vec3::Y), never_lands));
+        }
+        assert_eq!(pool.room(10.0), 0);
+        assert!(!pool.throw(10.5, particle(Vec3::Y), never_lands));
+        // Its slots come free as they go.
+        assert_eq!(pool.room(10.0 + THROWN.life), 3);
+        // And when the clock goes back to 0.
+        assert_eq!(pool.room(0.2), 3);
+        // Each is sent to the buffer once, in its own slot.
+        let mut slots: Vec<usize> = pool.thrown.iter().map(|(slot, ..)| *slot).collect();
+        slots.sort();
+        assert_eq!(slots, [0, 1, 2]);
+    }
+
+    #[test]
+    fn neighbouring_slots_are_sent_as_one_run_at_their_place_in_the_buffer() {
+        let size = Slot::SHADER_SIZE.get();
+        let thrown = |slot: usize, goes: f32| (slot, particle(Vec3::Y), [1.0, goes]);
+        let runs = runs(&[
+            thrown(5, 2.0),
+            thrown(3, 2.0),
+            thrown(4, 2.0),
+            thrown(9, 2.0),
+        ]);
+        let placed: Vec<(u64, usize)> = runs.iter().map(|(at, bytes)| (*at, bytes.len())).collect();
+        assert_eq!(
+            placed,
+            [(3 * size, 3 * size as usize), (9 * size, size as usize)]
+        );
+    }
+
+    #[test]
+    fn a_slot_thrown_twice_in_one_frame_keeps_the_later_particle() {
+        let first = (2, particle(Vec3::Y), [1.0, 2.0]);
+        let second = (2, particle(Vec3::Y), [1.5, 3.0]);
+        let runs = runs(&[first, second]);
+        assert_eq!(runs.len(), 1);
+        let mut expected = StorageBuffer::new(Vec::<u8>::new());
+        expected.write(&Slot::new(&second.1, second.2)).unwrap();
+        assert_eq!(runs[0].1, expected.into_inner());
+    }
+
+    #[test]
+    fn the_shader_reads_a_slot_in_the_order_it_is_written() {
+        // WGSL lays out a struct as encase does, so the fields in the same order give the
+        // same 80 bytes.
+        assert_eq!(Slot::SHADER_SIZE.get(), 80);
+        let shader = include_str!("../shaders/particles.wgsl");
+        let fields = [
+            "at", "size", "velocity", "turned", "color", "life", "turning", "trail", "shape",
+        ];
+        let mut from = shader.find("struct Slot {").expect("struct Slot");
+        for field in fields {
+            let at = shader[from..]
+                .find(&format!("    {field}: "))
+                .unwrap_or_else(|| panic!("{field} out of order in particles.wgsl"));
+            from += at + 1;
+        }
+    }
+
+    #[test]
+    fn the_shader_reads_the_motion_in_the_order_it_is_written() {
+        let shader = include_str!("../shaders/particles.wgsl");
+        let fields = [
+            "air",
+            "gravity",
+            "gusts",
+            "drag",
+            "gust_periods",
+            "life",
+            "gust_weights",
+            "spread",
+            "fade_from",
+            "shrink_from",
+            "exposure",
+            "near_camera",
+            "soft",
+            "shapes",
+            "flat",
+            "wave_x",
+            "wave_z",
+            "wave_rates",
+            "wave_heights",
+        ];
+        let mut from = shader.find("struct Motion {").expect("struct Motion");
+        for field in fields {
+            let at = shader[from..]
+                .find(&format!("    {field}: "))
+                .unwrap_or_else(|| panic!("{field} out of order in particles.wgsl"));
+            from += at + 1;
+        }
+        let air = Air {
+            steady: Vec3::X,
+            gusts: Vec3::Z,
+            periods: [3.0, 2.0, 1.0],
+            weights: [0.5, 0.3, 0.2],
+        };
+        let uniform = MotionUniform::new(THROWN, air);
+        assert_eq!(uniform.air, Vec3::X);
+        assert_eq!(uniform.gusts, Vec3::Z);
+        assert_eq!(uniform.gust_periods, Vec3::new(3.0, 2.0, 1.0));
+        assert_eq!(uniform.gust_weights, Vec3::new(0.5, 0.3, 0.2));
+        assert_eq!(uniform.near_camera, THROWN.near_camera);
+    }
+
+    #[test]
+    fn the_air_gusts_about_its_steady_speed() {
+        let air = Air {
+            steady: Vec3::new(3.0, 0.0, 0.0),
+            gusts: Vec3::new(1.0, 0.0, 0.0),
+            periods: [4.0, 2.0, 1.0],
+            weights: [0.5, 0.3, 0.2],
+        };
+        // Every swing is at 0 at 0 and at a whole period.
+        assert!(air.at(0.0).distance(air.steady) < 1e-6);
+        assert!(air.at(4.0).distance(air.steady) < 1e-5);
+        // A quarter of the way through the slow swing, at its height, the others at 0 or
+        // back to it.
+        assert!(air.at(1.0).distance(Vec3::new(3.5, 0.0, 0.0)) < 1e-5);
+        assert_eq!(Air::STILL.at(12.3), Vec3::ZERO);
+    }
+
+    #[test]
+    fn flat_particles_lie_on_the_waves_the_shader_is_given() {
+        let waves = Waves {
+            travel: [
+                Vec2::new(0.4, 0.0),
+                Vec2::new(0.3, -0.2),
+                Vec2::new(0.0, 1.0),
+            ],
+            rates: [2.0, 1.5, 3.0],
+            heights: [0.3, 0.1, 0.05],
+        };
+        let uniform = MotionUniform::new(
+            Motion {
+                lies_on: Some(waves),
+                ..THROWN
+            },
+            Air::STILL,
+        );
+        assert_eq!(uniform.flat, 1);
+        assert_eq!(uniform.wave_x, Vec3::new(0.4, 0.3, 0.0));
+        assert_eq!(uniform.wave_z, Vec3::new(0.0, -0.2, 1.0));
+        assert_eq!(uniform.wave_rates, Vec3::new(2.0, 1.5, 3.0));
+        assert_eq!(uniform.wave_heights, Vec3::new(0.3, 0.1, 0.05));
+        assert_eq!(MotionUniform::new(THROWN, Air::STILL).flat, 0);
+        // A crest of the first wave alone, a quarter of the way round, rolls on with time.
+        let first = Waves {
+            heights: [0.3, 0.0, 0.0],
+            ..waves
+        };
+        let crest = Vec2::new(std::f32::consts::FRAC_PI_2 / 0.4, 0.0);
+        assert!((first.height_at(crest, 0.0) - 0.3).abs() < 1e-5);
+        assert!((first.height_at(crest + Vec2::X * 2.0 / 0.4, 1.0) - 0.3).abs() < 1e-5);
+        let shader = include_str!("../shaders/particles.wgsl");
+        assert!(shader.contains(
+            "let phase = motion.wave_x * position.x + motion.wave_z * position.y - motion.wave_rates * time;"
+        ));
+        assert!(shader.contains("return dot(motion.wave_heights, sin(phase));"));
+    }
+
+    #[test]
+    fn the_shader_gusts_as_the_air_does() {
+        let shader = include_str!("../shaders/particles.wgsl");
+        assert!(shader.contains(
+            "motion.air + motion.gusts * dot(motion.gust_weights, sin(TAU * time / motion.gust_periods))"
+        ));
+    }
+}
