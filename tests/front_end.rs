@@ -468,6 +468,7 @@ fn an_option_goes_to_its_slice_at_once_and_is_remembered() {
                 anisotropy: 4,
                 scenery_distance: f32::INFINITY,
                 decorations: true,
+                settle_scenery: true,
             }
         );
         assert_eq!(*world.resource::<SpeedUnits>(), SpeedUnits::Mph);

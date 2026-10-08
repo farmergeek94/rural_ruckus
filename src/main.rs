@@ -37,7 +37,8 @@ fn main() {
     // `--weather=random` in one picked at random, and `--time=night` at that time of day
     // (day, dusk or night). `--no-backdrop` leaves out the distant
     // hills a track draws round its horizon, and `--no-decorations` the scenery that trucks
-    // drive through. `--flat-water` draws the water as a plain flat plane,
+    // drive through. `--no-settle-scenery` stands each object as the track puts it, though
+    // its foot floats over a slope. `--flat-water` draws the water as a plain flat plane,
     // and `--no-water-reflections` mirrors only the sky in it. `--base-game=FOLDER` looks for the base game's
     // archives, which tracks and trucks borrow from, in FOLDER and its subfolders, in place
     // of the Shared and language folders chosen in the front end (or `base/`, if none was);
@@ -104,6 +105,7 @@ fn main() {
             Some("--smooth-terrain") => settings.smooth_terrain = true,
             Some("--no-blend-ground") => settings.blend_ground = false,
             Some("--no-mipmaps") => settings.mipmaps = false,
+            Some("--no-settle-scenery") => settings.settle_scenery = false,
             Some("--log-fps") => log_fps = true,
             Some("--autopilot") => autopilot = true,
             Some("--unlit") => environment_settings.lighting = environment::Lighting::Off,

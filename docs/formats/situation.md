@@ -119,6 +119,32 @@ The Ramps section comes before the Boxes section. Its count is 0 in most tracks.
   and no texture, so there is nothing to draw it with. Whether MTM2 draws anything for it
   is **open**.
 
+## Objects on sloping ground
+
+**Measured** on the 28 tracks in the base game's archives (Community Patch 3's `GAME.POD`
+with the CD's track archives) and the 12 community tracks in `tracks/`:
+
+- On the base game's tracks, nearly every box stands with its model's lowest point on the
+  ground under its origin, as model.md says. No box in them has a pitch or a roll
+  (`theta`, `phi`). Four community tracks do: `BAJBEACH_MTM2_HD.POD` (85 boxes),
+  `TDSNAKE.POD` (127), `MonteCarlo_PZ.pod` (48) and `ROUTE77.POD` (4). The game turns
+  boxes about the vertical only.
+- So a model with a broad, flat foot on a slope floats at its downhill corners. On
+  Sidewinder Canyon (`SNAKE.SIT`) the checkpoint pillars (`SN4CHK1.BIN` to `SN4CHK5.BIN`,
+  5.8 m across and 12.2 m high) float by 0.03 to 0.66 m, and 18 of its 241 objects by more
+  than 0.3 m. Trees on steep slopes float most at their lowest branches: 5.4 m in Alaska
+  (`AK8PINEC.BIN`, 45.7 m high) and 8.2 m in Graveyard (`DTREE1.BIN`, 15.2 m).
+- Some boxes stand above the ground on purpose, with every corner of their foot clear of
+  it: the start lights' gantry over the road (`STRTLITE.BIN`, 7.3 m up), bridges
+  (`BRIGSIDE.BIN`, 9 to 11 m) and helicopters (`HELI.BIN`, 19 to 25 m).
+- Whether MTM2 draws such a foot floating, as its placement says, is **open**.
+
+The game lowers a fixed object that stands on the ground until the corner of its foot
+furthest above the ground touches it, by no more than a tenth of the model's height
+(`TrackSettings::settle_scenery`, on by default). It does not lower loose or moving
+objects, or objects whose whole foot is more than 0.3 m above the ground. How far to
+lower each object is worked out once, as the track is loaded (`track/settle.rs`).
+
 ## Objects that face the camera
 
 - **Reference** (JSTrackViewer: `src/scene.js` names type 8 `BOXTYPE_NO_COLLIDE_FACING`

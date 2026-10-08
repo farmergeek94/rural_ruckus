@@ -239,9 +239,14 @@ fn spawn_scenery(
         let ground = track
             .heights
             .height_at(object.position.x, object.position.y);
+        let sunk = if settings.settle_scenery {
+            object.sunk_on_slope
+        } else {
+            0.0
+        };
         let transform = Transform::from_xyz(
             object.position.x,
-            ground + object.height_above_ground,
+            ground + object.height_above_ground - sunk,
             object.position.y,
         )
         .with_rotation(Quat::from_rotation_y(object.yaw));

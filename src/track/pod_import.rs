@@ -214,6 +214,8 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
     };
 
     let course = course_from_segments(&course, &heights);
+    let mut scenery = super::pod_scenery::scenery_from_pod(track, to_ground);
+    super::settle::settle(&mut scenery, &heights);
     Ok(TrackData {
         name: track.situation.name.clone(),
         heights,
@@ -227,7 +229,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
             .water_feet()
             .filter(|&feet| feet > 0.0)
             .map(|feet| feet * METRES_PER_FOOT),
-        scenery: super::pod_scenery::scenery_from_pod(track, to_ground),
+        scenery,
         backdrop: super::pod_scenery::backdrop_from_pod(track),
         skies: skies_from_pod(&track.skies),
         course,

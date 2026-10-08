@@ -22,6 +22,7 @@ mod map;
 mod mesh;
 mod pod_import;
 mod pod_scenery;
+mod settle;
 mod shading;
 mod tile_material;
 
@@ -113,6 +114,14 @@ pub struct TrackSettings {
     /// What is solid is drawn either way, so that nothing unseen stands in the way. May be
     /// changed while racing.
     pub decorations: bool,
+    /// Lowers a fixed object on sloping ground until the lowest corner of its foot touches
+    /// the ground. Monster Truck Madness 2's editor stands a model on its lowest point at
+    /// the ground under its origin only, so one with a broad, flat foot on a slope floats at
+    /// its downhill corners: Sidewinder Canyon's checkpoint pillars by up to 0.66 m. Loose
+    /// and moving objects, and those put above the ground on purpose, stay where they are
+    /// put. How far to lower each is worked out as the track is loaded (`settle`), so this
+    /// costs nothing as a race begins. Read as each race begins.
+    pub settle_scenery: bool,
 }
 
 impl Default for TrackSettings {
@@ -124,6 +133,7 @@ impl Default for TrackSettings {
             anisotropy: 16,
             scenery_distance: f32::INFINITY,
             decorations: true,
+            settle_scenery: true,
         }
     }
 }

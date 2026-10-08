@@ -351,6 +351,10 @@ pub struct SceneryObject {
     /// Whether it is drawn. A ramp that a track gives by its size alone is solid but
     /// unseen: the solid shape under a model that trucks drive through.
     pub visible: bool,
+    /// How far below `height_above_ground` it stands when it is lowered onto sloping
+    /// ground (`TrackSettings::settle_scenery`), in metres. Worked out as the track is
+    /// loaded (`settle`).
+    pub sunk_on_slope: f32,
 }
 
 /// Whether a scenery object stays where it is put.

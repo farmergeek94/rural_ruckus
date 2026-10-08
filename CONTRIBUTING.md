@@ -13,6 +13,7 @@ cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod   # in one of its trucks (eit
 cargo run -- tracks/AlpineMtns.pod --smooth-terrain   # with the ground lit as if rounded off
 cargo run -- tracks/AlpineMtns.pod --no-blend-ground  # with the ground's textures edge to edge, as MTM2 draws them
 cargo run -- tracks/AlpineMtns.pod --no-mipmaps       # textures without mipmaps, to compare
+cargo run -- --base-game=$HOME/Documents/mtm2 --no-settle-scenery   # objects on slopes stand as the track puts them, feet floating
 cargo run -- --log-fps --no-vsync  # print the true frame time once a second
 cargo run -- --fifo                # strict vsync (PresentMode::Fifo): never shows a late frame early
 cargo run -- tracks/AlpineMtns.pod --integrated-graphics   # start with the graphics for a processor's built-in graphics (INTEGRATED GRAPHICS on the options screen)
