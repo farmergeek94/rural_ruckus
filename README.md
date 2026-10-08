@@ -74,10 +74,29 @@ cargo run -- --base-game=/path/to/MTM2                               # use the b
 cargo run -- --race --builtin                                        # race the built-in truck and track (no files necessary)
 ```
 
-Use the dev profile (`cargo run`), not `--release`. The dev profile optimises the
-dependencies, thus the game is playable.
-
 [CONTRIBUTING.md](CONTRIBUTING.md) lists all the options.
+
+### Release build
+
+To play with the best frame rate, use the release profile.
+
+```sh
+cargo run --release
+```
+The release build takes more time than the dev build, because it optimises all of the code together.
+
+Cargo writes the program to `target/release/`. You can start it without Cargo:
+
+```sh
+./target/release/monster_truck_rural_ruckus
+```
+
+Start it from the repository folder. The game finds `tracks/`, `trucks/`, `base/` and
+`saves/` relative to the current folder.
+
+If you change the code, use the dev profile to test it. The debugger shows more in a dev
+build, and the reference figures in [docs/smoothness.md](docs/smoothness.md) are for dev
+builds.
 
 ## 4. Drive
 
