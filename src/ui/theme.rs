@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 /// The height of the screen the theme's sizes were written for, in pixels.
-const DESIGNED_FOR_HEIGHT: f32 = 1080.0;
+pub(super) const DESIGNED_FOR_HEIGHT: f32 = 1080.0;
 
 /// Replace it, before the front end opens, to change how everything looks.
 #[derive(Resource, Clone, Debug)]

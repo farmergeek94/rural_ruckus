@@ -99,18 +99,22 @@ const MIST_GRAVITY: f32 = 2.0;
 const MIST_OPACITY: f32 = 0.45;
 const DROP_OPACITY: f32 = 0.7;
 /// The colour of spray, in sRGB from 0 to 1: white where the light catches it, whichever way
-/// it is seen from, and not shaded like a solid thing.
+/// it is seen from, and not shaded like a solid thing. A droplet is this colour at its
+/// edge, where it thins out.
 const SPRAY_COLOR: Vec3 = Vec3::new(0.9, 0.95, 1.0);
-/// How much of the water's own deep blue (`WATER_COLOR`) the spray takes, from 0 (white)
-/// to 1 (as blue as the water), so that it looks to be of the same water. Higher is bluer
-/// and darker.
-const SPRAY_BLUE: f32 = 0.7;
+/// How much of the water's own deep blue (`WATER_COLOR`) the spray takes where it is
+/// thick, in the middle of a droplet and in a splash's ring, from 0 (white) to 1 (as blue
+/// as the water), so that it looks to be of the same water. Higher is bluer and darker.
+const SPRAY_BLUE: f32 = 0.4;
 
-/// Spray's colour, as see-through as `opacity` (from 0 to 1).
+/// Thick spray's colour, as see-through as `opacity` (from 0 to 1).
 fn spray_color(opacity: f32) -> Color {
+    spray_edge().mix(&WATER_COLOR, SPRAY_BLUE).with_alpha(opacity)
+}
+
+/// Thin spray's colour, at the edge of a droplet.
+fn spray_edge() -> Color {
     Color::srgb(SPRAY_COLOR.x, SPRAY_COLOR.y, SPRAY_COLOR.z)
-        .mix(&WATER_COLOR, SPRAY_BLUE)
-        .with_alpha(opacity)
 }
 /// How near the camera a droplet starts to shrink away, in metres. Spray that the truck
 /// throws back at the camera would otherwise pass it as big blobs, as if on the lens. Inside
@@ -239,7 +243,12 @@ pub(super) fn make_droplet_looks(
             ..default()
         })
     };
-    let ring_picture = images.add(picture(|point| round(ring_opacity, point)));
+    // The ring takes its blue from its material, so its picture is white throughout.
+    let ring_picture = images.add(picture(
+        |point| round(ring_opacity, point),
+        Color::WHITE,
+        Color::WHITE,
+    ));
     let ring = (0..RING_SHADES)
         .map(|shade| {
             let left = 1.0 - shade as f32 / RING_SHADES as f32;
@@ -247,8 +256,13 @@ pub(super) fn make_droplet_looks(
         })
         .collect();
     commands.insert_resource(DropletLooks {
-        drop: images.add(picture(drop_opacity)),
-        mist: images.add(picture(|point| round(mist_opacity, point))),
+        // A droplet is blue where it is thick, and white where it thins out at its edge.
+        drop: images.add(picture(drop_opacity, spray_color(1.0), spray_edge())),
+        mist: images.add(picture(
+            |point| round(mist_opacity, point),
+            spray_color(1.0),
+            spray_edge(),
+        )),
         // Two metres across, so that its scale is its radius.
         square: meshes.add(Rectangle::new(2.0, 2.0)),
         ring,
@@ -289,10 +303,11 @@ pub(super) fn spawn_spray(
 /// How many texels the droplets' pictures have along a side.
 const PICTURE_SIZE: u32 = 32;
 
-/// A white picture, as solid as `opacity` says at each point of it, from -1 to 1 across
-/// (X) and up (Y), as it lies on the square: up is the square's +Y.
-fn picture(opacity: fn(Vec2) -> f32) -> Image {
-    let texels = picture_texels(PICTURE_SIZE, opacity);
+/// A picture as solid as `opacity` says at each point of it, from -1 to 1 across (X) and
+/// up (Y), as it lies on the square: up is the square's +Y. It is the colour `solid` where
+/// it is solid, and goes to `thin` as it thins out.
+fn picture(opacity: fn(Vec2) -> f32, solid: Color, thin: Color) -> Image {
+    let texels = picture_texels(PICTURE_SIZE, opacity, solid, thin);
     Image::new(
         Extent3d {
             width: PICTURE_SIZE,
@@ -306,15 +321,17 @@ fn picture(opacity: fn(Vec2) -> f32) -> Image {
     )
 }
 
-fn picture_texels(size: u32, opacity: fn(Vec2) -> f32) -> Vec<u8> {
+fn picture_texels(size: u32, opacity: fn(Vec2) -> f32, solid: Color, thin: Color) -> Vec<u8> {
     let middle = size as f32 / 2.0;
     let mut texels = Vec::with_capacity((size * size * 4) as usize);
     for row in 0..size {
         for col in 0..size {
             // The picture's first row is at the square's top.
             let point = Vec2::new(col as f32 + 0.5 - middle, middle - row as f32 - 0.5) / middle;
-            let alpha = (opacity(point).clamp(0.0, 1.0) * 255.0).round() as u8;
-            texels.extend_from_slice(&[255, 255, 255, alpha]);
+            let opacity = opacity(point).clamp(0.0, 1.0);
+            let [red, green, blue, _] = thin.mix(&solid, opacity).to_srgba().to_u8_array();
+            let alpha = (opacity * 255.0).round() as u8;
+            texels.extend_from_slice(&[red, green, blue, alpha]);
         }
     }
     texels
@@ -562,7 +579,8 @@ pub(super) fn throw_droplet(
         size,
         turned: 0.0,
         turning: 0.0,
-        color: spray_color(opacity).into(),
+        // Its picture gives it its colour (see `make_droplet_looks`).
+        color: LinearRgba::WHITE.with_alpha(opacity),
         trail: Vec3::ZERO,
         shape: 0,
     };
@@ -791,7 +809,12 @@ mod tests {
 
     #[test]
     fn droplet_pictures_are_solid_in_the_middle_and_clear_at_the_edge() {
-        let texels = picture_texels(16, |point| round(mist_opacity, point));
+        let texels = picture_texels(
+            16,
+            |point| round(mist_opacity, point),
+            Color::WHITE,
+            Color::WHITE,
+        );
         let alpha = |col: usize, row: usize| texels[(row * 16 + col) * 4 + 3];
         assert!(alpha(8, 8) > 200);
         assert_eq!(alpha(0, 0), 0);
@@ -802,6 +825,23 @@ mod tests {
         assert!(ring_opacity(0.75) > ring_opacity(0.3));
         assert!(ring_opacity(0.3) > 0.1);
         assert!(ring_opacity(1.0) < 1e-3);
+    }
+
+    #[test]
+    fn a_droplet_is_blue_in_the_middle_and_white_at_the_edge() {
+        let texels = picture_texels(
+            16,
+            |point| round(mist_opacity, point),
+            spray_color(1.0),
+            spray_edge(),
+        );
+        let texel = |col: usize| &texels[(8 * 16 + col) * 4..][..3];
+        // Blue: much less red than blue.
+        let [red, _, blue] = texel(8) else { panic!() };
+        assert!(*red + 60 < *blue, "{:?}", texel(8));
+        // Out towards the edge, whiter: more red, and as much blue.
+        let [edge_red, _, edge_blue] = texel(15) else { panic!() };
+        assert!(edge_red > red && edge_blue >= blue, "{:?}", texel(15));
     }
 
     #[test]

@@ -438,6 +438,29 @@ const AIR_COAST_TIME: f32 = 2.0;
 /// The same for a wheel in the air held by the brakes or the handbrake.
 const AIR_BRAKE_TIME: f32 = 0.15;
 
+/// How much faster than the ground a tire that the engine asks too much of spins, at full
+/// throttle, in m/s of tread speed: a tire that slips (see `tread_on_the_ground`). For the
+/// visual only. Higher spins it faster as it slips; much past 20 and it blurs.
+const SLIP_SPIN: f32 = 12.0;
+/// How long a slipping tire takes to spin up to `SLIP_SPIN`, in seconds: the time to close
+/// all but a third of the gap.
+const SLIP_SPIN_UP_TIME: f32 = 0.3;
+/// How long a tire that grips again takes to slow to the ground's speed, in seconds. Short,
+/// so that it rolls with the ground, but not one step, so that a tire on the edge of its
+/// grip does not flicker between spinning and rolling.
+const GRIP_CATCH_TIME: f32 = 0.08;
+/// How steep the ground must be along a tire, as the sine of its slope, before throttle
+/// against the way the truck goes is taken for climbing and not for the brakes: a truck
+/// that slides back down a hill with its tires spinning uphill. About 6 degrees.
+const SLIP_UPHILL: f32 = 0.1;
+
+/// How many times `brake_force` the handbrake brakes the rear wheels with, which it locks.
+/// The front wheels get `brake_force` alone and roll on, so that they still steer. A
+/// locked tire slides at `handbrake_grip` times its load, which is less than `brake_force`
+/// on a truck at rest on its springs, so higher than 1 matters only on a tire pressed
+/// down hard, as in a landing.
+const HANDBRAKE_REAR_BRAKE: f32 = 2.0;
+
 /// The speed at which the rear wheels' steering has faded to `REAR_STEER_FLOOR`, in m/s.
 /// Their counter-steer is at its full `rear_steer_ratio` at a standstill and fades here,
 /// much as a real four-wheel
@@ -1048,9 +1071,12 @@ pub(super) fn drive_truck(
             };
             wheel.tilt = tilt;
             let steer_rotation = sweep.steer_rotation;
+            // The handbrake locks the rear wheels; the front ones it brakes, and they roll on.
             let locked = input.handbrake && !wheel.front;
-            // The ground's speed under the tread, while it touches.
+            // The ground's speed under the tread, while it touches, and whether the tire
+            // slips on it under the throttle.
             let mut rolling_speed = None;
+            let mut slipping = false;
             // Pressed past the top of its travel: the springs are shut and the tire is
             // solid from here on (see `WheelCollider`).
             let mut bottomed = false;
@@ -1131,7 +1157,9 @@ pub(super) fn drive_truck(
                 let asked = if held {
                     hold(forward_speed, config.brake_force)
                 } else if locked {
-                    -forward_speed.signum() * config.brake_force
+                    -forward_speed.signum() * config.brake_force * HANDBRAKE_REAR_BRAKE
+                } else if input.handbrake {
+                    hold(forward_speed, config.brake_force)
                 } else if braking {
                     input.throttle * config.brake_force
                 } else {
@@ -1161,7 +1189,17 @@ pub(super) fn drive_truck(
                     } else {
                         config.grip
                     };
-                let tire = (forward * drive + side * cornering).clamp_length_max(grip * load);
+                let asked_of_tire = forward * drive + side * cornering;
+                let tire = asked_of_tire.clamp_length_max(grip * load);
+                // The engine turns a tire faster than the ground goes by when it asks for
+                // more than the tire grips. Throttle against the way the truck goes is the
+                // brakes, unless the truck is sliding back down a hill it faces up.
+                let climbing = forward.y * input.throttle > SLIP_UPHILL;
+                slipping = input.throttle != 0.0
+                    && !held
+                    && !input.handbrake
+                    && (!braking || climbing)
+                    && asked_of_tire.length_squared() > (grip * load).powi(2);
 
                 // The load along the surface's normal, as the ground pushes: a bank met
                 // sideways pushes the truck off it, not upwards. At the hub rather than
@@ -1177,15 +1215,21 @@ pub(super) fn drive_truck(
             }
 
             let tire_rotation = Quat::from_rotation_z(tilt) * steer_rotation;
-            wheel.tread_speed = rolling_speed.unwrap_or_else(|| {
-                spin_in_the_air(
+            wheel.tread_speed = match rolling_speed {
+                Some(ground) => tread_on_the_ground(
+                    wheel.tread_speed,
+                    ground,
+                    if slipping { input.throttle } else { 0.0 },
+                    dt,
+                ),
+                None => spin_in_the_air(
                     wheel.tread_speed,
                     if held { 0.0 } else { input.throttle },
-                    locked || held,
+                    input.handbrake || held,
                     config.top_speed,
                     dt,
-                )
-            });
+                ),
+            };
             wheel.spin -= wheel.tread_speed / config.wheel_radius * dt;
             let hub_in_truck = wheel.mount - Vec3::Y * sweep.length;
             // The wheel is a pivot whose axle lies along X. What is drawn hangs from it, and
@@ -1240,7 +1284,7 @@ fn lifting_in_a_sharp_turn(
 
 /// How fast the tread of a wheel with nothing under it goes round a step on, in m/s, from
 /// `speed`. The throttle spins it up towards the truck's top speed, either way; throttle
-/// against its spin, the brakes, or the handbrake on a rear wheel stop it quickly; and
+/// against its spin, the brakes, or the handbrake stop it quickly; and
 /// left alone it runs down slowly. Each draws the speed towards its target by the same
 /// share of the gap in every second, whatever the step.
 fn spin_in_the_air(speed: f32, throttle: f32, locked: bool, top_speed: f32, dt: f32) -> f32 {
@@ -1254,6 +1298,23 @@ fn spin_in_the_air(speed: f32, throttle: f32, locked: bool, top_speed: f32, dt: 
     } else {
         (0.0, AIR_COAST_TIME)
     };
+    towards(speed, target, time, dt)
+}
+
+/// How fast the tread of a wheel on the ground goes round a step on, in m/s, from `speed`.
+/// It rolls with the ground (`ground`), or, given the throttle it slips under, spins
+/// `SLIP_SPIN` faster than that the way the throttle pushes: trying to go, and slipping.
+fn tread_on_the_ground(speed: f32, ground: f32, slip_throttle: f32, dt: f32) -> f32 {
+    if slip_throttle != 0.0 {
+        towards(speed, ground + slip_throttle * SLIP_SPIN, SLIP_SPIN_UP_TIME, dt)
+    } else {
+        towards(speed, ground, GRIP_CATCH_TIME, dt)
+    }
+}
+
+/// `speed` drawn towards `target` for `dt` seconds, closing all but a third of the gap in
+/// `time` seconds, whatever the step.
+fn towards(speed: f32, target: f32, time: f32, dt: f32) -> f32 {
     target + (speed - target) * (-dt / time).exp()
 }
 
@@ -1533,6 +1594,20 @@ mod tests {
         let after_a_second = spin_for(1.0, 20.0, 0.0, false);
         assert!(after_a_second > 10.0 && after_a_second < 20.0);
         assert!(spin_for(10.0, 20.0, 0.0, false).abs() < 0.2);
+    }
+
+    #[test]
+    fn a_slipping_tire_spins_the_way_the_throttle_pushes_and_catches_up_when_it_grips() {
+        let dt = 1.0 / 120.0;
+        let run = |seconds: f32, speed: f32, ground: f32, throttle: f32| {
+            (0..(seconds / dt).round() as usize)
+                .fold(speed, |speed, _| tread_on_the_ground(speed, ground, throttle, dt))
+        };
+        // Sliding back down a hill at 2 m/s under full throttle: the tread goes forwards.
+        assert!(close(run(3.0, -2.0, -2.0, 1.0), -2.0 + SLIP_SPIN));
+        // Gripping, it rolls with the ground, and soon after slipping.
+        assert_eq!(run(1.0, 5.0, 5.0, 0.0), 5.0);
+        assert!((run(0.5, 15.0, 5.0, 0.0) - 5.0).abs() < 0.05);
     }
 
     #[test]

@@ -488,13 +488,7 @@ impl Tiles<'_> {
         let own_palette = track.own_palettes.get(name);
         let mut rgba = texture.to_rgba(own_palette.or(track.palette.as_ref())?);
         if cutout {
-            // MTM2 has no alpha. On a cutout face, pure black is a hole. It stays
-            // black so that smooth filtering doesn't draw a bright fringe round it.
-            for pixel in rgba.as_chunks_mut::<4>().0 {
-                if pixel[..3] == [0, 0, 0] {
-                    pixel[3] = 0;
-                }
-            }
+            cut_out(&mut rgba, texture.size());
         }
         Some((texture.size(), rgba))
     }
@@ -517,6 +511,42 @@ impl Tiles<'_> {
         let tile = self.pixels.len() as u32 - 1;
         self.known.insert(key, tile);
         tile
+    }
+}
+
+/// The brightest colour, in each channel from 0 to 255, that a texture's top two corners may
+/// have for the override in `cut_out` to make it a hole. The Excavation's ferns are 7. At 8,
+/// AlpineMtns' `88LIGHT1.RAW` and `88LIGHT3.RAW` would lose 16% and all of their texels.
+const DARKEST_CORNER_KEY: u8 = 7;
+
+/// Makes the holes in a cutout face's 8-bit texture, `size` pixels square. MTM2 has no
+/// alpha: pure black is a hole. A hole is made black so that smooth filtering doesn't draw
+/// a bright fringe round it.
+///
+/// A texture with no pure black at all has the colour of its top two corners cut instead,
+/// where they are the same and near black. This is our override, not a rule known from
+/// MTM2: The Excavation's ferns (`AZ8FN2.RAW`, `AZ8FN3.RAW`) have a (7, 7, 7) background,
+/// which the pure-black rule draws as a dark square. Brighter corners are the background of
+/// an opaque picture, such as a banner, on a cutout face. See `docs/formats/model.md`.
+fn cut_out(rgba: &mut [u8], size: usize) {
+    let pixels = rgba.as_chunks_mut::<4>().0;
+    let key = if pixels.iter().any(|pixel| pixel[..3] == [0, 0, 0]) {
+        [0, 0, 0]
+    } else {
+        match (pixels.first(), pixels.get(size.wrapping_sub(1))) {
+            (Some(left), Some(right))
+                if left[..3] == right[..3]
+                    && left[..3].iter().all(|&channel| channel <= DARKEST_CORNER_KEY) =>
+            {
+                [left[0], left[1], left[2]]
+            }
+            _ => return,
+        }
+    };
+    for pixel in pixels {
+        if pixel[..3] == key {
+            *pixel = [0, 0, 0, 0];
+        }
     }
 }
 
@@ -566,6 +596,41 @@ mod tests {
         let smaller = fit(tile.clone(), 2, 1);
         assert_eq!(smaller, mip_chain(&tile, 2)[1]);
         assert_eq!(fit(tile.clone(), 2, 2), tile);
+    }
+
+    const GREY: [u8; 4] = [7, 7, 7, 255];
+    const GREEN: [u8; 4] = [20, 90, 30, 255];
+    const BLACK: [u8; 4] = [0, 0, 0, 255];
+    const HOLE: [u8; 4] = [0, 0, 0, 0];
+
+    #[test]
+    fn a_cutout_texture_with_pure_black_cuts_only_that() {
+        let mut rgba = [GREY, GREY, BLACK, GREEN].concat();
+        cut_out(&mut rgba, 2);
+        assert_eq!(rgba, [GREY, GREY, HOLE, GREEN].concat());
+    }
+
+    #[test]
+    fn a_cutout_texture_without_pure_black_cuts_its_top_corners_colour() {
+        let mut rgba = [GREY, GREY, GREEN, GREY].concat();
+        cut_out(&mut rgba, 2);
+        assert_eq!(rgba, [HOLE, HOLE, GREEN, HOLE].concat());
+    }
+
+    #[test]
+    fn top_corners_brighter_than_near_black_cut_nothing() {
+        let tile = [GREEN, GREEN, GREY, GREEN].concat();
+        let mut rgba = tile.clone();
+        cut_out(&mut rgba, 2);
+        assert_eq!(rgba, tile);
+    }
+
+    #[test]
+    fn top_corners_that_differ_cut_nothing() {
+        let tile = [GREY, GREEN, GREY, GREY].concat();
+        let mut rgba = tile.clone();
+        cut_out(&mut rgba, 2);
+        assert_eq!(rgba, tile);
     }
 
     fn square(corners: [usize; 4]) -> pod::Face {

@@ -25,7 +25,8 @@ use monster_truck_rural_ruckus::truck::{
     TruckDisplay, TruckPlugin, TruckSetup,
 };
 use monster_truck_rural_ruckus::ui::{
-    Action, Catalogue, Choices, Dials, Entry, FolderBrowser, PlayerDid, Screen, Settings, Turntable,
+    Action, Catalogue, Choices, Dials, Entry, FolderBrowser, Loading, LoadingScreen, PlayerDid,
+    Screen, Settings, Turntable,
 };
 use monster_truck_rural_ruckus::water::WaterSettings;
 
@@ -91,6 +92,28 @@ fn run_until(app: &mut App, what: &str, mut done: impl FnMut(&mut App) -> bool) 
         std::thread::sleep(Duration::from_millis(2));
     }
     panic!("waited too long for {what}");
+}
+
+/// GO, and every frame until the race is on screen: loading happens on other threads, and
+/// the loading screen stays up until the race runs smoothly.
+fn go(app: &mut App) {
+    player_does(app, Action::Go);
+    run_until(app, "the race", |app| {
+        state(app) == GameState::Racing && loading(app).is_none()
+    });
+}
+
+fn loading(app: &App) -> Option<Loading> {
+    app.world().resource::<LoadingScreen>().0.clone()
+}
+
+/// The entity the loading screen is drawn as, while it is.
+fn loading_screen(app: &mut App) -> Option<Entity> {
+    app.world_mut()
+        .query::<(Entity, &Name)>()
+        .iter(app.world())
+        .find(|(_, name)| name.as_str() == "Loading screen")
+        .map(|(entity, _)| entity)
 }
 
 fn state(app: &App) -> GameState {
@@ -231,7 +254,7 @@ fn restarting_builds_the_whole_race_again() {
     run_until(&mut app, "the built-in truck", |app| {
         !on_show(app).is_empty()
     });
-    player_does(&mut app, Action::Go);
+    go(&mut app);
     for _ in 0..30 {
         app.update();
     }
@@ -298,9 +321,7 @@ fn go_races_what_was_chosen_and_cancelling_comes_back_to_it() {
     player_does(&mut app, Action::Show(Screen::Truck));
     let before = entities(&mut app);
 
-    player_does(&mut app, Action::Go);
-    app.update();
-    assert_eq!(state(&app), GameState::Racing);
+    go(&mut app);
     assert_eq!(count::<With<Turntable>>(&mut app), 0);
     assert_eq!(count::<With<TruckDisplay>>(&mut app), 0);
     assert_eq!(app.world().resource::<RaceSettings>().laps, 5);
@@ -357,6 +378,65 @@ fn go_races_what_was_chosen_and_cancelling_comes_back_to_it() {
     assert_eq!(app.world().resource::<Choices>().laps, 5);
     assert_eq!(app.world().resource::<Dials>().0[0].step, 4);
     // Nothing of the race is left, and nothing of the front end was doubled.
+    assert_eq!(entities(&mut app), before);
+}
+
+/// GO covers the window with the loading screen, under which the player can do nothing. It
+/// stays up as the race is built, with the game's clock stopped, and goes once the race
+/// runs, starting the clock, so that the countdown is all seen.
+#[test]
+fn go_shows_the_loading_screen_until_the_race_runs() {
+    let mut app = headless_app(nowhere(), None);
+    run_until(&mut app, "the built-in truck", |app| {
+        !on_show(app).is_empty()
+    });
+    // The screens are drawn a frame after the truck is first on show.
+    app.update();
+    let entities = |app: &mut App| count::<Without<IsResource>>(app);
+    let before = entities(&mut app);
+
+    player_does(&mut app, Action::Go);
+    let shown = loading(&app).expect("the loading screen");
+    assert_eq!(shown.title, builtin_track().name);
+    assert!(shown.detail.contains("Built-in truck"), "{}", shown.detail);
+    assert!(!shown.step.is_empty());
+    let screen = loading_screen(&mut app).expect("the loading screen drawn");
+    // The player can do nothing under it.
+    player_does(&mut app, Action::MoreLaps);
+    player_does(&mut app, Action::Go);
+
+    run_until(&mut app, "the race", |app| state(app) == GameState::Racing);
+    assert_eq!(
+        loading(&app).expect("the loading screen").step,
+        "Building the race"
+    );
+    // Built once: only its text follows what is being done.
+    assert_eq!(loading_screen(&mut app), Some(screen));
+    let mut texts = app.world_mut().query::<&Text>();
+    assert!(
+        texts
+            .iter(app.world())
+            .any(|text| text.0 == "Building the race")
+    );
+    assert!(app.world().resource::<Time<Virtual>>().is_paused());
+    assert_eq!(app.world().resource::<RaceClock>().tick, 0);
+
+    run_until(&mut app, "the loading screen to go", |app| {
+        loading(app).is_none()
+    });
+    assert!(!app.world().resource::<Time<Virtual>>().is_paused());
+    app.update();
+    assert!(app.world().resource::<RaceClock>().tick > 0);
+    assert_eq!(
+        app.world().resource::<RaceSettings>().laps,
+        Choices::default().laps
+    );
+
+    // Nothing of it is left once the race is cancelled.
+    cancel_the_race(&mut app);
+    run_until(&mut app, "the truck to be back on show", |app| {
+        !on_show(app).is_empty()
+    });
     assert_eq!(entities(&mut app), before);
 }
 
@@ -547,9 +627,7 @@ fn a_setting_changed_elsewhere_is_shown_and_left_alone() {
     run_until(&mut app, "the built-in truck", |app| {
         !on_show(app).is_empty()
     });
-    player_does(&mut app, Action::Go);
-    app.update();
-    assert_eq!(state(&app), GameState::Racing);
+    go(&mut app);
     app.world_mut()
         .resource_mut::<EnvironmentSettings>()
         .shadow_distance = 120.0;

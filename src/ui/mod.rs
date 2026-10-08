@@ -16,6 +16,7 @@
 //! | `SettingOpened`, `FolderEntered`, `FolderUp`, `FolderChosen`, `FolderLeft` | out | The same, on a line that opens something and in a folder being browsed. The game changes `FolderBrowser` to suit. |
 //! | `PlayerDid` | in | An `Action`, from the module's own input or from anyone else. |
 //! | `FrontEndOpen` | in | The screens and the showroom exist while it is `Open`. |
+//! | `LoadingScreen` | in | Something being got ready, drawn over everything, open or not, while it holds one. The player can do nothing while it is up. |
 //!
 //! `Catalogue`, `Choices`, `Dials` and `Settings` are read when the front end opens and
 //! whenever the `Catalogue` or the `FolderBrowser` changes. From then on the module writes `Choices`, each
@@ -23,7 +24,8 @@
 //!
 //! Inside, one module per concern: `model` (the rules, a pure state machine), `input`
 //! (bindings), `screens` (what is drawn, which reads the model and never changes it),
-//! `theme` (every colour and size) and `showroom` (the showroom behind it all). Widgets are
+//! `theme` (every colour and size), `showroom` (the showroom behind it all) and `loading`
+//! (the loading screen). Widgets are
 //! `bevy_ui_widgets` buttons. What is highlighted lives in the model and not in
 //! `bevy_input_focus`, so that a key, a stick and a click all go the same way.
 //!
@@ -32,6 +34,7 @@
 //! and adds it if no one has.
 
 mod input;
+mod loading;
 mod model;
 mod screens;
 mod showroom;
@@ -63,6 +66,7 @@ impl Plugin for UiPlugin {
             .init_resource::<Presets>()
             .init_resource::<TrackPreview>()
             .init_resource::<FolderBrowser>()
+            .init_resource::<LoadingScreen>()
             .init_resource::<Theme>()
             .init_resource::<screens::OptionsScrolled>()
             .add_message::<PlayerDid>()
@@ -105,6 +109,12 @@ impl Plugin for UiPlugin {
                 screens::keep_in_hand_in_view
                     .after(bevy::ui::UiSystems::Layout)
                     .run_if(in_state(FrontEndOpen::Open)),
+            )
+            // In `PostUpdate`, after whatever changed `LoadingScreen` in `Update`, so that the
+            // change is drawn in that frame: the next may be the one a race is built in.
+            .add_systems(
+                PostUpdate,
+                loading::redraw.before(bevy::ui::UiSystems::Prepare),
             );
     }
 }
@@ -278,6 +288,22 @@ impl Default for Choices {
 #[derive(Resource, Default)]
 pub struct TrackPreview(pub Option<Handle<Image>>);
 
+/// Something being got ready, for the loading screen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Loading {
+    /// What is being got ready, shown large.
+    pub title: String,
+    /// A line under it, such as what goes with it.
+    pub detail: String,
+    /// What is being done now, under the bar.
+    pub step: String,
+}
+
+/// The loading screen, which covers everything while it holds a view, whether the front end
+/// is open or not. `None` shows none.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct LoadingScreen(pub Option<Loading>);
+
 /// Something the player did. The module's own input writes these, and anything else may.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct PlayerDid(pub Action);
@@ -434,6 +460,11 @@ fn apply_actions(
     mut browser: ResMut<FolderBrowser>,
     mut browsed: Browsed,
 ) {
+    // Nothing is done while something is being got ready, and nothing waits for it to end.
+    if browsed.loading.0.is_some() {
+        did.clear();
+        return;
+    }
     // The model arrives with the next frame's commands, and what was done waits for it.
     let Some(mut model) = model else {
         return;
@@ -499,9 +530,11 @@ fn apply_actions(
     }
 }
 
-/// What `apply_actions` says about opening a line, browsing a folder, and exiting.
+/// What `apply_actions` says about opening a line, browsing a folder, and exiting, and the
+/// loading screen, which stops it.
 #[derive(bevy::ecs::system::SystemParam)]
 struct Browsed<'w> {
+    loading: Res<'w, LoadingScreen>,
     opened: MessageWriter<'w, SettingOpened>,
     entered: MessageWriter<'w, FolderEntered>,
     up: MessageWriter<'w, FolderUp>,

@@ -98,6 +98,19 @@ with its face, the face's own normal otherwise.
   that come out pure black through the palette are holes. On other faces black is black.
   A face of type 64 is a cutout if its material says so, and a PNG texture uses its alpha
   for the holes (see textures.md).
+- **Near-black keys: measured, rule open.** Of the 135 different 8-bit textures on cutout
+  faces in the base game's archives and 12 community tracks, 116 have pure black.
+  `AZ8FN2.RAW` and `AZ8FN3.RAW` (ferns on The Excavation, `AZTEC.POD`, faces of type 51)
+  have none: through their own palettes, their background is index 205, (7, 7, 7), over
+  37035 and 40383 of 65536 texels. The pure-black rule leaves that background as a dark
+  square; `AZ8FN1.RAW` beside them, with a pure-black background, is cut correctly.
+  Whether MTM2 cut (7, 7, 7) is **open**. A 16-bit 5-5-5 texture would make it black, but
+  a rule of "every channel under 8" would also cut 3600 to 7500 texels inside each of the
+  Graveyard's trees, fences and gates (`JUNK.POD`), and no file can show which is right.
+  **Override (ours, not MTM2's):** the scenery cuts a texture with no pure black by the
+  colour of its top two corners, where they are the same and no channel is over 7. Of the
+  16 other cutout textures with no pure black, that cuts none; with no limit, it would cut
+  13 of them (banners, hedges and walls), two entirely.
 - Textures are 64 x 64, 8-bit, through the track's palette, like the ground's. A truck's
   are up to 256 x 256, each through a palette of its own: see [truck.md](truck.md).
 

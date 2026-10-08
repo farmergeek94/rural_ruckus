@@ -34,8 +34,8 @@ fn main() {
     // option after it on the command line wins over it. `--opponents=3` races
     // against that many trucks driven by the computer, which are copies of the player's.
     // `--weather=rain` races in that weather (clear, overcast, fog, rain, storm or snow), and
-    // `--weather=random` in one picked at random, and `--time=night` at that time of day
-    // (day, dusk or night). `--no-backdrop` leaves out the distant
+    // `--weather=random` in one picked at random, at a time of day picked at random, and
+    // `--time=night` at that time of day (day, dusk or night), unless the weather is random. `--no-backdrop` leaves out the distant
     // hills a track draws round its horizon, and `--no-decorations` the scenery that trucks
     // drive through. `--no-settle-scenery` stands each object as the track puts it, though
     // its foot floats over a slope. `--flat-water` draws the water as a plain flat plane,

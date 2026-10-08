@@ -9,9 +9,13 @@
 //! puts the highlighted truck on the showroom's turntable, paints the highlighted track's
 //! map, turns the garage's dials into a `truck::TruckSetup`, and on GO hands the choices to
 //! the slices, the trucks that the computer drives among them (`truck::ComputerTrucks`),
-//! and enters the race. Cancelling the race from its pause dialog (`race::RaceCancelled`)
-//! comes back, with the choices kept. EXIT closes the game. What
-//! was chosen is kept in a `store::Store` on GO and chosen again the next time.
+//! and enters the race. GO closes the front end and puts up the `ui` module's loading
+//! screen, and once that is on show loads what is not loaded yet, which stops the screen
+//! until it is done. The screen stays up as the race is built and until the race's frames
+//! are quick again. The game's clock is stopped until
+//! then, so that the race begins when the player can see it. Cancelling the race from its
+//! pause dialog (`race::RaceCancelled`) comes back, with the choices kept. EXIT closes the
+//! game. What was chosen is kept in a `store::Store` on GO and chosen again the next time.
 //!
 //! Where the base game's archives are is two folders the player chooses, `Shared` and one
 //! language's, kept in the store. When the command line names no folder and the store
@@ -25,7 +29,7 @@
 //! other slices: the window's (`display`), the graphics (`camera`, `environment`, `track`,
 //! `water`, `dirt`, `backdrop`), the `weather`, and a few more. The options screen's
 //! Quality line stands for the graphics that cost most, which are on the ADVANCED screen
-//! with the physics, and sets them all at once. Each line of `OPTIONS` says which value of which slice's settings resource it stands for. A change
+//! with the physics, the scenery's among them, and sets them all at once. Each line of `OPTIONS` says which value of which slice's settings resource it stands for. A change
 //! goes to that resource at once, and to the store, and what the store holds is set when
 //! the game starts. A setting changed elsewhere (by F2 in a race, or on the command line)
 //! is shown as it is, and is only written over when the player changes that line.
@@ -43,6 +47,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::system::SystemParam;
@@ -61,7 +66,7 @@ use crate::environment::{EnvironmentSettings, Lighting};
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
 use crate::physics::PhysicsSettings;
-use crate::race::{RaceCancelled, RaceSettings};
+use crate::race::{RaceCancelled, RacePause, RaceSettings};
 use crate::store::{self, Store};
 use crate::track::{self, ChosenTrack, TrackData, TrackSettings};
 use crate::truck::{
@@ -70,8 +75,9 @@ use crate::truck::{
 };
 use crate::ui::{
     self, Catalogue, Choices, Dial, Dials, Entry, ExitPressed, Folder, FolderBrowser, FolderChosen,
-    FolderEntered, FolderLeft, FolderUp, FrontEndOpen, GoPressed, Setting, SettingOpened,
-    TrackHighlighted, TrackPreview, TruckHighlighted, Turntable, UiPlugin, UiSystems,
+    FolderEntered, FolderLeft, FolderUp, FrontEndOpen, GoPressed, Loading as LoadingView,
+    LoadingScreen, Setting, SettingOpened, TrackHighlighted, TrackPreview, TruckHighlighted,
+    Turntable, UiPlugin, UiSystems,
 };
 use crate::water::WaterSettings;
 use crate::weather::{TimeOfDay, Weather, WeatherSettings};
@@ -230,6 +236,7 @@ impl Plugin for FrontEndPlugin {
             .insert_resource(browsing)
             .insert_resource(base_folders)
             .init_resource::<Showing>()
+            .init_resource::<GettingReady>()
             .add_systems(OnEnter(GameState::FrontEnd), (open, show_the_options))
             .add_systems(OnExit(GameState::FrontEnd), close)
             .add_systems(
@@ -246,13 +253,20 @@ impl Plugin for FrontEndPlugin {
                         set_the_truck_up,
                         apply_the_options,
                         go,
+                        get_ready,
                         exit,
                     )
                         .chain()
                         .after(UiSystems)
                         .run_if(in_state(GameState::FrontEnd)),
-                    leave_the_race.run_if(in_state(GameState::Racing)),
+                    lift_the_loading_screen.run_if(in_state(GameState::Racing)),
                 ),
+            )
+            // After the race's pause dialog, whichever system of `Update` it is, so that
+            // CANCEL RACE is answered in the frame it is chosen.
+            .add_systems(
+                PostUpdate,
+                leave_the_race.run_if(in_state(GameState::Racing)),
             );
     }
 }
@@ -876,6 +890,8 @@ const DISPLAY: &str = "DISPLAY";
 const GRAPHICS: &str = "GRAPHICS";
 const GAME: &str = "GAME";
 const PHYSICS: &str = "PHYSICS";
+/// Under PHYSICS, as its lines come before the graphics lines.
+const SCENERY: &str = "SCENERY";
 // The sections of the controls screen, whose lines are key bindings, which wait for a key
 // (see `ui::Setting::keys`).
 const DRIVING: &str = "DRIVING";
@@ -884,9 +900,9 @@ const CAMERA: &str = "CAMERA";
 const GAME_KEYS: &str = "GAME";
 const FILES: &str = "FILES";
 /// These sections are on the ADVANCED screen, out of the way of the Quality line, which
-/// sets the graphics all at once.
+/// sets the graphics and the scenery all at once.
 fn is_advanced(line: &OptionLine) -> bool {
-    matches!(line.section, GRAPHICS | PHYSICS)
+    matches!(line.section, GRAPHICS | PHYSICS | SCENERY)
 }
 /// Only these lines' values are keys: a GAME section of the options screen has none.
 fn binds_a_key(line: &OptionLine) -> bool {
@@ -1010,6 +1026,69 @@ const OPTIONS: &[OptionLine] = &[
         set: |options, value| options.physics.substeps = SUBSTEPS[value] as u32,
     },
     OptionLine {
+        key: "option.scenery_distance",
+        section: SCENERY,
+        label: "Scenery distance",
+        detail: "How far away trees, signs and buildings are drawn. A track can have thousands, and each one drawn costs time on every frame, however small. Solid ones stay solid beyond it.",
+        values: &["150 m", "300 m", "600 m", "All"],
+        get: |options| {
+            // All is the last, and the nearest of the rest stands for any other distance.
+            let distance = options.track.scenery_distance;
+            let all = SCENERY_DISTANCES.len() - 1;
+            if distance.is_finite() {
+                nearest(&SCENERY_DISTANCES[..all], distance)
+            } else {
+                all
+            }
+        },
+        set: |options, value| options.track.scenery_distance = SCENERY_DISTANCES[value],
+    },
+    OptionLine {
+        key: "option.decorations",
+        section: SCENERY,
+        label: "Decorations",
+        detail: "The trees, bushes and signs that trucks drive through. Off draws fewer things on every frame. What trucks can hit is always drawn.",
+        values: &["Off", "On"],
+        get: |options| options.track.decorations as usize,
+        set: |options, value| options.track.decorations = value == 1,
+    },
+    OptionLine {
+        key: "option.backdrop",
+        section: SCENERY,
+        label: "Backdrop",
+        detail: "The distant hills a track draws round its horizon. Off, the sky reaches down to the ground.",
+        values: &["Off", "On"],
+        get: |options| options.backdrop.on as usize,
+        set: |options, value| options.backdrop.on = value == 1,
+    },
+    OptionLine {
+        key: "option.mipmaps",
+        section: SCENERY,
+        label: "Mipmaps",
+        detail: "Stops textures shimmering in the distance. From the next race.",
+        values: &["Off", "On"],
+        get: |options| options.track.mipmaps as usize,
+        set: |options, value| options.track.mipmaps = value == 1,
+    },
+    OptionLine {
+        key: "option.blend_ground",
+        section: SCENERY,
+        label: "Blended ground",
+        detail: "Fades the ground's textures into each other where they meet, instead of the hard edges that Monster Truck Madness 2 has. Costs time on the graphics card. On at Best quality. From the next race.",
+        values: &["Off", "On"],
+        get: |options| options.track.blend_ground as usize,
+        set: |options, value| options.track.blend_ground = value == 1,
+    },
+    OptionLine {
+        key: "option.smooth_terrain",
+        section: SCENERY,
+        label: "Smooth ground",
+        detail: "Lights the ground as if the creases that Monster Truck Madness 2 has were rounded off. The shape of the ground does not change. From the next race.",
+        values: &["Off", "On"],
+        get: |options| options.track.smooth_terrain as usize,
+        set: |options, value| options.track.smooth_terrain = value == 1,
+    },
+    OptionLine {
         key: "option.antialiasing",
         section: GRAPHICS,
         label: "Antialiasing",
@@ -1066,51 +1145,6 @@ const OPTIONS: &[OptionLine] = &[
         set: |options, value| options.track.anisotropy = ANISOTROPIES[value] as u16,
     },
     OptionLine {
-        key: "option.scenery_distance",
-        section: GRAPHICS,
-        label: "Scenery distance",
-        detail: "How far away trees, signs and buildings are drawn. A track can have thousands, and each one drawn costs time on every frame, however small. Solid ones stay solid beyond it.",
-        values: &["150 m", "300 m", "600 m", "All"],
-        get: |options| {
-            // All is the last, and the nearest of the rest stands for any other distance.
-            let distance = options.track.scenery_distance;
-            let all = SCENERY_DISTANCES.len() - 1;
-            if distance.is_finite() {
-                nearest(&SCENERY_DISTANCES[..all], distance)
-            } else {
-                all
-            }
-        },
-        set: |options, value| options.track.scenery_distance = SCENERY_DISTANCES[value],
-    },
-    OptionLine {
-        key: "option.decorations",
-        section: GRAPHICS,
-        label: "Decorations",
-        detail: "The trees, bushes and signs that trucks drive through. Off draws fewer things on every frame. What trucks can hit is always drawn.",
-        values: &["Off", "On"],
-        get: |options| options.track.decorations as usize,
-        set: |options, value| options.track.decorations = value == 1,
-    },
-    OptionLine {
-        key: "option.mipmaps",
-        section: GRAPHICS,
-        label: "Mipmaps",
-        detail: "Stops textures shimmering in the distance. From the next race.",
-        values: &["Off", "On"],
-        get: |options| options.track.mipmaps as usize,
-        set: |options, value| options.track.mipmaps = value == 1,
-    },
-    OptionLine {
-        key: "option.blend_ground",
-        section: GRAPHICS,
-        label: "Blended ground",
-        detail: "Fades the ground's textures into each other where they meet, instead of the hard edges that Monster Truck Madness 2 has. Costs time on the graphics card. On at Best quality. From the next race.",
-        values: &["Off", "On"],
-        get: |options| options.track.blend_ground as usize,
-        set: |options, value| options.track.blend_ground = value == 1,
-    },
-    OptionLine {
         key: "option.truck_shine",
         section: GRAPHICS,
         label: "Truck shine",
@@ -1156,15 +1190,6 @@ const OPTIONS: &[OptionLine] = &[
         set: |options, value| options.dirt.on = value == 1,
     },
     OptionLine {
-        key: "option.backdrop",
-        section: GRAPHICS,
-        label: "Backdrop",
-        detail: "The distant hills a track draws round its horizon. Off, the sky reaches down to the ground.",
-        values: &["Off", "On"],
-        get: |options| options.backdrop.on as usize,
-        set: |options, value| options.backdrop.on = value == 1,
-    },
-    OptionLine {
         key: "option.camera",
         section: GAME,
         label: "Camera",
@@ -1185,7 +1210,7 @@ const OPTIONS: &[OptionLine] = &[
         key: "option.weather",
         section: GAME,
         label: "Weather",
-        detail: "Rain and snow make the ground slippery, and snow freezes the water to ice. Random picks anew for each race. F7 changes it in a race.",
+        detail: "Rain and snow make the ground slippery, and snow freezes the water to ice. Random picks the weather and the time of day anew for each race. F7 changes it in a race.",
         // Random first, and then `Weather::ALL` in its order.
         values: &[
             "Random", "Clear", "Overcast", "Fog", "Rain", "Storm", "Snow",
@@ -1208,19 +1233,10 @@ const OPTIONS: &[OptionLine] = &[
         key: "option.time_of_day",
         section: GAME,
         label: "Time of day",
-        detail: "At dusk and at night the trucks' lamps are on. F8 changes it in a race.",
+        detail: "At dusk and at night the trucks' lamps are on. Random weather picks it for each race. F8 changes it in a race.",
         values: &["Day", "Dusk", "Night"],
         get: |options| place(&TimeOfDay::ALL, &options.weather.time_of_day),
         set: |options, value| options.weather.time_of_day = TimeOfDay::ALL[value],
-    },
-    OptionLine {
-        key: "option.smooth_terrain",
-        section: GAME,
-        label: "Smooth ground",
-        detail: "Lights the ground as if the creases that Monster Truck Madness 2 has were rounded off. The shape of the ground does not change. From the next race.",
-        values: &["Off", "On"],
-        get: |options| options.track.smooth_terrain as usize,
-        set: |options, value| options.track.smooth_terrain = value == 1,
     },
     OptionLine {
         key: "option.speed_units",
@@ -1886,49 +1902,133 @@ fn set_the_truck_up(dials: Res<Dials>, mut setup: ResMut<TruckSetup>) {
     }
 }
 
-/// Hands the choices to the slices, remembers them, and enters the race.
-#[expect(clippy::too_many_arguments, reason = "it is where everything meets")]
+/// A race being got ready after GO, under the loading screen. `None` when there is none.
+#[derive(Resource, Default)]
+struct GettingReady(Option<Chosen>);
+
+/// What GO chose, to be loaded once the loading screen is on show.
+struct Chosen {
+    truck_id: String,
+    track_id: String,
+    /// What the loading screen says.
+    title: String,
+    detail: String,
+    /// How many frames the loading screen has been drawn in.
+    shown_for: u32,
+}
+
+impl Chosen {
+    fn loading_screen(&self, step: &str) -> LoadingView {
+        LoadingView {
+            title: self.title.clone(),
+            detail: self.detail.clone(),
+            step: step.into(),
+        }
+    }
+}
+
+/// Puts up the loading screen and closes the front end, both at once. `get_ready` loads
+/// what was chosen once the screen is on show.
 fn go(
-    mut commands: Commands,
     mut pressed: MessageReader<GoPressed>,
     choices: Res<Choices>,
-    mut catalogue: ResMut<Catalogue>,
-    setup: Res<TruckSetup>,
-    showing: Res<Showing>,
-    base: Res<BaseGame>,
-    saves: Res<Saves>,
-    mut race: ResMut<RaceSettings>,
-    mut game: ResMut<NextState<GameState>>,
+    catalogue: Res<Catalogue>,
+    mut getting_ready: ResMut<GettingReady>,
+    mut screen: ResMut<LoadingScreen>,
     mut open: ResMut<NextState<FrontEndOpen>>,
 ) {
-    if pressed.read().count() == 0 {
+    if pressed.read().count() == 0 || getting_ready.0.is_some() {
         return;
     }
     let (Some(truck_entry), Some(track_entry)) = (
-        catalogue.trucks.get(choices.truck).cloned(),
-        catalogue.tracks.get(choices.track).cloned(),
+        catalogue.trucks.get(choices.truck),
+        catalogue.tracks.get(choices.track),
     ) else {
         return;
     };
-
-    // Whatever was highlighted long enough is loaded already. GO straight after moving
-    // waits for the rest here, where a track is about to be built anyway.
-    let truck = match showing.truck(&truck_entry.id) {
-        Some(truck) => Ok(truck.clone()),
-        None => load_truck(&truck_entry.id, &base),
+    let laps = match choices.laps {
+        1 => "1 lap".to_string(),
+        laps => format!("{laps} laps"),
     };
-    let track = match showing.track(&track_entry.id) {
+    let against = match choices.opponents {
+        0 => "alone".to_string(),
+        1 => "against 1 truck".to_string(),
+        opponents => format!("against {opponents} trucks"),
+    };
+    let chosen = Chosen {
+        truck_id: truck_entry.id.clone(),
+        track_id: track_entry.id.clone(),
+        title: track_entry.name.clone(),
+        detail: format!("{}  -  {laps}  -  {against}", truck_entry.name),
+        shown_for: 0,
+    };
+    screen.0 = Some(chosen.loading_screen(LOADING));
+    getting_ready.0 = Some(chosen);
+    // Gone as the loading screen comes up, rather than left frozen under it.
+    open.as_mut().set_if_neq(FrontEndOpen::Closed);
+}
+
+/// What the loading screen says while the truck and the track are loaded, and while the
+/// race is built.
+const LOADING: &str = "Loading the track and the trucks";
+const BUILDING: &str = "Building the race";
+
+/// How many frames the loading screen is drawn in before what was chosen is loaded, which
+/// takes the whole of one long frame, and then the race is built, in another. A frame is
+/// drawn while the next is worked out, and may wait for the screen behind another: fewer,
+/// and the front end can stay on show, frozen, while the race is loaded.
+const FRAMES_BEFORE_LOADING: u32 = 3;
+
+/// Once the loading screen is on show, loads what GO chose, hands it to the slices,
+/// remembers the choices, and enters the race. Whatever was highlighted long enough is
+/// loaded already; the rest is loaded here, in this frame.
+///
+/// The game's clock is stopped as the race is entered, so that nothing of it runs unseen:
+/// `lift_the_loading_screen` starts it again. Building a race takes one long frame, which
+/// the clock would otherwise try to catch up on with a burst of physics steps.
+#[expect(clippy::too_many_arguments, reason = "it is where everything meets")]
+fn get_ready(
+    mut commands: Commands,
+    mut getting_ready: ResMut<GettingReady>,
+    mut screen: ResMut<LoadingScreen>,
+    mut catalogue: ResMut<Catalogue>,
+    mut showing: ResMut<Showing>,
+    base: Res<BaseGame>,
+    choices: Res<Choices>,
+    setup: Res<TruckSetup>,
+    saves: Res<Saves>,
+    mut race: ResMut<RaceSettings>,
+    mut time: ResMut<Time<Virtual>>,
+    mut game: ResMut<NextState<GameState>>,
+    mut open: ResMut<NextState<FrontEndOpen>>,
+) {
+    let Some(chosen) = &mut getting_ready.0 else {
+        return;
+    };
+    chosen.shown_for += 1;
+    if chosen.shown_for < FRAMES_BEFORE_LOADING {
+        return;
+    }
+    let Some(chosen) = getting_ready.0.take() else {
+        return;
+    };
+
+    let truck = match showing.truck(&chosen.truck_id) {
+        Some(truck) => Ok(truck.clone()),
+        None => load_truck(&chosen.truck_id, &base),
+    };
+    let track = match showing.track(&chosen.track_id) {
         Some(track) => Ok(track.clone()),
-        None => load_track(&track_entry.id, &base),
+        None => load_track(&chosen.track_id, &base),
     };
     let (truck, track) = match (truck, track) {
         (Ok(truck), Ok(track)) => (truck, track),
         (truck, track) => {
-            // Stay, and say why on the entry that failed.
+            // Back to the front end, and say why on the entry that failed.
             let catalogue = &mut *catalogue;
             for (entries, id, error) in [
-                (&mut catalogue.trucks, &truck_entry.id, truck.err()),
-                (&mut catalogue.tracks, &track_entry.id, track.err()),
+                (&mut catalogue.trucks, &chosen.truck_id, truck.err()),
+                (&mut catalogue.tracks, &chosen.track_id, track.err()),
             ] {
                 if let (Some(error), Some(entry)) =
                     (error, entries.iter_mut().find(|entry| entry.id == *id))
@@ -1938,6 +2038,10 @@ fn go(
                     entry.detail = error;
                 }
             }
+            screen.0 = None;
+            // Built again: the turntable went with it.
+            showing.truck_on_show = None;
+            open.as_mut().set_if_neq(FrontEndOpen::Open);
             return;
         }
     };
@@ -1958,8 +2062,8 @@ fn go(
     if let Some(store) = &saves.0 {
         let written = store.write(|batch| {
             batch
-                .set_text(KEY_TRUCK, &truck_entry.id)
-                .set_text(KEY_TRACK, &track_entry.id)
+                .set_text(KEY_TRUCK, &chosen.truck_id)
+                .set_text(KEY_TRACK, &chosen.track_id)
                 .set_number(KEY_LAPS, choices.laps as f64)
                 .set_number(KEY_OPPONENTS, choices.opponents as f64)
                 .set_number(KEY_SUSPENSION, setup.suspension as f64)
@@ -1972,9 +2076,49 @@ fn go(
         }
     }
 
+    screen.0 = Some(chosen.loading_screen(BUILDING));
+    time.pause();
     game.as_mut().set_if_neq(GameState::Racing);
-    // Together with it, so that no frame is drawn with neither a race nor a showroom.
-    open.as_mut().set_if_neq(FrontEndOpen::Closed);
+}
+
+/// A frame longer than this is still the race settling in: the frame that built it, or one
+/// that waited for its textures to reach the graphics processor. 20 frames a second.
+const UNSETTLED_FRAME: Duration = Duration::from_millis(50);
+/// How many frames in a row must be quicker than `UNSETTLED_FRAME` before the race is shown.
+/// More hides more of a race settling in, and keeps the player waiting longer.
+const SETTLED_FRAMES: u32 = 5;
+/// The longest the loading screen stays up in a race, however slow its frames: on a machine
+/// that draws the race at under 20 frames a second it would otherwise never go.
+const LONGEST_SETTLING: Duration = Duration::from_secs(3);
+
+/// Takes the loading screen down once the race runs smoothly, and starts the clock that GO
+/// stopped, so that the countdown begins when the player can see it.
+fn lift_the_loading_screen(
+    mut screen: ResMut<LoadingScreen>,
+    real: Res<Time<Real>>,
+    mut time: ResMut<Time<Virtual>>,
+    pause: Option<Res<State<RacePause>>>,
+    mut settled: Local<u32>,
+    mut up_for: Local<Duration>,
+) {
+    if screen.0.is_none() {
+        (*settled, *up_for) = (0, Duration::ZERO);
+        return;
+    }
+    *up_for += real.delta();
+    *settled = if real.delta() < UNSETTLED_FRAME {
+        *settled + 1
+    } else {
+        0
+    };
+    if *settled < SETTLED_FRAMES && *up_for < LONGEST_SETTLING {
+        return;
+    }
+    screen.0 = None;
+    // A player who paused under the screen starts the clock by carrying on.
+    if pause.is_none_or(|pause| *pause.get() == RacePause::Running) {
+        time.unpause();
+    }
 }
 
 /// EXIT closes the game. What was chosen is already in the store: it is written on GO and
@@ -2073,10 +2217,12 @@ mod tests {
         assert_eq!(line.values.len(), QUALITY_LEVELS.len() + 1);
         assert_eq!(line.values[QUALITY_LEVELS.len()], "Custom");
         assert!(!is_advanced(line));
-        // Every line it sets is a graphics line, on the advanced screen, and each is there.
+        // Every line it sets is a graphics or scenery line, on the advanced screen, and each
+        // is there.
         for key in QUALITY_LINES {
             let line = OPTIONS.iter().find(|line| line.key == key).unwrap();
-            assert_eq!(line.section, GRAPHICS, "{key}");
+            assert!(matches!(line.section, GRAPHICS | SCENERY), "{key}");
+            assert!(is_advanced(line), "{key}");
         }
     }
 

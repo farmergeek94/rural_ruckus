@@ -15,8 +15,8 @@
 //! (`truck::TruckLamps`). F8 goes on to the next time in a race.
 //!
 //! The weather is chosen with `WeatherSettings`, on the options screen, or with F7 in a
-//! race, which goes on to the next kind. Or it is left to chance: a new kind, picked at
-//! random as each race begins. Clear is the game as it was before there was
+//! race, which goes on to the next kind. Or it is left to chance: a new kind, and a new
+//! time of day, picked at random as each race begins. Clear is the game as it was before there was
 //! weather. The values are the game's own: Monster Truck Madness 2's weather is not
 //! measured.
 //!
@@ -92,7 +92,8 @@ impl Plugin for WeatherPlugin {
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct WeatherSettings {
     pub weather: Weather,
-    /// Whether each race's weather is picked at random as it begins, into `weather`.
+    /// Whether each race's weather and time of day are picked at random as it begins, into
+    /// `weather` and `time_of_day`.
     pub random: bool,
     pub time_of_day: TimeOfDay,
 }
@@ -217,7 +218,7 @@ fn lamps_on(settings: &WeatherSettings) -> bool {
     settings.time_of_day.dark() || matches!(settings.weather, Weather::Rain | Weather::Storm)
 }
 
-/// A new kind of weather for a race, when it is left to chance.
+/// A new kind of weather and time of day for a race, when they are left to chance.
 fn pick_the_weather(mut settings: ResMut<WeatherSettings>) {
     if !settings.random {
         return;
@@ -226,18 +227,27 @@ fn pick_the_weather(mut settings: ResMut<WeatherSettings>) {
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos() as u64);
-    settings.weather = pick(seed);
-    info!("Weather: {}", settings.weather.name());
+    (settings.weather, settings.time_of_day) = pick(seed);
+    info!(
+        "Weather: {}, {}",
+        settings.weather.name(),
+        settings.time_of_day.name()
+    );
 }
 
-/// The weather that `seed` picks, every kind as likely as another.
-fn pick(seed: u64) -> Weather {
+/// The weather and the time of day that `seed` picks, every kind as likely as another and
+/// every time as likely as another, whatever the kind.
+fn pick(seed: u64) -> (Weather, TimeOfDay) {
     // Stirred (splitmix64), so that seeds close together pick different kinds.
     let mut mixed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
     mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     mixed ^= mixed >> 31;
-    Weather::ALL[(mixed % Weather::ALL.len() as u64) as usize]
+    let kinds = Weather::ALL.len() as u64;
+    let weather = Weather::ALL[(mixed % kinds) as usize];
+    // What is left once the kind is taken out, so that the two don't go together.
+    let time = TimeOfDay::ALL[(mixed / kinds % TimeOfDay::ALL.len() as u64) as usize];
+    (weather, time)
 }
 
 fn next_weather(mut settings: ResMut<WeatherSettings>) {
@@ -276,13 +286,16 @@ mod tests {
     }
 
     #[test]
-    fn chance_picks_every_kind_about_as_often() {
-        let mut counts = [0; Weather::ALL.len()];
-        for seed in 0..6000 {
-            let at = Weather::ALL.iter().position(|&w| w == pick(seed)).unwrap();
-            counts[at] += 1;
+    fn chance_picks_every_kind_and_every_time_about_as_often() {
+        // Every pair of a kind and a time, so that neither leans on the other.
+        let mut counts = [[0; TimeOfDay::ALL.len()]; Weather::ALL.len()];
+        for seed in 0..18000 {
+            let (weather, time) = pick(seed);
+            let kind = Weather::ALL.iter().position(|&w| w == weather).unwrap();
+            let when = TimeOfDay::ALL.iter().position(|&t| t == time).unwrap();
+            counts[kind][when] += 1;
         }
-        for count in counts {
+        for count in counts.into_iter().flatten() {
             assert!((800..1200).contains(&count), "{counts:?}");
         }
     }

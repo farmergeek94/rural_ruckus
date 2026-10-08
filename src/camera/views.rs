@@ -17,7 +17,8 @@
 //! more: a new view is picked at random every `SHOW_EACH_VIEW` seconds (`direct_views`), as
 //! a television picture of the race would change shots. It does not cut to it. The chase
 //! camera swings round the truck to look another way, on a spring, so that it eases off and
-//! eases in. Between the chase camera and the cockpit the picture fades to black and back
+//! eases in. Each shot also picks how far from the truck the chase camera is
+//! (`SHOT_DISTANCE`), and the camera eases nearer or further on the same spring. Between the chase camera and the cockpit the picture fades to black and back
 //! (`Fade`): a swing from one to the other would go through the truck's body.
 //!
 //! MTM2 has an in-cab view whose dashboard the truck's `Instrument Cluster` names, which
@@ -30,7 +31,7 @@ use bevy::prelude::*;
 
 use super::ChaseCamera;
 use super::dashboard::eye_pitch;
-use super::spring::follow_angle;
+use super::spring::{follow, follow_angle};
 use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
 use crate::track::Track;
@@ -54,6 +55,11 @@ const SHOW_EACH_VIEW: f32 = 7.0;
 /// second: it is most of the way round after `4 / SWING_STIFFNESS` seconds. Higher swings
 /// faster.
 const SWING_STIFFNESS: f32 = 2.5;
+/// On autopilot, the nearest and the furthest the chase camera is put from the truck for a
+/// shot, as a share of its own distance and height (`RigConfig`), so that it looks down at
+/// the truck at the same angle. A shot picks a share between the two at random. A lower
+/// first number allows closer shots; a higher second, shots from further off.
+const SHOT_DISTANCE: (f32, f32) = (0.55, 2.0);
 /// On autopilot, how long the picture takes to fade to black, and again to come back, in
 /// seconds, between the chase camera and the cockpit.
 const FADE_TIME: f32 = 0.4;
@@ -120,19 +126,40 @@ impl Look {
 
 /// On autopilot: the view picked, how far the camera has got to it, and how long until
 /// another is picked.
-#[derive(Resource, Clone, Copy, Debug, Default)]
+#[derive(Resource, Clone, Copy, Debug)]
 pub(super) struct Director {
     /// The view picked, which the camera swings or fades to. `None` until the first pick.
     shot: Option<(CameraView, Look)>,
     /// How far round from ahead the chase camera has swung, in radians (left is positive),
     /// and how fast it is swinging, in radians per second.
     swung: (f32, f32),
+    /// How far from the truck the shot puts the chase camera, as a share of its own
+    /// distance (`SHOT_DISTANCE`).
+    distance: f32,
+    /// How far from the truck the chase camera has got, as the same share, and how fast
+    /// that share is changing, per second.
+    zoomed: (f32, f32),
     /// How dark the picture is, from 0 (clear) to 1 (black).
     dark: f32,
     /// In seconds. At 0 or below, a view is picked at once.
     next_shot_in: f32,
     /// Stirred at every pick, for the next one.
     seed: u64,
+}
+
+impl Default for Director {
+    fn default() -> Self {
+        Self {
+            shot: None,
+            swung: (0.0, 0.0),
+            // At the chase camera's own distance, until a shot picks another.
+            distance: 1.0,
+            zoomed: (1.0, 0.0),
+            dark: 0.0,
+            next_shot_in: 0.0,
+            seed: 0,
+        }
+    }
 }
 
 /// Over the whole window: black, as dark as `Director::dark` says.
@@ -203,6 +230,7 @@ pub(super) fn direct_views(
         director.seed = stir(director.seed);
         let current = director.shot.unwrap_or((*view, Look::Ahead));
         director.shot = Some(next_shot(current, director.seed));
+        director.distance = shot_distance(stir(director.seed));
     }
     let Some((wanted, look)) = director.shot else {
         return;
@@ -211,8 +239,9 @@ pub(super) fn direct_views(
         director.dark = (director.dark + dt / FADE_TIME).min(1.0);
         if director.dark >= 1.0 {
             *view = wanted;
-            // Unseen in the dark, it is already looking the new way.
+            // Unseen in the dark, it is already looking the new way, from the new distance.
             director.swung = (look.angle(), 0.0);
+            director.zoomed = (director.distance, 0.0);
             if wanted == CameraView::Chase {
                 // Back to the chase camera, it starts again settled behind the truck.
                 camera.snap();
@@ -221,6 +250,12 @@ pub(super) fn direct_views(
     } else {
         director.dark = (director.dark - dt / FADE_TIME).max(0.0);
         director.swung = follow_angle(director.swung, look.angle(), SWING_STIFFNESS, dt);
+        director.zoomed = follow(
+            director.zoomed,
+            (director.distance, 0.0),
+            SWING_STIFFNESS,
+            dt,
+        );
     }
 }
 
@@ -254,6 +289,15 @@ fn next_shot(current: (CameraView, Look), roll: u64) -> (CameraView, Look) {
     others[(roll % others.len() as u64) as usize]
 }
 
+/// A share of the chase camera's distance between the two of `SHOT_DISTANCE`, which `roll`
+/// picks.
+fn shot_distance(roll: u64) -> f32 {
+    // The top 24 bits, which an f32 holds exactly: from 0 up to, but not, 1.
+    let share = (roll >> 40) as f32 / (1u64 << 24) as f32;
+    let (nearest, furthest) = SHOT_DISTANCE;
+    nearest + (furthest - nearest) * share
+}
+
 /// A number that looks random, from `state` (splitmix64), so that seeds close together
 /// give numbers far apart.
 fn stir(state: u64) -> u64 {
@@ -264,7 +308,7 @@ fn stir(state: u64) -> u64 {
 }
 
 /// Lays the view and the look over where the chase camera has put the eye (on autopilot,
-/// as far round as `direct_views` has swung it), and in the cockpit tells the truck slice
+/// as far round and as near or far as `direct_views` has taken it), and in the cockpit tells the truck slice
 /// that the player's truck is seen from inside, which hides its body and keeps its lamps
 /// lit (`truck::SeenFromInside`).
 #[allow(clippy::too_many_arguments)]
@@ -314,10 +358,10 @@ pub(super) fn place_view(
         )
     };
     looking.set_if_neq(look);
-    let angle = if autopilot {
-        director.swung.0
+    let (angle, zoom) = if autopilot {
+        (director.swung.0, director.zoomed.0)
     } else {
-        look.angle()
+        (look.angle(), 1.0)
     };
 
     let (chase, mut transform, projection) = camera.into_inner();
@@ -331,9 +375,9 @@ pub(super) fn place_view(
             _ => 0.0,
         };
         *transform = cockpit_pose(truck, eye, look, pitch);
-    } else if angle != 0.0 {
+    } else if angle != 0.0 || zoom != 1.0 {
         let aim = truck.translation + Vec3::Y * chase.config.look_above;
-        let eye = swing(transform.translation, aim, angle);
+        let eye = aim + (swing(transform.translation, aim, angle) - aim) * zoom;
         let ground = track.heights.height_at(eye.x, eye.z);
         let eye = eye.with_y(eye.y.max(ground + chase.config.clearance));
         *transform = Transform::from_translation(eye).looking_at(aim, Vec3::Y);
@@ -398,6 +442,18 @@ mod tests {
                 assert!(picked.contains(&shot), "{shot:?} after {current:?}");
             }
         }
+    }
+
+    #[test]
+    fn each_shot_distance_is_in_range_and_they_spread_over_it() {
+        let picked: Vec<_> = (0..200).map(|seed| shot_distance(stir(seed))).collect();
+        let (nearest, furthest) = SHOT_DISTANCE;
+        assert!(picked.iter().all(|share| (nearest..furthest).contains(share)));
+        let middle = (nearest + furthest) / 2.0;
+        assert!(picked.iter().any(|share| *share < nearest + 0.1));
+        assert!(picked.iter().any(|share| *share > furthest - 0.1));
+        assert!(picked.iter().filter(|share| **share < middle).count() > 60);
+        assert!(picked.iter().filter(|share| **share > middle).count() > 60);
     }
 
     #[test]
