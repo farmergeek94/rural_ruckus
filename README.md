@@ -8,6 +8,12 @@ tracks and trucks, and community-made ones.
 This repository contains no MTM2 files. You must supply them from your own copy of the
 game.
 
+![A race in the desert: Bigfoot follows two trucks along a dirt course, with dust behind the wheels](docs/images/desert.jpg)
+
+![Eight trucks on the starting grid at night, in rain, with headlights on](docs/images/rain-at-night.jpg)
+
+The screenshots show tracks and trucks from MTM2, loaded from the original game's files as well as community additions.
+
 ## Acknowledgements
 
 The reverse-engineering work by [Juan Pablo Utreras](https://github.com/juanputrerasm)
