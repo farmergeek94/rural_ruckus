@@ -71,7 +71,7 @@ use crate::race::{RaceCancelled, RacePause, RaceSettings};
 use crate::store::{self, Store};
 use crate::track::{self, ChosenTrack, TrackData, TrackSettings};
 use crate::truck::{
-    self, ChosenTruck, ComputerTrucks, SpeedUnits, TruckData, TruckDisplay, TruckLooksSettings,
+    self, ChosenTruck, ComputerTrucks, SpeedUnits, Transmission, TruckData, TruckDisplay, TruckLooksSettings,
     TruckSetup,
 };
 use crate::ui::{
@@ -183,6 +183,7 @@ impl Plugin for FrontEndPlugin {
             .init_resource::<EnvironmentSettings>()
             .init_resource::<ControlsHelpSettings>()
             .init_resource::<SpeedUnits>()
+            .init_resource::<Transmission>()
             .init_resource::<TruckLooksSettings>()
             .init_resource::<WaterSettings>()
             .init_resource::<DirtSettings>()
@@ -757,6 +758,7 @@ struct Options {
     environment: EnvironmentSettings,
     help: ControlsHelpSettings,
     speed: SpeedUnits,
+    gears: Transmission,
     truck_looks: TruckLooksSettings,
     water: WaterSettings,
     dirt: DirtSettings,
@@ -776,6 +778,7 @@ impl Options {
             environment: default(),
             help: default(),
             speed: default(),
+            gears: default(),
             truck_looks: default(),
             water: default(),
             dirt: default(),
@@ -794,6 +797,7 @@ impl Options {
             environment: world.resource::<EnvironmentSettings>().clone(),
             help: *world.resource(),
             speed: *world.resource(),
+            gears: *world.resource(),
             truck_looks: *world.resource(),
             water: *world.resource(),
             dirt: *world.resource(),
@@ -811,6 +815,7 @@ impl Options {
         world.insert_resource(self.environment);
         world.insert_resource(self.help);
         world.insert_resource(self.speed);
+        world.insert_resource(self.gears);
         world.insert_resource(self.truck_looks);
         world.insert_resource(self.water);
         world.insert_resource(self.dirt);
@@ -830,6 +835,7 @@ struct OptionResources<'w> {
     environment: ResMut<'w, EnvironmentSettings>,
     help: ResMut<'w, ControlsHelpSettings>,
     speed: ResMut<'w, SpeedUnits>,
+    gears: ResMut<'w, Transmission>,
     truck_looks: ResMut<'w, TruckLooksSettings>,
     water: ResMut<'w, WaterSettings>,
     dirt: ResMut<'w, DirtSettings>,
@@ -848,6 +854,7 @@ impl OptionResources<'_> {
             environment: self.environment.clone(),
             help: *self.help,
             speed: *self.speed,
+            gears: *self.gears,
             truck_looks: *self.truck_looks,
             water: *self.water,
             dirt: *self.dirt,
@@ -866,6 +873,7 @@ impl OptionResources<'_> {
         self.environment.set_if_neq(options.environment);
         self.help.set_if_neq(options.help);
         self.speed.set_if_neq(options.speed);
+        self.gears.set_if_neq(options.gears);
         self.truck_looks.set_if_neq(options.truck_looks);
         self.water.set_if_neq(options.water);
         self.dirt.set_if_neq(options.dirt);
@@ -1259,6 +1267,21 @@ const OPTIONS: &[OptionLine] = &[
         },
     },
     OptionLine {
+        key: "option.gears",
+        section: GAME,
+        label: "Gears",
+        detail: "Who changes the five forward gears. Manual: Left Shift changes up and Left Ctrl down (or the keys bound to them), or the gamepad's bumpers. Reverse goes in by itself when the truck stops and the brake is held.",
+        values: &["Automatic", "Manual"],
+        get: |options| (options.gears == Transmission::Manual) as usize,
+        set: |options, value| {
+            options.gears = if value == 1 {
+                Transmission::Manual
+            } else {
+                Transmission::Automatic
+            };
+        },
+    },
+    OptionLine {
         key: "option.controls_help",
         section: GAME,
         label: "Key help",
@@ -1273,6 +1296,8 @@ const OPTIONS: &[OptionLine] = &[
     key_line!("key.steer_left", DRIVING, Control::SteerLeft),
     key_line!("key.steer_right", DRIVING, Control::SteerRight),
     key_line!("key.handbrake", DRIVING, Control::Handbrake),
+    key_line!("key.shift_up", DRIVING, Control::ShiftUp),
+    key_line!("key.shift_down", DRIVING, Control::ShiftDown),
     key_line!("key.flip_upright", DRIVING, Control::FlipUpright),
     key_line!("key.back_to_checkpoint", RACE, Control::BackToCheckpoint),
     key_line!("key.race_again", RACE, Control::RaceAgain),

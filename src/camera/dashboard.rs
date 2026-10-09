@@ -21,7 +21,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use super::views::{CameraView, Look};
 use crate::game_state::GameState;
 use crate::truck::{
-    ChosenTruck, Dashboard, DashboardPicture, Dial, Player, TruckConfig, TruckInput,
+    ChosenTruck, Dashboard, DashboardPicture, Dial, Gearbox, Player, TruckInput,
 };
 
 /// How thick a needle is, in the dashboard's pixels. The game's own.
@@ -32,9 +32,8 @@ const NEEDLE_COLOR: Color = Color::srgb(0.2, 0.5, 0.96);
 /// marks (100 mph is 265 degrees round, 9,000 rpm 235), and never all the way round. The
 /// game's own.
 const MOST_SWEEP: f32 = 300.0 * std::f32::consts::PI / 180.0;
-/// The tachometer: the truck has no engine speed, so the needle stands at `IDLE_RPM` and
-/// goes up to `TOP_RPM` with the truck's speed, as a share of its top speed, as if in one
-/// gear. The game's own, not MTM2's.
+/// The tachometer: the needle stands at `IDLE_RPM` and goes up to `TOP_RPM` at the rev
+/// limit of the gear the truck is in (`truck::Gearbox::revs`). The game's own, not MTM2's.
 const IDLE_RPM: f32 = 1000.0;
 const TOP_RPM: f32 = 7000.0;
 /// Where the horizon is put in the dashboard's 3D window, as a share of the way down it,
@@ -167,7 +166,7 @@ pub(super) fn show_dashboard(
         (&Needle, &mut UiTransform, &mut Visibility),
         (Without<Wheel>, Without<DashboardRoot>),
     >,
-    player: Single<(&LinearVelocity, &TruckInput, &TruckConfig), Player>,
+    player: Single<(&LinearVelocity, &TruckInput, &Gearbox), Player>,
 ) {
     let Some(root) = root else {
         return;
@@ -199,7 +198,7 @@ pub(super) fn show_dashboard(
     } else {
         Visibility::Hidden
     };
-    let (velocity, input, config) = *player;
+    let (velocity, input, gearbox) = *player;
     let dashboard = &root.dashboard;
     for (mut image, mut visibility) in &mut wheel {
         visibility.set_if_neq(seen);
@@ -222,7 +221,11 @@ pub(super) fn show_dashboard(
         visibility.set_if_neq(seen);
         let (dial, reading) = match needle {
             Needle::Speed => (dashboard.speedometer, speed),
-            Needle::Revs => (dashboard.tachometer, revs(speed, config.top_speed)),
+            // A stalled engine does not turn.
+            Needle::Revs => (
+                dashboard.tachometer,
+                if gearbox.stalled() { 0.0 } else { revs(gearbox.revs()) },
+            ),
         };
         if let Some(dial) = dial {
             let (angle, length) = stretched_needle(needle_angle(&dial, reading), widened);
@@ -311,15 +314,9 @@ fn wheel_frame(turns: &[f32], steer: f32) -> usize {
         .map_or(0, |(frame, _)| frame)
 }
 
-/// The engine speed the tachometer shows at `speed`, in metres a second, for a truck whose
-/// top speed is `top_speed`.
-fn revs(speed: f32, top_speed: f32) -> f32 {
-    let share = if top_speed > 0.0 {
-        (speed / top_speed).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    IDLE_RPM + (TOP_RPM - IDLE_RPM) * share
+/// The engine speed the tachometer shows, in rpm, for an engine at `share` of its rev limit.
+fn revs(share: f32) -> f32 {
+    IDLE_RPM + (TOP_RPM - IDLE_RPM) * share.clamp(0.0, 1.0)
 }
 
 fn texture(picture: &DashboardPicture) -> Image {
@@ -395,11 +392,10 @@ mod tests {
     }
 
     #[test]
-    fn the_engine_idles_at_rest_and_revs_with_speed() {
-        assert_eq!(revs(0.0, 30.0), IDLE_RPM);
-        assert_eq!(revs(30.0, 30.0), TOP_RPM);
-        assert_eq!(revs(60.0, 30.0), TOP_RPM);
-        assert_eq!(revs(10.0, 0.0), IDLE_RPM);
+    fn the_engine_idles_at_rest_and_reads_top_at_the_rev_limit() {
+        assert_eq!(revs(0.0), IDLE_RPM);
+        assert_eq!(revs(1.0), TOP_RPM);
+        assert_eq!(revs(2.0), TOP_RPM);
     }
 
     #[test]

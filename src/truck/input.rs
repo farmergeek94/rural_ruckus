@@ -27,6 +27,10 @@ pub struct TruckInput {
     /// -1 (right) to 1 (left).
     pub steer: f32,
     pub handbrake: bool,
+    /// How many gears the driver has asked to change by, up positive, since the gearbox
+    /// last looked. Add to it; the gearbox takes it each physics step, so that a key
+    /// pressed between two steps is neither lost nor counted twice.
+    pub shifts: i8,
 }
 
 /// Moves the keyboard's steering from `current` towards the `target` the keys ask for
@@ -74,6 +78,8 @@ pub(super) fn read_input(
     );
     let mut steer = *key_steer;
     let mut handbrake = bindings.pressed(&keys, Control::Handbrake);
+    let mut shifts = bindings.just_pressed(&keys, Control::ShiftUp) as i8
+        - bindings.just_pressed(&keys, Control::ShiftDown) as i8;
 
     for gamepad in &gamepads {
         throttle += gamepad.get(GamepadButton::RightTrigger2).unwrap_or(0.0)
@@ -81,12 +87,15 @@ pub(super) fn read_input(
         // Stick right is positive, but steering left is.
         steer -= gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
         handbrake |= gamepad.pressed(GamepadButton::South);
+        shifts += gamepad.just_pressed(GamepadButton::RightTrigger) as i8
+            - gamepad.just_pressed(GamepadButton::LeftTrigger) as i8;
     }
 
     for mut input in &mut inputs {
         input.throttle = throttle.clamp(-1.0, 1.0);
         input.steer = steer.clamp(-1.0, 1.0);
         input.handbrake = handbrake;
+        input.shifts = input.shifts.saturating_add(shifts);
     }
 }
 

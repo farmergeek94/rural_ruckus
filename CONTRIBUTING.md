@@ -67,6 +67,7 @@ built-in shapes and grey in its place.
 | --- | --- |
 | W, S, A, D (or the arrows) | Throttle, brake and reverse, steer |
 | Space | Handbrake |
+| Left Shift, Left Ctrl | Shift up, shift down, with manual gears (OPTIONS > Gears, or `--manual`) |
 | R | Flip the truck upright |
 | C | Back to the last checkpoint |
 | Esc | Pause: continue, restart the whole race, save a screenshot (in `screenshots/`), or cancel the race |

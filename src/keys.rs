@@ -16,6 +16,9 @@ pub enum Control {
     SteerLeft,
     SteerRight,
     Handbrake,
+    /// With the manual gearbox (`truck::Transmission::Manual`).
+    ShiftUp,
+    ShiftDown,
     FlipUpright,
     BackToCheckpoint,
     /// Once the player has finished: race again.
@@ -34,12 +37,14 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the options screen lists them.
-    pub const ALL: [Control; 17] = [
+    pub const ALL: [Control; 19] = [
         Control::Throttle,
         Control::Reverse,
         Control::SteerLeft,
         Control::SteerRight,
         Control::Handbrake,
+        Control::ShiftUp,
+        Control::ShiftDown,
         Control::FlipUpright,
         Control::BackToCheckpoint,
         Control::RaceAgain,
@@ -69,6 +74,8 @@ impl Control {
             Control::SteerLeft => "Steer left",
             Control::SteerRight => "Steer right",
             Control::Handbrake => "Handbrake",
+            Control::ShiftUp => "Shift up",
+            Control::ShiftDown => "Shift down",
             Control::FlipUpright => "Flip upright",
             Control::BackToCheckpoint => "Back to checkpoint",
             Control::RaceAgain => "Race again (after the finish)",
@@ -92,6 +99,8 @@ impl Control {
             Control::SteerLeft => KeyCode::KeyA,
             Control::SteerRight => KeyCode::KeyD,
             Control::Handbrake => KeyCode::Space,
+            Control::ShiftUp => KeyCode::ShiftLeft,
+            Control::ShiftDown => KeyCode::ControlLeft,
             Control::FlipUpright => KeyCode::KeyR,
             Control::BackToCheckpoint => KeyCode::KeyC,
             Control::RaceAgain => KeyCode::Enter,

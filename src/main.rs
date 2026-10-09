@@ -33,7 +33,8 @@ fn main() {
     // CPU (`front_end::integrated_graphics`, the options screen's Quality at Balanced); an
     // option after it on the command line wins over it. `--opponents=3` races
     // against that many trucks driven by the computer, which are copies of the player's.
-    // `--difficulty=hard` (easy, normal or hard) is how hard they are to beat.
+    // `--difficulty=hard` (easy, normal or hard) is how hard they are to beat. `--manual`
+    // has the player change the forward gears.
     // `--weather=rain` races in that weather (clear, overcast, fog, rain, storm or snow), and
     // `--weather=random` in one picked at random, at a time of day picked at random, and
     // `--time=night` at that time of day (day, dusk or night), unless the weather is random. `--no-backdrop` leaves out the distant
@@ -117,6 +118,9 @@ fn main() {
             Some("--no-vsync") => vsync = false,
             Some("--fifo") => fifo = true,
             Some("--race") => race_at_once = true,
+            Some("--manual") => {
+                app.insert_resource(truck::Transmission::Manual);
+            }
             Some("--builtin") => builtin = true,
             Some("--no-antialiasing") => camera_settings.antialiasing = camera::Antialiasing::Off,
             Some(flag) if flag.starts_with("--antialiasing=") => {
@@ -191,7 +195,7 @@ fn main() {
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
                     "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-blend-ground --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
-                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --no-water-reflections --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --difficulty=EASY|NORMAL|HARD --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
+                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --no-water-reflections --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --difficulty=EASY|NORMAL|HARD --manual --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
             }

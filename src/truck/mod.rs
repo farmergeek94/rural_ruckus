@@ -24,6 +24,7 @@ mod contacts;
 mod data;
 mod display;
 mod drive;
+mod gearbox;
 mod input;
 mod interpolate;
 mod lamps;
@@ -47,6 +48,7 @@ pub use data::{
     TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel, TruckTexture, TruckTextureCycle,
 };
 pub use display::TruckDisplay;
+pub use gearbox::{FORWARD_GEARS, Gear, Gearbox};
 pub use input::TruckInput;
 pub use lamps::TruckLamps;
 pub use pod_import::{
@@ -75,6 +77,7 @@ impl Plugin for TruckPlugin {
             .init_resource::<crate::keys::KeyBindings>()
             .init_resource::<ComputerTrucks>()
             .init_resource::<SpeedUnits>()
+            .init_resource::<Transmission>()
             .init_resource::<TruckLooksSettings>()
             .init_resource::<TruckLamps>()
             .init_resource::<RepeatingWorld>()
@@ -106,7 +109,13 @@ impl Plugin for TruckPlugin {
             )
             // Forces must be computed at the physics rate, before each step, which the
             // physics takes in `FixedPostUpdate`.
-            .add_systems(FixedUpdate, drive::drive_truck.in_set(TruckSystems::Drive))
+            .add_systems(
+                FixedUpdate,
+                (
+                    gearbox::change_gears.before(TruckSystems::Drive),
+                    drive::drive_truck.in_set(TruckSystems::Drive),
+                ),
+            )
             .add_systems(
                 FixedPostUpdate,
                 (wrap::bring_back_on, interpolate::record_poses)
@@ -133,6 +142,17 @@ pub enum SpeedUnits {
     #[default]
     Kmh,
     Mph,
+}
+
+/// Who changes the player's gears (see `Gearbox`). Change it at any time. The computer's
+/// trucks are always automatic.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Transmission {
+    #[default]
+    Automatic,
+    /// The player changes the forward gears with `Control::ShiftUp` and
+    /// `Control::ShiftDown`. Reverse still goes in by itself.
+    Manual,
 }
 
 /// How trucks are drawn. Change it at any time: trucks already built are brought up to date.

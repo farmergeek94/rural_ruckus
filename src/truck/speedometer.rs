@@ -1,9 +1,9 @@
-//! On-screen speed readout.
+//! On-screen speed readout, with the gear beside it.
 
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 
-use super::{Player, SpeedUnits};
+use super::{Gear, Gearbox, Player, SpeedUnits};
 use crate::game_state::GameState;
 
 /// Metres per second to kilometres per hour, and to miles per hour.
@@ -17,7 +17,7 @@ pub(super) fn spawn_speedometer(mut commands: Commands, units: Res<SpeedUnits>) 
     commands.spawn((
         SpeedText,
         DespawnOnExit(GameState::Racing),
-        Text::new(speed_text(0.0, *units)),
+        Text::new(speed_text(0.0, Gear::Forward(1), *units)),
         TextFont::from_font_size(32.0),
         Node {
             position_type: PositionType::Absolute,
@@ -29,19 +29,28 @@ pub(super) fn spawn_speedometer(mut commands: Commands, units: Res<SpeedUnits>) 
 }
 
 pub(super) fn update_speedometer(
-    truck: Single<&LinearVelocity, Player>,
+    truck: Single<(&LinearVelocity, &Gearbox), Player>,
     units: Res<SpeedUnits>,
     mut text: Single<&mut Text, With<SpeedText>>,
 ) {
-    text.0 = speed_text(truck.0.length(), *units);
+    let (velocity, gearbox) = *truck;
+    let mut shown = speed_text(velocity.0.length(), gearbox.gear(), *units);
+    if gearbox.stalled() {
+        shown.push_str(" stalled");
+    }
+    // Only when it changes, so that the text is not laid out again every frame.
+    if text.0 != shown {
+        text.0 = shown;
+    }
 }
 
 /// `speed` in metres per second.
-fn speed_text(speed: f32, units: SpeedUnits) -> String {
-    match units {
+fn speed_text(speed: f32, gear: Gear, units: SpeedUnits) -> String {
+    let speed = match units {
         SpeedUnits::Kmh => format!("{:.0} km/h", speed * KMH_PER_MS),
         SpeedUnits::Mph => format!("{:.0} mph", speed * MPH_PER_MS),
-    }
+    };
+    format!("{speed}   Gear {gear}")
 }
 
 #[cfg(test)]
@@ -50,8 +59,13 @@ mod tests {
 
     #[test]
     fn a_speed_reads_in_either_unit() {
-        assert_eq!(speed_text(10.0, SpeedUnits::Kmh), "36 km/h");
+        let first = Gear::Forward(1);
+        assert_eq!(speed_text(10.0, first, SpeedUnits::Kmh), "36 km/h   Gear 1");
         // 100 km/h.
-        assert_eq!(speed_text(27.778, SpeedUnits::Mph), "62 mph");
+        assert_eq!(
+            speed_text(27.778, Gear::Forward(4), SpeedUnits::Mph),
+            "62 mph   Gear 4"
+        );
+        assert_eq!(speed_text(2.0, Gear::Reverse, SpeedUnits::Mph), "4 mph   Gear R");
     }
 }

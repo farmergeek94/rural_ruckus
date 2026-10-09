@@ -16,7 +16,7 @@ use super::drive::TipGuard;
 use super::interpolate::PhysicsPose;
 use super::lamps;
 use super::{
-    ChosenTruck, ComputerTrucks, GroundGrip, PlayerTruck, Truck, TruckConfig, TruckData,
+    ChosenTruck, ComputerTrucks, Gearbox, GroundGrip, PlayerTruck, Truck, TruckConfig, TruckData,
     TruckInput, TruckName, TruckSetup, TruckVisual, TruckWheelColliders, TruckWheels,
     WheelCollider, WheelCore,
 };
@@ -139,6 +139,7 @@ fn spawn_truck(
             Truck,
             TruckName(chosen.name.clone()),
             TruckInput::default(),
+            Gearbox::default(),
             start,
             PhysicsPose::at(start),
             config.clone(),

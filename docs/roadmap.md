@@ -105,7 +105,7 @@ Goal: feature parity. Confirm each item in MTM2 before you build it (**Game**).
 | Map of the track in the race | Done. M shows it; not yet seen in the game. |
 | Other camera views (bumper, far) | Partial |
 | Damage | **Open** |
-| Gears: automatic and manual | **Open** |
+| Gears: automatic and manual | Done, by the user's request: five forward gears and a reverse, automatic by default (see the feature row). |
 | Force feedback | Missing |
 
 ### Stage 16: rare files
@@ -204,7 +204,7 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Truck sounds | Out of scope | File: [truck.md](formats/truck.md) | `Wave File`: three sound names. Not parsed. |
 | Dashboard (instrument cluster) | Partial | File: [cockpit.md](formats/cockpit.md) | `Instrument Cluster` names the layout (`POWERBIG.480`, in the base game's `COCKPIT.POD`), which is read with its pictures. In the cockpit view, the picture for the way the player looks is stretched over the window, and the road shows through its palette index 0 (**measured**). Looking ahead: the steering wheel picture for the steering, and a speedometer and a tachometer needle, at the file's angles (**measured**: clockwise from straight up). The tachometer's engine speed is the game's own. Not drawn: the mirror, the shifter, the shift light (**open**). Not yet looked at in the game. |
 | Damage | Open | Game | Confirm whether MTM2 has it. |
-| Gears: automatic and manual | Open | Game | Confirm what MTM2 offers. |
+| Gears: automatic and manual | Own | | `src/truck/gearbox.rs`. Five forward gears, by the user's request, and a reverse that goes in by itself. Automatic by default; manual is an option (OPTIONS > Gears, `--manual`) for the player's truck only. Only first, second and reverse pull away from a standstill: the throttle in a higher gear at low engine speed stalls the engine until the throttle is let go or the gear is changed. The gear is shown beside the speed, and the tachometer reads the engine speed in the gear. The gear ratios and shift points are the game's own. What MTM2 offers is **open**. The shifter pictures and the shift light of the cockpit are not drawn. Not yet driven. |
 | Truck paint and liveries chosen in the garage | Open | Game | The garage sets handling, not paint. |
 
 ### Racing
