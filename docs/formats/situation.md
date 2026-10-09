@@ -308,6 +308,91 @@ Between [Beta]":
   The two gates that the route does not go through (10 and 14) are 34 to 37 m to one
   side of a long straight part of it. Why is **open**.
 
+## Extra courses
+
+After the first course, a line `@*********** Extended Course Definitions *************`
+and a count follow. Then each extra course has a header `[Course N] c1Count,course_direction`
+and the same fields as the first course. **Measured** on 46 track files (the base game's,
+the community tracks in `tracks/`, and Community Patch 3's `GAME.POD`):
+
+- The count is 4 in every file. So every track has five courses: the first ("main") and
+  `[Course 1]` to `[Course 4]`. An empty course has the count 0 and no pieces.
+- `[Course 3]` and `[Course 4]` are empty in every file except Monte Carlo
+  (`[Course 3]`: 58 pieces). `[Course 1]` is empty only on the hill climb.
+  `[Course 2]` is empty on 13 files: Alpine, Castle, Circuits 2 and 4, Arizona
+  (`DEMO.SIT`), Island, the hill climb and the drag files.
+- Points of an extra course can be off the map: Critic's `[Course 2]` has x = -4078 ft,
+  and Circuit 4's `[Course 1]` has z = 5440 ft. Wrapped onto the map (8192 ft, see
+  terrain.md), each such course is a sound loop, so the course goes across an edge as
+  Monte Carlo's main course does.
+- Wrapped, every extra course passes every checkpoint within 60 m (the main course: within
+  37 m, except on Route 756 Jam). Each piece is in lap order, as in the main course.
+- `[Course 1]` is nearly the main course: 1 to 27 m from it, and 0 to 5 % shorter
+  (Alpine: 158 m from it, 2 % shorter).
+- `[Course 2]` is the shortest course on most tracks: 3 to 16 % shorter than the main
+  course, and up to 103 m from it. On some tracks it takes a different road:
+  - Crazy '98: it goes straight along the lower road (z = 1631 ft) from the west loop to
+    checkpoint 5. The main course goes along the upper road (z = 1475 ft) and down an S
+    bend. 1601 m, against 1792 m.
+  - Sidewinder Canyon (`SNAKE.SIT`): it leaves out a loop of road west of checkpoint 5.
+    4036 m, against 4771 m.
+  - Thunder Park (`TPARK.SIT`): it goes across the infield in long straight lines between
+    the loops. 1624 m, against 1821 m.
+- Route 756 Jam's main course has 2 pieces and does not pass its checkpoints (644 m from
+  one). Its `[Course 1]` and `[Course 2]` have 37 and 31 pieces, and pass every
+  checkpoint within 34 m.
+
+**Reference**: the computer trucks follow `[Course 2]`, and the main course is the map.
+
+- Traxx tutorial (<https://mtm2.com/~traxx/traxxlc.html>, step 18): "The computer trucks
+  in MTM2 always follow course #2, so we need to make sure thats defined." Course 1 is
+  "not really needed, but Traxx complains if its not done".
+- MTMG Traxx guide (<https://mtm2.com/~mtmg/traxx/extended.php>): "3 and 4 are not for
+  use in MTM2 and do not have to be set".
+- Tracked2 lesson 3 (<https://mtm2.com/~mtmg/tracked2/trackedl3.html>): "the 'main'
+  course (used in the game for the map), and also a couple courses for the computer
+  trucks to follow."
+- JSTrackViewer (`src/scene.js`, lines 2204 to 2209) calls the extra courses "the lines
+  the computer trucks follow".
+
+**Open**: what MTM2 does on the 13 files with no `[Course 2]`. Whether each truck can
+follow a different course (JSTrackViewer's `docs/MTM2_PHYSICS_NOTES.md`, line 100, names
+a field `ap.courseToFollow` for each truck, with no known meaning). Whether MTM2's
+difficulty changes the course.
+
+### Corners of the extra courses
+
+A course gives only straight pieces. The corners between them are left out: **reference**,
+Tracked2 lesson 3 ("We only have to add the straight segments; tracked2 calculates the
+corners for us"), and the Traxx FAQ (<https://mtm2.com/~traxx/traxxfaq.html>): the
+computer trucks "shoot off the end of a segment, and then try to merge gradually with the
+next". How MTM2 makes the corner is **open**.
+
+**Measured** on Crazy '98 (`CRAZY98.POD`), where the road is a dark texture with rounded
+corners, against a picture of the ground with the courses on it. On `[Course 1]` (8
+corners) and `[Course 2]` (6), the pieces stop where the road's bend begins, and the
+lines of two pieces meet 55 to 352 ft past the end of the one and before the start of the
+other, nearly the same distance from both (within 11 ft) as a circle's corner would be.
+Three ways to join the pieces were compared:
+
+- A straight line from the end of one piece to the start of the next cuts across the
+  grass inside every corner: its middle is up to 125 ft inside the curve below. On
+  `[Course 2]` it runs through the barriers (`c8nulsin.bin`) and past a loader
+  (`loader.bin`, 24 ft away) where the game's drivers were put back 27 times in 4 minutes.
+- Out to where the lines meet and back goes outside the road at every corner.
+- A curve that leaves the one piece along it and meets the next along it (a quadratic
+  Bezier curve, its middle control point where the lines meet) is in the middle of the
+  road at every corner of both courses.
+
+The game puts the corners of the extra courses back as that curve. Where the lines meet
+behind either piece, as in a jog to one side, or more than twice the gap away, it joins
+them straight. The main course is joined straight.
+
+The game reads every course. The main course is the map's and the race's. Which course
+the computer trucks follow is the game's difficulty setting (`opponents::Difficulty`):
+the main course on easy, `[Course 1]` on normal and `[Course 2]` on hard, and the main
+course where the one chosen is empty.
+
 ## Backdrop
 
 The last section names the models drawn round the horizon. **Measured** on 12 tracks:
@@ -344,4 +429,4 @@ CROKDROP.BIN
   Summit Rumble arenas. **Measured** on 40 track files, the user tracks and the base game's.
   So 3 is very likely a rally. How a rally differs from a circuit is **open**: 10 of the
   11 have their grid just behind their last checkpoint, as circuits do.
-- The extra courses after `Extended Course Definitions`.
+- What MTM2 does with the extra courses where `[Course 2]` is empty (see "Extra courses").

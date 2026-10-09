@@ -30,9 +30,12 @@ pub struct Situation {
     /// Scenery, obstacles, checkpoints and ramps, in the file's order: the Ramps section
     /// comes before the Boxes section.
     pub boxes: Vec<SituationBox>,
-    /// The first course that computer trucks follow: straight pieces, without the
-    /// corners that join them.
+    /// The first ("main") course: straight pieces, without the corners that join them.
     pub course: Vec<CourseSegment>,
+    /// The courses after `Extended Course Definitions`, in the file's order, `[Course 1]`
+    /// first, laid out as `course` is. Empty where a track leaves one empty, and four of
+    /// them in every file seen (situation.md, "Extra courses").
+    pub extra_courses: Vec<Vec<CourseSegment>>,
     /// File names of the models drawn round the horizon (.BIN), from the Backdrop section,
     /// in the file's order. Empty for a track that has none.
     pub backdrops: Vec<String>,
@@ -100,9 +103,10 @@ impl Situation {
         let course_start = lines.section("Course").unwrap_or(end);
         let vehicles_end = lines.next_section(vehicles_start);
         // The extra courses that follow the first repeat its labels.
-        let course_end = (course_start..end)
+        let courses_end = lines.next_section(course_start);
+        let course_end = (course_start..courses_end)
             .find(|&index| lines.text(index).contains("Extended Course Definitions"))
-            .unwrap_or_else(|| lines.next_section(course_start));
+            .unwrap_or(courses_end);
 
         let mut vehicles = Vec::new();
         for start in lines.labelled("truckFile", vehicles_start, vehicles_end) {
@@ -124,13 +128,21 @@ impl Situation {
             }
         }
 
-        let mut course = Vec::new();
-        for start in lines.labelled("cstart", course_start, course_end) {
-            course.push(CourseSegment {
-                start: lines.floats("cstart", start + 1)?,
-                end: lines.floats_after("cend", start, course_end)?,
-            });
-        }
+        let course = read_course(&lines, course_start, course_end)?;
+        // Each opens with a `[Course N] c1Count,course_direction` line.
+        let headers: Vec<usize> = (course_end..courses_end)
+            .filter(|&index| lines.text(index).starts_with("[Course"))
+            .collect();
+        let extra_courses = headers
+            .iter()
+            .enumerate()
+            .map(|(at, &start)| {
+                let end = headers.get(at + 1).copied().unwrap_or(courses_end);
+                // The main course is the one a track must have right. A damaged extra one
+                // is left out rather than losing the track.
+                read_course(&lines, start, end).unwrap_or_default()
+            })
+            .collect();
 
         let backdrops = lines
             .section("Backdrop")
@@ -145,6 +157,7 @@ impl Situation {
             vehicles,
             boxes,
             course,
+            extra_courses,
             backdrops,
         })
     }
@@ -155,6 +168,19 @@ impl Situation {
             .iter()
             .filter(|situation_box| situation_box.kind == box_type::CHECKPOINT)
     }
+}
+
+/// The straight pieces of one course, which runs from line `start` to `end`.
+fn read_course(lines: &Lines, start: usize, end: usize) -> Result<Vec<CourseSegment>, PodError> {
+    lines
+        .labelled("cstart", start, end)
+        .map(|at| {
+            Ok(CourseSegment {
+                start: lines.floats("cstart", at + 1)?,
+                end: lines.floats_after("cend", at, end)?,
+            })
+        })
+        .collect()
 }
 
 /// The boxes of the section that opens at line `start`. A ramp is laid out as a box is,
@@ -468,7 +494,7 @@ length,width,height\r\n38.0,18.0,10.0\r\nmass\r\n0.0\r\nbvel\r\n0.0,0.0,0.0\r\np
     }
 
     #[test]
-    fn reads_only_the_first_course() {
+    fn reads_the_main_course_and_each_extra_one_apart() {
         let situation = Situation::parse(TRACK).unwrap();
         assert_eq!(
             situation.course,
@@ -477,6 +503,26 @@ length,width,height\r\n38.0,18.0,10.0\r\nmass\r\n0.0\r\nbvel\r\n0.0,0.0,0.0\r\np
                 end: [4348.0, 120.0, 4203.5],
             }]
         );
+        assert_eq!(
+            situation.extra_courses,
+            [vec![CourseSegment {
+                start: [1.0, 1.0, 1.0],
+                end: [2.0, 2.0, 2.0],
+            }]]
+        );
+    }
+
+    #[test]
+    fn an_empty_or_damaged_extra_course_has_no_pieces() {
+        // As a real file has them: `[Course 2]` damaged, then `[Course 3]` empty.
+        let more = "[Course 2] c1Count,course_direction\r\n1,0\r\ncstart\r\n3.0,oops,3.0\r\n\
+cend\r\n4.0,4.0,4.0\r\n[Course 3] c1Count,course_direction\r\n0,0\r\n*** Stadium ***";
+        let track = TRACK.replacen("*** Stadium ***", more, 1);
+        let situation = Situation::parse(&track).unwrap();
+        assert_eq!(situation.extra_courses.len(), 3);
+        assert_eq!(situation.extra_courses[0].len(), 1);
+        assert!(situation.extra_courses[1].is_empty());
+        assert!(situation.extra_courses[2].is_empty());
     }
 
     #[test]
@@ -498,6 +544,7 @@ length,width,height\r\n38.0,18.0,10.0\r\nmass\r\n0.0\r\nbvel\r\n0.0,0.0,0.0\r\np
         assert!(situation.vehicles.is_empty());
         assert!(situation.boxes.is_empty());
         assert!(situation.course.is_empty());
+        assert!(situation.extra_courses.is_empty());
         assert!(Situation::parse("").unwrap().level_file.is_empty());
     }
 }

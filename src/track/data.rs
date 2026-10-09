@@ -44,6 +44,13 @@ pub struct TrackData {
     pub water_level: Option<f32>,
     /// The route around the track, where one is known.
     pub course: Option<Course>,
+    /// Other routes around the track, in the track's own order, each `None` where the
+    /// track leaves it out. A Monster Truck Madness 2 track has four: `[Course 1]` to
+    /// `[Course 4]`, which its computer trucks follow, and of which the second is often
+    /// the shortest, by shortcuts (situation.md, "Extra courses"). The corners that a
+    /// track leaves out between their straight pieces are put back as curves, which keep
+    /// to the middle of the road. Empty for a track that has no others.
+    pub other_courses: Vec<Option<Course>>,
     /// Checkpoints in the order they must be crossed. Gate 0 is the start/finish line.
     pub gates: Vec<Gate>,
     /// Pole position: where the first truck waits for the race to begin.
@@ -351,6 +358,9 @@ pub struct SceneryObject {
     /// Whether it is drawn. A ramp that a track gives by its size alone is solid but
     /// unseen: the solid shape under a model that trucks drive through.
     pub visible: bool,
+    /// Whether it is a ramp, which trucks drive up and over rather than round: a box of the
+    /// track file's Ramps section (situation.md, "Ramps").
+    pub ramp: bool,
     /// How far below `height_above_ground` it stands when it is lowered onto sloping
     /// ground (`TrackSettings::settle_scenery`), in metres. Worked out as the track is
     /// loaded (`settle`).

@@ -213,7 +213,19 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         None => (None, ground_boxes(track, to_ground, None)),
     };
 
-    let course = course_from_segments(&course, &heights);
+    let course = course_from_segments(&course, &heights, false);
+    let other_courses = track
+        .situation
+        .extra_courses
+        .iter()
+        .map(|segments| {
+            let segments: Vec<(Vec2, Vec2)> = segments
+                .iter()
+                .map(|segment| (to_ground(segment.start), to_ground(segment.end)))
+                .collect();
+            course_from_segments(&segments, &heights, true)
+        })
+        .collect();
     let mut scenery = super::pod_scenery::scenery_from_pod(track, to_ground);
     super::settle::settle(&mut scenery, &heights);
     Ok(TrackData {
@@ -233,6 +245,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         backdrop: super::pod_scenery::backdrop_from_pod(track),
         skies: skies_from_pod(&track.skies),
         course,
+        other_courses,
         gates,
         start: grid_place(pole_position),
         grid: clear_places(
@@ -280,14 +293,36 @@ fn checkpoint_half_width_feet(track: &pod::Track, checkpoint: &pod::SituationBox
 /// Width given to a POD track's course, in feet: roads are two terrain cells wide.
 const COURSE_WIDTH_FEET: f32 = 2.0 * FEET_PER_CELL;
 
+/// Most metres between the points of a corner that is put back into a course.
+const CORNER_STEP: f32 = 5.0;
+/// A corner is put back only where the lines of its two pieces meet no further from them
+/// than this many times the gap between the pieces. Pieces that are nearly in line meet far
+/// away, and a curve out to there would leave the road.
+const CORNER_REACH: f32 = 2.0;
+
 /// The route round the track, from the straight pieces that computer trucks follow.
-/// The corners between them aren't in the file, so each piece is simply joined to the
-/// next, and the last back to the first, the short way across an edge of the `ground`
-/// where that is shorter.
-fn course_from_segments(segments: &[(Vec2, Vec2)], ground: &HeightGrid) -> Option<Course> {
+/// The corners between them aren't in the file, so each piece is joined to the next, and
+/// the last back to the first, the short way across an edge of the `ground` where that is
+/// shorter. Joined straight, or, with `round_corners`, by the corner that was left out
+/// (`corner`).
+///
+/// The main course is joined straight: the race, the map and the checkpoints' directions
+/// are measured on it, and the computer's drivers were tuned on it. On the extra courses a
+/// straight join cuts across the grass and through what stands there (situation.md,
+/// "Corners of the extra courses").
+fn course_from_segments(
+    segments: &[(Vec2, Vec2)],
+    ground: &HeightGrid,
+    round_corners: bool,
+) -> Option<Course> {
     let mut centerline: Vec<Vec2> = Vec::with_capacity(segments.len() * 2);
-    for &(start, end) in segments {
-        for point in [start, end] {
+    for (index, &(start, end)) in segments.iter().enumerate() {
+        let (next_start, next_end) = segments[(index + 1) % segments.len()];
+        let corner = match round_corners {
+            true => corner((start, end), (next_start, next_end), ground),
+            false => Vec::new(),
+        };
+        for point in [start, end].into_iter().chain(corner) {
             // Pieces that do meet would otherwise leave a segment of no length, and so
             // would a point on one edge of the map and the same point on the other.
             if centerline
@@ -305,6 +340,41 @@ fn course_from_segments(segments: &[(Vec2, Vec2)], ground: &HeightGrid) -> Optio
             false => Course::new(centerline, width),
         }
     })
+}
+
+/// The points of the corner left out between a straight `piece` and the `next`, not counting
+/// the ends of the pieces: a curve that leaves the one along it and meets the other along
+/// it (a quadratic Bezier curve whose middle control point is where the pieces' lines
+/// meet). Each piece's end is where the road's bend begins (situation.md, "Corners of the
+/// extra courses"). None where the lines meet behind either piece, as in a jog to one
+/// side, or too far off (`CORNER_REACH`): those are joined straight.
+fn corner(piece: (Vec2, Vec2), next: (Vec2, Vec2), ground: &HeightGrid) -> Vec<Vec2> {
+    let along = ground.offset(piece.0, piece.1).normalize_or_zero();
+    let next_along = ground.offset(next.0, next.1).normalize_or_zero();
+    // From the end of the piece to the start of the next, the short way.
+    let gap = ground.offset(piece.1, next.0);
+    let turn = along.perp_dot(next_along);
+    if turn.abs() < 1e-3 || gap.length() < CORNER_STEP {
+        return Vec::new();
+    }
+    // The end of the piece goes `ahead` along it, and the start of the next `behind` back
+    // along that, to where the two lines meet.
+    let ahead = gap.perp_dot(next_along) / turn;
+    let behind = -gap.perp_dot(along) / turn;
+    let reach = CORNER_REACH * gap.length();
+    if ahead <= 0.0 || behind <= 0.0 || ahead > reach || behind > reach {
+        return Vec::new();
+    }
+    let control = along * ahead;
+    // Out to where the lines meet and back is never shorter than the curve.
+    let steps = ((ahead + behind) / CORNER_STEP).ceil() as usize;
+    (1..steps)
+        .map(|step| {
+            let t = step as f32 / steps as f32;
+            let point = 2.0 * (1.0 - t) * t * control + t * t * gap;
+            ground.onto(piece.1 + point)
+        })
+        .collect()
 }
 
 /// The track's ground textures, if it carries its own, and the tiles they are made into,
@@ -551,6 +621,70 @@ fn skies_from_pod(skies: &pod::Skies) -> super::Skies {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Flat ground 1 km across, which repeats as MTM2's does.
+    fn repeating_ground() -> HeightGrid {
+        HeightGrid::from_fn(9, 1000.0, |_, _| 0.0).repeating()
+    }
+
+    #[test]
+    fn a_corner_left_out_is_put_back_as_a_curve_along_both_pieces() {
+        let ground = repeating_ground();
+        // Along +X to (0, 0), then from (40, 40) along +Z: the lines meet at (40, 0).
+        let piece = (Vec2::new(-100.0, 0.0), Vec2::ZERO);
+        let next = (Vec2::new(40.0, 40.0), Vec2::new(40.0, 140.0));
+        let points = corner(piece, next, &ground);
+        assert!(points.len() >= 10, "{points:?}");
+        // Inside the sharp corner and outside the straight line across it, so on a road
+        // that bends round there.
+        let middle = points[points.len() / 2];
+        let chord = Vec2::new(20.0, 20.0);
+        let sharp = Vec2::new(40.0, 0.0);
+        assert!(
+            middle.distance(chord) > 5.0 && middle.distance(sharp) > 5.0,
+            "{middle}"
+        );
+        // It leaves the one piece along it, and meets the other along it.
+        assert!(points[0].y.abs() < 1.0 && points[0].x > 0.0);
+        assert!((points[points.len() - 1].x - 40.0).abs() < 1.0);
+        // No step longer than CORNER_STEP.
+        let path: Vec<Vec2> = [piece.1]
+            .into_iter()
+            .chain(points)
+            .chain([next.0])
+            .collect();
+        assert!(
+            path.windows(2)
+                .all(|pair| pair[0].distance(pair[1]) <= CORNER_STEP)
+        );
+    }
+
+    #[test]
+    fn pieces_that_jog_or_run_on_in_line_are_joined_straight() {
+        let ground = repeating_ground();
+        let piece = (Vec2::new(-100.0, 0.0), Vec2::ZERO);
+        // A jog to one side: the lines meet behind the end of the piece.
+        let jog = (Vec2::new(40.0, 40.0), Vec2::new(140.0, 90.0));
+        assert!(corner(piece, jog, &ground).is_empty());
+        // In line, and nearly so: they meet nowhere, or far off.
+        let in_line = (Vec2::new(40.0, 0.0), Vec2::new(140.0, 0.0));
+        assert!(corner(piece, in_line, &ground).is_empty());
+        let nearly = (Vec2::new(40.0, 2.0), Vec2::new(140.0, 4.0));
+        assert!(corner(piece, nearly, &ground).is_empty());
+    }
+
+    #[test]
+    fn a_corner_across_an_edge_of_the_map_goes_the_short_way() {
+        let ground = repeating_ground();
+        // The same corner as above, with the next piece written a map's width over.
+        let piece = (Vec2::new(-100.0, 0.0), Vec2::ZERO);
+        let next = (Vec2::new(40.0, 40.0), Vec2::new(40.0, 140.0));
+        let over = (next.0 + Vec2::X * 1000.0, next.1 + Vec2::X * 1000.0);
+        let near = corner(piece, next, &ground);
+        let far = corner(piece, over, &ground);
+        assert_eq!(near.len(), far.len());
+        assert!(near.iter().zip(&far).all(|(a, b)| a.distance(*b) < 1e-3));
+    }
 
     #[test]
     fn the_course_decides_which_way_a_checkpoint_faces() {

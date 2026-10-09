@@ -127,6 +127,7 @@ mod tests {
             motion,
             faces_camera: false,
             visible: true,
+            ramp: false,
             sunk_on_slope: 0.0,
         }
     }

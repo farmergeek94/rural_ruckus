@@ -2,19 +2,27 @@
 //! `truck::PlayerTruck`. The `truck` slice builds them, from `truck::ComputerTrucks`, and
 //! the `race` slice puts them on the grid and counts their laps as it does the player's.
 //! This slice is the driver: it writes each one's `TruckInput`, which is all the player's
-//! keys do, so a computer truck has no more grip than the player's. It has no more power
-//! either, except when it is behind: then its engine is given more, up to `CHASING_POWER`
-//! more top speed, so that it catches up on the straights.
+//! keys do, so a computer truck has no more grip than the player's. Its power is that of
+//! its truck's engine, scaled by the `Difficulty`: all of it on hard, less on normal and
+//! less again on easy. When it is behind, its engine is given more, up to `CHASING_POWER`
+//! more top speed on hard (less on normal and on easy), so that it catches up on the
+//! straights.
 //!
-//! The driver follows `TrackData::course`, which for a Monster Truck Madness 2 track is the
-//! route its own computer trucks follow. It keeps to the road rather than cutting corners:
+//! The `Difficulty` also chooses the course that every driver of a race follows: on easy
+//! `TrackData::course`, on normal the track's first other course, and on hard its second,
+//! which is the one Monster Truck Madness 2's own computer trucks follow, and often takes
+//! shortcuts (Crazy '98, Sidewinder Canyon). A track that does not have the one chosen has
+//! its main course followed. The other courses have their corners put back
+//! (`track::TrackData::other_courses`), so that a driver on a shortcut keeps to the middle
+//! of its road round the bends. The driver keeps to the road rather than cutting corners:
 //! it steers at a point of its own line a little way up the course, and so follows the road
 //! round every bend on that line. Near a bend that point is nearer (`BEND_CUT`), so that a
 //! truck at speed does not take a chord across the inside of the bend to a point far round it. Each driver's line is the middle of the road or a little to
 //! one side of it, so that trucks don't all want the same one. It keeps to a speed that the
 //! bends ahead allow, which is the sharper the slower (`bend_speed`), and round a bend that
 //! goes on, a loop or a right angle, the speed that its whole radius allows
-//! (`LONG_BEND_SPAN`): all of it in `plan`, a pure function. A driver that is behind
+//! (`LONG_BEND_SPAN`): all of it in `plan`, a pure function. Downhill it counts on less
+//! braking, and so brakes sooner (`DOWNHILL_BRAKING`). A driver that is behind
 //! catches up on its line, never across the inside of a bend: the further down the order it
 //! is, and the further behind the leader, the more power its engine has, the more it asks of
 //! its tires and the later it brakes (`chasing`), until it is back in range. The edge of the
@@ -26,9 +34,12 @@
 //! and steers straight through the gate, inside its edges (`NextGate`): the course is only
 //! near the gates, and a line or a pass can take a truck round one.
 //! One that comes up behind another truck swerves round it instead of slowing down: it pulls
-//! out to one side (`passing_line`) and follows that line until it is by. Only boxed in, with
-//! no side clear, does it hold station a truck's length behind (`keeping_off`) and press. It
-//! remembers how far along the course it is and looks for itself only about there: where a
+//! out to one side (`passing_line`) and follows that line until it is by. It steers round
+//! fixed scenery on the road, or reaching into it, in the same way, as if it were a truck
+//! stopped there (`Obstacle`), and never slows for it: Crazy '98's loader stands at the
+//! inside of a bend, and every driver that cut the bend hit it. A ramp it drives over. It never slows for a truck in front
+//! either: boxed in, with no side clear, it presses on along its line, and pulls out as
+//! soon as a side is clear. It remembers how far along the course it is and looks for itself only about there: where a
 //! mountain road doubles back, the nearest piece of the course is often the wrong one.
 //!
 //! A driver that stops against something backs up first, turning the opposite way to the
@@ -56,13 +67,15 @@
 //! slice for the checkpoints. Needs `RacePlugin`, and the physics, which says where the ground
 //! is under a truck.
 
+use std::collections::HashSet;
+
 use avian3d::prelude::{LinearVelocity, SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 
 use crate::collision_groups::GROUND;
 use crate::game_state::GameState;
 use crate::race::{BackToCheckpoint, RaceSystems, Racer};
-use crate::track::{Course, Track};
+use crate::track::{Course, SceneryMotion, Track, TrackData};
 use crate::truck::{Autopilot, Held, PlayerTruck, Truck, TruckConfig, TruckInput};
 
 /// The speed the quickest driver keeps to where the course is straight, in m/s. The truck
@@ -86,6 +99,17 @@ const CORNERING: f32 = 22.0;
 /// after checkpoint 6: at 7 it got there in 302 s on average and rolled 13 times in all; at
 /// 10, arriving hot, in 346 s with 30 rolls; at 14, in 399 s with 92.
 const BRAKING: f32 = 7.0;
+/// How much less braking a driver counts on for each metre the course falls per metre along
+/// it, between its truck and where its braking would end, in m/s². Measured headless,
+/// seven computer trucks braking fully for 4 minutes on Sidewinder Canyon and on Alpine, at
+/// 20 to 30 m/s: about 6 m/s² on the level, 4.1 to 6.3 at 12 % downhill, 2.7 to 5.3 at
+/// 18 % and 0.8 to 3.7 at 24 %. That is more than gravity alone takes away (9.8): a truck
+/// bounces on the way down. Counting on 7 there, drivers arrived at the canyons' U-turns too
+/// fast and went off.
+const DOWNHILL_BRAKING: f32 = 16.0;
+/// The least braking a driver counts on however steep the way down, in m/s², so that it
+/// still drives on down a cliff of a slope.
+const LEAST_BRAKING: f32 = 1.5;
 /// No bend is taken slower than this, in m/s.
 const SLOWEST_BEND: f32 = 16.0;
 /// A bend is measured as the change in the course's direction over this many metres.
@@ -167,8 +191,8 @@ const CHASING_BY: f32 = 500.0;
 /// desperate as it gets, as a share of `CORNERING`: a little, so that it is only slightly
 /// quicker through the bends. It catches up on the straights instead (`CHASING_POWER`).
 const CHASING_CORNER: f32 = 0.2;
-/// How much more braking it counts on then, as a share of `BRAKING`: it leaves its braking
-/// that much later, and arrives in the bend that much hotter.
+/// How much more braking it counts on then, as a share of `braking_on`: it leaves its
+/// braking that much later, and arrives in the bend that much hotter.
 const CHASING_BRAKE: f32 = 0.15;
 /// How much more top speed a truck has when its driver is as desperate as it gets, as a
 /// share: its engine's pull and the speed at which the pull runs out both go up by this,
@@ -176,9 +200,19 @@ const CHASING_BRAKE: f32 = 0.15;
 /// proportion, and none for the leader. This is the catch-up: a truck that is behind has more
 /// power than the player's, and loses it again as it gets back in range.
 const CHASING_POWER: f32 = 0.15;
-/// How far ahead a driver looks out for a truck to pass, in metres, along the course and
-/// in a straight line: about six truck lengths, which is far enough to move aside before
-/// it arrives behind one.
+/// The share of its truck's own engine (pull and top speed) a driver has on easy and on
+/// normal. Hard has all of it, as much as the player's truck. Lower is slower on the
+/// straights and up the hills; much lower and the trucks are left behind on the first
+/// straight.
+const EASY_POWER: f32 = 0.8;
+const NORMAL_POWER: f32 = 0.9;
+/// The share of `CHASING_POWER` a driver has on easy and on normal, so that it gives up a
+/// lead it has lost. Hard has all of it.
+const EASY_CATCHING_UP: f32 = 0.25;
+const NORMAL_CATCHING_UP: f32 = 0.5;
+/// The least a driver looks out ahead for a truck to pass, or for fixed scenery, in metres,
+/// along the course and in a straight line: about six truck lengths. Closing faster, it looks
+/// further (`LOOK_AHEAD`).
 const LOOK_OUT: f32 = 45.0;
 /// Daylight a driver wants beside another truck, in metres, on top of what the two of them
 /// reach across the course. Every sideways figure below is worked out from the trucks
@@ -196,16 +230,33 @@ const IN_FRONT: f32 = 0.8;
 /// How fast a driver moves its line across the course, in m/s. Faster pulls out in less
 /// road; slower keeps the steering from snapping over when a truck appears in front.
 const LANE_RATE: f32 = 3.0;
-/// Daylight a driver leaves between itself and a truck it cannot get by, in metres, on top of
-/// the length at which the two are clear of each other: close enough to press, and not into
-/// it. It holds this and does not drop back from it.
-const PRESSURE_ROOM: f32 = 2.5;
 /// Daylight between a driver and a truck alongside it, in metres, on top of what the two of
 /// them need to be clear of each other, within which the driver holds its line rather than
 /// turning in for a corner: about as far as a corner's line moves it across. Further apart
 /// than this, turning in cannot reach the other truck, and each takes its corner as it would
 /// alone. Larger holds more trucks to their lines, and pairs of them run wide together.
 const SIDE_BY_SIDE: f32 = 7.0;
+
+/// Heights above the ground, in metres, at which a fixed object is cut to find where a truck
+/// would hit it: its outline at a truck's bumpers and at its body. A part of a model above
+/// both, such as the span of an arch, is over a truck and not in its way.
+const OBSTACLE_SLICES: [f32; 2] = [0.5, 1.5];
+/// Most metres between the points of an obstacle's outline that a driver steers round.
+/// Closer is more points to check each step.
+const OBSTACLE_SPACING: f32 = 1.0;
+/// How far ahead a driver looks out for what is in its way, a truck or fixed scenery, in
+/// seconds: until it would be up against it at the speed it is closing on it, and never less
+/// than `LOOK_OUT` (`look_out`). Its line moves across at `LANE_RATE`, so it needs about 2 s
+/// to move a truck's width and a half. At `LOOK_OUT` alone, drivers on Crazy '98 saw the
+/// loader too late to move off it.
+const LOOK_AHEAD: f32 = 3.0;
+/// Daylight a driver leaves beside fixed scenery, in metres, on top of `ROOM_TO_SPARE`: its
+/// line can still be half a metre inside in a bend (`CAREFUL_BEND_CUT`), and it may still be
+/// moving across to it.
+const OBSTACLE_ROOM: f32 = 1.0;
+/// How far outside the edge of the course, in metres, a fixed object is still steered round:
+/// a truck on a line near the edge reaches out past it.
+const OBSTACLE_MARGIN: f32 = 2.0;
 
 /// How far above its ride height a truck's middle has to be, in metres, for its driver to
 /// take it to be in the air, and how long after it comes down it leaves the steering alone,
@@ -253,19 +304,78 @@ pub struct OpponentsPlugin;
 
 impl Plugin for OpponentsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                take_the_wheel,
-                take_the_players_wheel,
-                // So that the race sees the request in the same frame.
-                ask_to_be_put_back.before(RaceSystems::BackToCheckpoint),
+        app.init_resource::<OpponentsSettings>()
+            .add_systems(
+                Update,
+                (
+                    take_the_wheel,
+                    take_the_players_wheel,
+                    // So that the race sees the request in the same frame.
+                    ask_to_be_put_back.before(RaceSystems::BackToCheckpoint),
+                )
+                    .run_if(in_state(GameState::Racing)),
             )
-                .run_if(in_state(GameState::Racing)),
-        )
-        // With the forces, so that a driver does the same at any frame rate.
-        .add_systems(FixedUpdate, drive.run_if(in_state(GameState::Racing)));
+            // With the forces, so that a driver does the same at any frame rate.
+            .add_systems(FixedUpdate, drive.run_if(in_state(GameState::Racing)));
     }
+}
+
+/// How the computer drives. Set it before a race: the course it chooses is the one the
+/// drivers measure where they are on.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct OpponentsSettings {
+    pub difficulty: Difficulty,
+}
+
+/// How hard the computer's drivers are to beat: the course they follow, and the power they
+/// have (see the module's doc).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Difficulty {
+    Easy,
+    #[default]
+    Normal,
+    Hard,
+}
+
+impl Difficulty {
+    pub const ALL: [Self; 3] = [Self::Easy, Self::Normal, Self::Hard];
+
+    /// Which of `TrackData::other_courses` the drivers follow, or `None` for the main
+    /// course.
+    fn other_course(self) -> Option<usize> {
+        match self {
+            Self::Easy => None,
+            Self::Normal => Some(0),
+            Self::Hard => Some(1),
+        }
+    }
+
+    /// The share of its truck's own engine that a driver has.
+    fn power(self) -> f32 {
+        match self {
+            Self::Easy => EASY_POWER,
+            Self::Normal => NORMAL_POWER,
+            Self::Hard => 1.0,
+        }
+    }
+
+    /// The share of `CHASING_POWER` that a driver has.
+    fn catching_up(self) -> f32 {
+        match self {
+            Self::Easy => EASY_CATCHING_UP,
+            Self::Normal => NORMAL_CATCHING_UP,
+            Self::Hard => 1.0,
+        }
+    }
+}
+
+/// The course every driver follows at `difficulty`: the other course that it chooses where
+/// the track has it, and the main course where it does not.
+fn course_for(track: &TrackData, difficulty: Difficulty) -> Option<&Course> {
+    difficulty
+        .other_course()
+        .and_then(|index| track.other_courses.get(index)?.as_ref())
+        .or(track.course.as_ref())
 }
 
 /// On every truck that the computer drives.
@@ -396,6 +506,8 @@ pub fn lead_driver(
         pace: 1.0,
         lane: 0.0,
         chasing: 0.0,
+        // It has no ground to look at: as on the level.
+        downhill: 0.0,
         reach_across: reach(config).x,
         gate: None,
         careful: false,
@@ -489,6 +601,10 @@ struct Style {
     /// How desperate it is, from 0 to 1, as `chasing` works it out. It asks more of the tires
     /// in a bend and brakes later for one, and keeps to its line.
     chasing: f32,
+    /// How steeply the course falls away ahead, between the truck and where its braking
+    /// would end: metres down for each metre along, and 0 on the level or uphill. The steeper,
+    /// the less braking it counts on (`braking_on`).
+    downhill: f32,
     /// How far its own truck reaches sideways from its middle, in metres, wheels included:
     /// what says how near the edge of the course its line may go to pass.
     reach_across: f32,
@@ -553,7 +669,7 @@ fn plan(
     // is chasing asks more of its tires in the bend and counts on more of its brakes to get
     // there, which is the caution it is throwing away to catch up.
     let cornering = CORNERING * (1.0 + CHASING_CORNER * style.chasing);
-    let braking = BRAKING * (1.0 + CHASING_BRAKE * style.chasing);
+    let braking = braking_on(style.downhill) * (1.0 + CHASING_BRAKE * style.chasing);
     // The tightest bends are held to a floor, which a desperate driver raises with the rest
     // of its caution: it takes a hairpin at a speed it cannot hold, and often does not.
     let slowest_bend = SLOWEST_BEND * (1.0 + CHASING_CORNER * style.chasing);
@@ -603,10 +719,16 @@ fn bend_speed(bend: f32, cornering: f32, slowest: f32) -> f32 {
     (asked_for * BEND_SPAN / bend).sqrt().max(slowest)
 }
 
+/// The braking a driver counts on, in m/s², where the course falls `downhill` metres for each
+/// metre along it (see `DOWNHILL_BRAKING`).
+fn braking_on(downhill: f32) -> f32 {
+    (BRAKING - DOWNHILL_BRAKING * downhill.max(0.0)).max(LEAST_BRAKING)
+}
+
 /// How desperate a driver is, from 0 (the leader, driving its own race with its own care) to
-/// 1 (throwing its caution away to get on terms). It buys nothing on the straights, which
-/// every truck drives flat out: a desperate driver catches up by carrying more speed into the
-/// bends and braking later for them, both of which risk the truck. See `Style`.
+/// 1 (throwing its caution away to get on terms). It buys more power on the straights
+/// (`CHASING_POWER`), and more speed into the bends and later braking for them, both of
+/// which risk the truck. See `Style`.
 ///
 /// Its `place` in the race sets it, from 1 for the lead to `field` for the last of them, so
 /// that each truck down the order is a little more desperate than the one in front of it. A
@@ -618,6 +740,12 @@ fn chasing(place: usize, field: usize, behind: f32) -> f32 {
     by_place.max(by_ground).clamp(0.0, 1.0)
 }
 
+/// How far ahead a driver looks out for something it is closing on at `closing` m/s, in
+/// metres: until it would be up against it in `LOOK_AHEAD`, and never less than `LOOK_OUT`.
+fn look_out(closing: f32) -> f32 {
+    (closing * LOOK_AHEAD).max(LOOK_OUT)
+}
+
 /// The line a driver wants: its `home` line when the road in front is clear, and otherwise
 /// `PASSING_ROOM` to one side of the nearest truck in the way, so that it pulls out to pass
 /// rather than sitting behind, and stays out until it is by. It goes to the side it is
@@ -626,9 +754,9 @@ fn chasing(place: usize, field: usize, behind: f32) -> f32 {
 /// centreline, not where its `lane` is: the two part at the start, where a grid can stand
 /// well off the course, and after a knock, and a driver that went by its lane would cross
 /// in front of the truck it means to pass.
-/// Boxed in, it holds the `lane` it is on and waits for a way through, which is what
-/// `keeping_off` then keeps it a truck's length from. Whatever line it settles on, it is
-/// held off any truck alongside it by `giving_room`, so that it never steers into one.
+/// Boxed in, it holds the `lane` it is on, and drives on along it until a side is clear: it
+/// does not slow for the truck in front. Whatever line it settles on, it is held off any
+/// truck alongside it by `giving_room`, so that it never steers into one.
 ///
 /// `others` holds every other truck near enough to matter. `room` is how far either side of
 /// the centreline a line may be, as `passing_room` says.
@@ -646,14 +774,14 @@ struct Neighbour {
     ahead: f32,
     /// How far to the left of the centreline it is, in metres.
     across: f32,
-    /// How fast it is going along the course, in m/s.
-    speed: f32,
     /// How far apart across the course the two of them have to be to pass each other, in
     /// metres: what each reaches sideways, wheels included, and `ROOM_TO_SPARE`.
     clear_by: f32,
     /// How far apart along the course their middles have to be for one to be clear of the
     /// other, in metres: what each reaches fore and aft, tires included.
     past_by: f32,
+    /// How far up the road it matters, in metres: `LOOK_AHEAD` of closing on it (`look_out`).
+    look_out: f32,
 }
 
 impl Neighbour {
@@ -669,12 +797,6 @@ impl Neighbour {
     /// more than `SIDE_BY_SIDE` further off than the two need to be clear.
     fn side_by_side(&self, across: f32) -> bool {
         self.alongside() && (self.across - across).abs() < self.clear_by + SIDE_BY_SIDE
-    }
-
-    /// Whether it is in front of the driver rather than beside it: `IN_FRONT` of the way to
-    /// being clear of it, and no further up the road than a driver looks out.
-    fn in_front(&self) -> bool {
-        (IN_FRONT * self.past_by..=LOOK_OUT).contains(&self.ahead)
     }
 }
 
@@ -728,7 +850,7 @@ fn wanted_line(home: f32, lane: f32, at: f32, others: &[Neighbour], room: f32) -
             // now, and letting it go at that would take the driver straight back in. One
             // that is not yet `IN_FRONT` behind is still alongside, and cutting back across
             // it is how a pass turns into a crash.
-            (-IN_FRONT * other.past_by..=LOOK_OUT).contains(&other.ahead)
+            (-IN_FRONT * other.past_by..=other.look_out).contains(&other.ahead)
                 && ((other.across - lane).abs() < other.clear_by
                     || (other.across - home).abs() < other.clear_by)
         })
@@ -756,38 +878,6 @@ fn wanted_line(home: f32, lane: f32, at: f32, others: &[Neighbour], room: f32) -
         (false, true) => beside(-side),
         (false, false) => lane,
     }
-}
-
-/// The truck a driver `across` metres to the left of the centreline has to slow for, if any:
-/// the nearest one it is behind and still square with, by where the two of them actually are,
-/// which it would run into. Once it has moved far enough across, or far enough up beside it,
-/// there is nobody in front of it. Nor is there while the line it `wanted` is clear of that
-/// truck: it is on its way round it, and swerves rather than brakes. Only a driver boxed in,
-/// whose line is still behind the truck, slows to hold station there.
-fn held_up_by(others: &[Neighbour], across: f32, wanted: f32) -> Option<Neighbour> {
-    others
-        .iter()
-        .filter(|other| {
-            other.in_front()
-                && (other.across - across).abs() < other.clear_by
-                && (other.across - wanted).abs() < other.clear_by
-        })
-        .min_by(|a, b| a.ahead.total_cmp(&b.ahead))
-        .copied()
-}
-
-/// How fast a driver may go without driving into the back of the truck `in_front` of it, in
-/// m/s: the speed it can brake off again by the time it is up behind that truck, which is the
-/// same sum as slowing for a bend. Where that is comes from the two trucks themselves, tires
-/// included, and `PRESSURE_ROOM`. Nothing in front is no limit at all, and nearer than that it
-/// asks for the other truck's own speed, so it sits there and presses rather than dropping
-/// back.
-fn keeping_off(in_front: Option<Neighbour>) -> f32 {
-    let Some(other) = in_front else {
-        return f32::INFINITY;
-    };
-    let room_to_brake = (other.ahead - other.past_by - PRESSURE_ROOM).max(0.0);
-    (other.speed * other.speed + 2.0 * BRAKING * room_to_brake).sqrt()
 }
 
 /// The throttle, from -1 (full brake) to 1 (full throttle), that a driver doing `speed`
@@ -1016,36 +1106,49 @@ type Watching<'a> = (
     Option<&'a Racer>,
 );
 
+/// What `drive` keeps from one step to the next.
+#[derive(Default)]
+struct Remembered {
+    /// Where the player's truck was last found round the course, as a driver remembers its
+    /// own: it is one of the trucks to catch and to pass, but nobody drives it.
+    player_along: Option<f32>,
+    /// `along_the_course`, for the course and the checkpoints of this race.
+    gates_along: Vec<f32>,
+    /// `obstacles_on` the course of this race.
+    obstacles: Vec<Obstacle>,
+}
+
 fn drive(
     time: Res<Time>,
     track: Res<Track>,
+    settings: Res<OpponentsSettings>,
     spatial: SpatialQuery,
     mut drivers: Query<Driving>,
     player: Query<Watching, (With<PlayerTruck>, Without<ComputerDriver>)>,
-    // Where the player's truck was last found round the course, as a driver remembers its
-    // own: it is one of the trucks to catch and to pass, but nobody drives it.
-    mut player_along: Local<Option<f32>>,
+    mut remembered: Local<Remembered>,
 ) {
-    let Some(course) = &track.course else {
+    let difficulty = settings.difficulty;
+    let Some(course) = course_for(&track, difficulty) else {
         return;
     };
+    let Remembered {
+        player_along,
+        gates_along,
+        obstacles,
+    } = &mut *remembered;
+    if track.is_changed() || settings.is_changed() || gates_along.len() != track.gates.len() {
+        *gates_along = along_the_course(&track, course);
+        *obstacles = obstacles_on(&track, course);
+    }
     let lap = course.length();
-    // Laps are counted from the start line, wherever along the course that is.
+    // Laps are counted from the start line, gate 0, wherever along the course that is.
     let places = Places {
         course,
         lap,
-        start_line: track.gates.first().map_or(0.0, |gate| {
-            course.distance_along(&course.nearest(gate.center))
-        }),
+        start_line: gates_along.first().copied().unwrap_or(0.0),
     };
     // A truck is enlisted in the race a frame after it is spawned.
     let lap_number = |racer: Option<&Racer>| racer.map_or(0, |racer| racer.progress.lap);
-    // How far along the course each checkpoint is, as `ask_to_be_put_back` measures it.
-    let gates_along: Vec<f32> = track
-        .gates
-        .iter()
-        .map(|gate| course.distance_along(&course.nearest(gate.center)))
-        .collect();
 
     // Where every truck is, before any of them is driven: what a driver has to catch, and
     // what is in its way. Taken here so that no driver answers to half-moved trucks.
@@ -1115,23 +1218,52 @@ fn drive(
         // behind it, and every driver steers into its neighbours while keeping clear of them.
         let left = -forward.perp();
         others.clear();
-        others.extend(
-            trucks
-                .iter()
-                .filter(|other| {
-                    other.entity != entity
-                        && course.offset(position, other.position).length() <= LOOK_OUT
-                        && gap(other.along - me.along, lap).abs() <= 2.0 * LOOK_OUT
-                })
-                .map(|other| Neighbour {
-                    ahead: course.offset(position, other.position).dot(forward),
-                    across: me.across + course.offset(position, other.position).dot(left),
-                    speed: other.speed,
+        // Seen from `LOOK_AHEAD` of catching it up, until they touch.
+        others.extend(trucks.iter().filter_map(|other| {
+            let look_out = look_out(me.speed - other.speed);
+            let offset = course.offset(position, other.position);
+            (other.entity != entity
+                && offset.length() <= look_out
+                && gap(other.along - me.along, lap).abs() <= 2.0 * look_out)
+                .then(|| Neighbour {
+                    ahead: offset.dot(forward),
+                    across: me.across + offset.dot(left),
                     // What the two of them reach towards each other, and a little more.
                     clear_by: me.reach.x + other.reach.x + ROOM_TO_SPARE,
                     past_by: me.reach.y + other.reach.y,
-                }),
+                    look_out,
+                })
+        }));
+        // And the fixed scenery up the road, each point of it a truck that is stopped there.
+        // Where it is is measured along and across the course, as the driver's line is: in
+        // a bend, measured from the truck's nose, an object at the inside of the bend looks
+        // clear of the line until the truck is on it.
+        // It closes on what stands still at its own speed.
+        let obstacle_look_out = look_out(speed);
+        let obstacle_clear_by = me.reach.x + ROOM_TO_SPARE + OBSTACLE_ROOM;
+        let obstacles_from = others.len();
+        others.extend(
+            obstacles_between(
+                obstacles,
+                me.along - 2.0 * me.reach.y,
+                me.along + obstacle_look_out,
+                lap,
+            )
+            .map(|obstacle| Neighbour {
+                ahead: gap(obstacle.along - me.along, lap),
+                across: obstacle.across,
+                clear_by: obstacle_clear_by,
+                past_by: me.reach.y,
+                look_out: obstacle_look_out,
+            }),
         );
+        // Near fixed scenery it keeps to its line round a bend, as one that was put back
+        // does: cutting the bend takes it about `BEND_CUT / 4` metres inside its line, which
+        // is where the loader on Crazy '98 stands.
+        let by_scenery = others[obstacles_from..].iter().any(|obstacle| {
+            obstacle.ahead >= -obstacle.past_by
+                && (obstacle.across - driver.lane).abs() < obstacle.clear_by + BEND_CUT / 4.0
+        });
         // The line moves across at its own speed, so that pulling out is a move, not a jerk.
         let room = passing_room(course, me.reach.x);
         let wanted = passing_line(driver.home, driver.lane, me.across, &others, room);
@@ -1139,26 +1271,24 @@ fn drive(
         driver.lane += (wanted - driver.lane).clamp(-step, step);
         let steering_line = not_towards(driver.lane, me.across, &others);
 
-        let in_front = held_up_by(&others, me.across, wanted);
-
         // Its place in the race: one more than the trucks that have raced further than it.
         let place = 1 + trucks.iter().filter(|other| other.raced > me.raced).count();
         let chasing = chasing(place, trucks.len(), leader - me.raced);
-        // More power the further behind, on its own engine.
+        // Its share of its own engine for the difficulty, and more the further behind.
         let (pull, top_speed) = *driver
             .engine
             .get_or_insert((config.engine_force, config.top_speed));
-        let boost = 1.0 + CHASING_POWER * chasing;
+        let boost = difficulty.power() * (1.0 + CHASING_POWER * difficulty.catching_up() * chasing);
         config.engine_force = pull * boost;
         config.top_speed = top_speed * boost;
         // Careful from being put back until it drives through its next checkpoint, which
         // moves the race on from where it was then.
-        let careful = racer.is_some_and(|racer| {
+        let put_back = racer.is_some_and(|racer| {
             let progress = &racer.progress;
             progress.finished.is_none()
                 && driver.careful_until == Some((progress.lap, progress.next_gate))
         });
-        if !careful {
+        if !put_back {
             driver.careful_until = None;
         }
         // Once it has finished, no checkpoint counts for it any more.
@@ -1172,19 +1302,25 @@ fn drive(
                 direction: gate.direction(),
                 half_width: gate.half_width,
             });
+        // How far the ground falls from here to where its braking would end, if it braked now
+        // for a bend there.
+        let stopping = (speed * speed / (2.0 * BRAKING) + *AIM_AHEAD.start()).min(HORIZON);
+        let (there, _) = course.point_at(me.along + stopping);
+        let fall = track.heights.height_at(position.x, position.y)
+            - track.heights.height_at(there.x, there.y);
         let style = Style {
             pace: driver.pace,
             lane: steering_line,
             chasing,
+            downhill: (fall / stopping).max(0.0),
             reach_across: me.reach.x,
             gate,
-            careful,
+            careful: put_back || by_scenery,
         };
+        // Only the road ahead sets its speed: a truck or fixed scenery in front is steered
+        // round, not braked for.
         let controls = plan(course, me.along, position, forward, speed, style);
-        // Whichever asks for less: the bends ahead, or the truck in front.
-        input.throttle = controls
-            .throttle
-            .min(throttle_for(keeping_off(in_front), speed));
+        input.throttle = controls.throttle;
         // Hands still in the air, and for a moment after landing. The terrain is cheap to
         // read, and nothing under the truck is lower: only above it, a ray looks for a box.
         let flying = config.wheel_radius - config.wheel_rest[0].y + AIRBORNE;
@@ -1227,6 +1363,140 @@ fn drive(
     }
 }
 
+/// A point of the outline of a fixed object that reaches into the course, which the drivers
+/// steer round as they do round a truck that is stopped there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Obstacle {
+    /// How far along the course it is, in metres.
+    along: f32,
+    /// How far to the left of the course's centreline it is, in metres, as a driver's line is
+    /// measured.
+    across: f32,
+    /// Where it is on the ground plane (world X and Z), in metres.
+    position: Vec2,
+}
+
+/// Every point, `OBSTACLE_SPACING` apart, of the outline of each fixed, solid scenery object
+/// at the heights a truck would hit it (`OBSTACLE_SLICES`), that is within `OBSTACLE_MARGIN`
+/// of the edge of `course`, in order along it. Loose objects are left out: a truck knocks
+/// them away, and so are ramps, which it drives up. Worked out once a race: it cuts every
+/// triangle of every model near the course.
+fn obstacles_on(track: &TrackData, course: &Course) -> Vec<Obstacle> {
+    let band = course.width / 2.0 + OBSTACLE_MARGIN;
+    let models = &track.scenery.models;
+    // Where a point has been looked at already, on a grid `OBSTACLE_SPACING` across, so that
+    // the two slices of a wall, the faces either side of an edge, and two objects that
+    // touch, give one point.
+    let mut seen = HashSet::new();
+    let mut obstacles = Vec::new();
+    for object in &track.scenery.objects {
+        if !object.solid || object.ramp || object.motion != SceneryMotion::Fixed {
+            continue;
+        }
+        let Some(model) = models.get(object.model) else {
+            continue;
+        };
+        // Too far from the course for any of it to reach.
+        let reach = model
+            .positions
+            .iter()
+            .map(|&[x, _, z]| Vec2::new(x, z).length())
+            .fold(0.0, f32::max);
+        if course.nearest(object.position).distance > band + reach {
+            continue;
+        }
+        // Placed as the scenery slice places it, with the object settled onto the slope.
+        let rotation = Quat::from_rotation_y(object.yaw);
+        let base = Vec3::Y * (object.height_above_ground - object.sunk_on_slope);
+        let corner = |index: &u32| {
+            let position = model.positions.get(*index as usize)?;
+            Some(rotation * Vec3::from_array(*position) + base)
+        };
+        // Its outline where it reaches the course, a point to each cell of the grid.
+        let mut cells = HashSet::new();
+        let mut outline = Vec::new();
+        for [a, b, c] in model.indices.as_chunks::<3>().0 {
+            let (Some(a), Some(b), Some(c)) = (corner(a), corner(b), corner(c)) else {
+                continue;
+            };
+            for height in OBSTACLE_SLICES {
+                let Some((from, to)) = slice([a, b, c], height) else {
+                    continue;
+                };
+                let steps = (from.distance(to) / OBSTACLE_SPACING).ceil().max(1.0) as usize;
+                for step in 0..=steps {
+                    let point = object.position + from.lerp(to, step as f32 / steps as f32);
+                    let cell = (point / OBSTACLE_SPACING).round().as_ivec2();
+                    if !cells.insert(cell) {
+                        continue;
+                    }
+                    let nearest = course.nearest(point);
+                    if nearest.distance <= band {
+                        let along = course.distance_along(&nearest);
+                        // As `Places::of` measures a truck.
+                        let (middle, direction) = course.point_at(along);
+                        outline.push((
+                            cell,
+                            Obstacle {
+                                along,
+                                across: -course.offset(middle, point).dot(direction.perp()),
+                                position: point,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        obstacles.extend(
+            outline
+                .into_iter()
+                .filter(|(cell, _)| seen.insert(*cell))
+                .map(|(_, point)| point),
+        );
+    }
+    obstacles.sort_by(|a, b| a.along.total_cmp(&b.along));
+    obstacles
+}
+
+/// Where a triangle crosses the level `height`, on the ground plane (X and Z): the two ends
+/// of the line it cuts there, or `None` where it is all above or all below.
+fn slice(corners: [Vec3; 3], height: f32) -> Option<(Vec2, Vec2)> {
+    let mut ends = (0..3).filter_map(|i| {
+        let (p, q) = (corners[i], corners[(i + 1) % 3]);
+        let (below_p, below_q) = (p.y - height, q.y - height);
+        ((below_p < 0.0) != (below_q < 0.0)).then(|| p.lerp(q, below_p / (below_p - below_q)).xz())
+    });
+    Some((ends.next()?, ends.next()?))
+}
+
+/// The `obstacles`, in order along a course of `lap` metres, that are from `from` to `to`
+/// metres along it, round the end of the lap and on. Found by a binary search for the first,
+/// since a driver asks for these every step.
+fn obstacles_between(
+    obstacles: &[Obstacle],
+    from: f32,
+    to: f32,
+    lap: f32,
+) -> impl Iterator<Item = &Obstacle> {
+    let start = from.rem_euclid(lap);
+    let stretch = (to - from).min(lap);
+    let first = obstacles.partition_point(|obstacle| obstacle.along < start);
+    (0..obstacles.len())
+        .map(move |i| &obstacles[(first + i) % obstacles.len()])
+        .take_while(move |obstacle| (obstacle.along - start).rem_euclid(lap) <= stretch)
+}
+
+/// How far along `course` each of the track's checkpoints is, in metres. It does not change
+/// during a race, and a course whose corners are curves has hundreds of pieces to search,
+/// so the systems find it once and keep it.
+fn along_the_course(track: &TrackData, course: &Course) -> Vec<f32> {
+    track
+        .gates
+        .iter()
+        .map(|gate| course.distance_along(&course.nearest(gate.center)))
+        .collect()
+}
+
 /// Whether a truck `along` metres round a course of `lap` metres has gone past its `next`
 /// checkpoint, having driven there from its `last` one, which are that far round too.
 /// Measured from the last checkpoint, where a truck that is put back starts again: where
@@ -1246,24 +1516,24 @@ fn has_missed(along: f32, last: f32, next: f32, lap: f32) -> bool {
 /// In `Update`, where the race puts trucks back.
 fn ask_to_be_put_back(
     track: Res<Track>,
+    settings: Res<OpponentsSettings>,
     mut drivers: Query<(Entity, &mut ComputerDriver, &Racer, Option<&Name>)>,
     mut back: MessageWriter<BackToCheckpoint>,
+    mut gates_along: Local<Vec<f32>>,
 ) {
-    let Some(course) = &track.course else {
+    let Some(course) = course_for(&track, settings.difficulty) else {
         return;
     };
+    if track.is_changed() || settings.is_changed() || gates_along.len() != track.gates.len() {
+        *gates_along = along_the_course(&track, course);
+    }
     let lap = course.length();
     for (truck, mut driver, racer, name) in &mut drivers {
         let Some(along) = driver.along else {
             continue;
         };
         // Gone past the checkpoint that it has to drive through next, without doing so.
-        let gate_along = |index: usize| {
-            track
-                .gates
-                .get(index)
-                .map(|gate| course.distance_along(&course.nearest(gate.center)))
-        };
+        let gate_along = |index: usize| gates_along.get(index).copied();
         let missed = racer.progress.finished.is_none()
             && racer
                 .progress
@@ -1301,6 +1571,7 @@ fn ask_to_be_put_back(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::track::{Scenery, SceneryModel, SceneryObject};
 
     /// A square of 300 m sides. The first side runs along +X from the origin, and the
     /// first corner turns towards +Z, which is to the right.
@@ -1332,28 +1603,15 @@ mod tests {
     }
 
     /// Another built-in truck, `ahead` metres along the course and `across` metres to the
-    /// left of the centreline, standing still.
+    /// left of the centreline.
     fn near(ahead: f32, across: f32) -> Neighbour {
         Neighbour {
             ahead,
             across,
-            speed: 0.0,
             clear_by: clear_by(),
             past_by: past_by(),
+            look_out: LOOK_OUT,
         }
-    }
-
-    /// One `ahead` metres up the road and going at `speed`, to hold station behind.
-    fn in_front(ahead: f32, speed: f32) -> Neighbour {
-        Neighbour {
-            speed,
-            ..near(ahead, 0.0)
-        }
-    }
-
-    /// Where a driver settles behind a truck it cannot get by, in metres: 8.
-    fn pressure_gap() -> f32 {
-        past_by() + PRESSURE_ROOM
     }
 
     /// A driver on the middle line, at full pace, with nobody to chase.
@@ -1362,6 +1620,7 @@ mod tests {
             pace: 1.0,
             lane: 0.0,
             chasing: 0.0,
+            downhill: 0.0,
             reach_across: built_in().x,
             gate: None,
             careful: false,
@@ -1388,6 +1647,50 @@ mod tests {
 
     /// The first side's corner is beyond the horizon from here: a plain straight ahead.
     const FAR_FROM_THE_CORNER: f32 = 20.0;
+
+    #[test]
+    fn each_difficulty_follows_its_own_course_or_else_the_main_one() {
+        // Told apart by how long a lap is.
+        let other = |side: f32| {
+            Some(Course::new(
+                vec![Vec2::ZERO, Vec2::X * side, Vec2::Y * side],
+                14.0,
+            ))
+        };
+        let lap = |track: &TrackData, difficulty| course_for(track, difficulty).unwrap().length();
+        let track = TrackData {
+            course: Some(course()),
+            other_courses: vec![other(100.0), other(10.0), other(1.0)],
+            ..crate::track::builtin_track()
+        };
+        assert_eq!(lap(&track, Difficulty::Easy), course().length());
+        assert_eq!(
+            lap(&track, Difficulty::Normal),
+            other(100.0).unwrap().length()
+        );
+        assert_eq!(lap(&track, Difficulty::Hard), other(10.0).unwrap().length());
+
+        // A track that leaves its shortcut out, and one with no other courses at all.
+        let without = |other_courses| TrackData {
+            other_courses,
+            ..track.clone()
+        };
+        let no_shortcut = without(vec![other(100.0), None]);
+        assert_eq!(lap(&no_shortcut, Difficulty::Hard), course().length());
+        assert_eq!(
+            lap(&without(Vec::new()), Difficulty::Normal),
+            course().length()
+        );
+    }
+
+    #[test]
+    fn the_harder_the_quicker() {
+        let [easy, normal, hard] = Difficulty::ALL;
+        assert!(easy.power() < normal.power() && normal.power() < hard.power());
+        assert!(easy.catching_up() < normal.catching_up());
+        assert!(normal.catching_up() < hard.catching_up());
+        assert_eq!(Difficulty::default(), normal);
+    }
 
     #[test]
     fn a_truck_on_its_line_drives_straight_and_up_to_its_pace() {
@@ -1955,6 +2258,194 @@ mod tests {
         assert_eq!(at(20.0, 0.0).throttle, at(20.0, 1.0).throttle);
     }
 
+    #[test]
+    fn a_triangle_is_cut_where_it_crosses_a_level() {
+        // Standing up from the ground along X, 2 m high at its peak.
+        let corners = [
+            Vec3::ZERO,
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(2.0, 2.0, 0.0),
+        ];
+        let (from, to) = slice(corners, 1.0).expect("it crosses 1 m");
+        let (low, high) = if from.x < to.x {
+            (from, to)
+        } else {
+            (to, from)
+        };
+        assert!(low.distance(Vec2::new(1.0, 0.0)) < 1e-5, "{low}");
+        assert!(high.distance(Vec2::new(3.0, 0.0)) < 1e-5, "{high}");
+        // Above it and below it, nothing.
+        assert_eq!(slice(corners, 3.0), None);
+        assert_eq!(slice(corners, -1.0), None);
+    }
+
+    /// A block `size` metres across, along and high, standing `lift` metres off the ground,
+    /// as a model of twelve triangles.
+    fn block(size: Vec3, lift: f32) -> SceneryModel {
+        let half = size / 2.0;
+        let positions: Vec<[f32; 3]> = (0..8)
+            .map(|i| {
+                let pick = |bit: u32, half: f32| if i & bit == 0 { -half } else { half };
+                [
+                    pick(1, half.x),
+                    lift + half.y + pick(2, half.y),
+                    pick(4, half.z),
+                ]
+            })
+            .collect();
+        let faces: [[u32; 4]; 6] = [
+            [0, 1, 3, 2],
+            [4, 6, 7, 5],
+            [0, 4, 5, 1],
+            [2, 3, 7, 6],
+            [0, 2, 6, 4],
+            [1, 5, 7, 3],
+        ];
+        let indices = faces
+            .iter()
+            .flat_map(|&[a, b, c, d]| [a, b, c, a, c, d])
+            .collect();
+        SceneryModel {
+            positions,
+            indices,
+            ..default()
+        }
+    }
+
+    #[test]
+    fn what_reaches_into_the_road_at_a_trucks_height_is_an_obstacle() {
+        // On the first side of the square course, which runs along +X from the origin: a
+        // block standing beside it, a block and a ramp on it, a slab over it on high legs
+        // that are not modelled, a loose block that a truck knocks away, and a block far off
+        // in the field.
+        let at = |x: f32, z: f32, model: usize, motion: SceneryMotion| SceneryObject {
+            model,
+            position: Vec2::new(x, z),
+            height_above_ground: 0.0,
+            yaw: 0.0,
+            solid: true,
+            motion,
+            faces_camera: false,
+            visible: true,
+            ramp: false,
+            sunk_on_slope: 0.0,
+        };
+        let track = TrackData {
+            scenery: Scenery {
+                models: vec![
+                    block(Vec3::new(4.0, 2.0, 4.0), 0.0),
+                    block(Vec3::new(4.0, 1.0, 20.0), 4.0),
+                ],
+                objects: vec![
+                    at(100.0, 8.0, 0, SceneryMotion::Fixed),
+                    // On the road: a block to drive round, and a ramp to drive over.
+                    at(250.0, 1.0, 0, SceneryMotion::Fixed),
+                    SceneryObject {
+                        ramp: true,
+                        ..at(270.0, 0.0, 0, SceneryMotion::Fixed)
+                    },
+                    at(150.0, 0.0, 1, SceneryMotion::Fixed),
+                    at(200.0, 4.0, 0, SceneryMotion::Loose { mass: 50.0 }),
+                    at(150.0, 100.0, 0, SceneryMotion::Fixed),
+                ],
+                ..default()
+            },
+            ..crate::track::builtin_track()
+        };
+        let course = course();
+        let obstacles = obstacles_on(&track, &course);
+        // Only the two blocks, the one beside the road only as far out as the 7 m edge of
+        // the 14 m course and `OBSTACLE_MARGIN` past it: its near face is 6 m from the
+        // middle, on the road, and its far face, 10 m off, is out of it.
+        let beside =
+            |&Vec2 { x, y }: &Vec2| (97.5..=102.5).contains(&x) && (5.5..=9.0).contains(&y);
+        let on = |&Vec2 { x, y }: &Vec2| (247.5..=252.5).contains(&x) && (-1.5..=3.5).contains(&y);
+        assert!(obstacles.iter().any(|obstacle| beside(&obstacle.position)));
+        assert!(obstacles.iter().any(|obstacle| on(&obstacle.position)));
+        for obstacle in &obstacles {
+            let Vec2 { x, y } = obstacle.position;
+            assert!(
+                beside(&obstacle.position) || on(&obstacle.position),
+                "{x}, {y}"
+            );
+            assert!((obstacle.along - x).abs() < 1e-3);
+            // Along +X, +Z is to the right: as far to the right as it is out.
+            assert!((obstacle.across + y).abs() < 1e-3, "{}", obstacle.across);
+        }
+        assert!(
+            obstacles
+                .windows(2)
+                .all(|pair| pair[0].along <= pair[1].along)
+        );
+    }
+
+    #[test]
+    fn obstacles_are_found_between_two_places_along_the_course_and_round_the_lap() {
+        let lap = 1200.0;
+        let obstacles: Vec<Obstacle> = [10.0, 50.0, 400.0, 1190.0]
+            .map(|along| Obstacle {
+                along,
+                across: 0.0,
+                position: Vec2::ZERO,
+            })
+            .to_vec();
+        let between = |from: f32, to: f32| -> Vec<f32> {
+            obstacles_between(&obstacles, from, to, lap)
+                .map(|obstacle| obstacle.along)
+                .collect()
+        };
+        assert_eq!(between(0.0, 60.0), [10.0, 50.0]);
+        assert_eq!(between(20.0, 45.0), Vec::<f32>::new());
+        // Over the end of the lap, and from before its start.
+        assert_eq!(between(1180.0, 1220.0), [1190.0, 10.0]);
+        assert_eq!(between(-20.0, 20.0), [1190.0, 10.0]);
+        // A stretch longer than the lap takes each one once.
+        assert_eq!(between(0.0, 5000.0).len(), obstacles.len());
+        assert_eq!(obstacles_between(&[], 0.0, 100.0, lap).count(), 0);
+    }
+
+    #[test]
+    fn downhill_a_driver_brakes_sooner_for_the_same_corner() {
+        // Coming up to the corner at 300 m at 30 m/s, on the middle line.
+        let at = |along: f32, downhill: f32| {
+            let style = Style {
+                pace: 30.0 / CRUISE_SPEED,
+                downhill,
+                ..steady()
+            };
+            plan(
+                &course(),
+                along,
+                Vec2::new(along, 0.0),
+                Vec2::X,
+                30.0,
+                style,
+            )
+        };
+        // Where along the road it first gets on the brakes.
+        let brakes_at = |downhill: f32| {
+            (0..300)
+                .map(|metres| metres as f32)
+                .find(|&along| at(along, downhill).throttle < 0.0)
+                .expect("the corner is braked for somewhere")
+        };
+        let (level, steep, steeper) = (brakes_at(0.0), brakes_at(0.15), brakes_at(0.3));
+        assert!(
+            steep < level && steeper < steep,
+            "{level}, {steep}, {steeper} m"
+        );
+        // Uphill counts as level: it is the brakes that bring it down, not the hill.
+        assert_eq!(brakes_at(-0.2), level);
+    }
+
+    #[test]
+    fn the_braking_a_driver_counts_on_falls_downhill_to_a_floor() {
+        assert_eq!(braking_on(0.0), BRAKING);
+        assert_eq!(braking_on(-0.5), BRAKING);
+        assert!(braking_on(0.1) < BRAKING);
+        assert_eq!(braking_on(1.0), LEAST_BRAKING);
+    }
+
     /// What `passing_room` allows on the 14 m course above: a line out to 5.1 m either
     /// side of the middle, which is wide enough to pass a truck on the centreline.
     fn room_to_pass() -> f32 {
@@ -2115,50 +2606,22 @@ mod tests {
     }
 
     #[test]
-    fn it_holds_station_behind_a_truck_it_has_not_got_by() {
-        // A clear road in front is no limit on its speed at all.
-        assert!(keeping_off(None).is_infinite());
-        // Up behind one doing 20 m/s: 20 m/s, so the gap stays as it is. Nearer than
-        // that it still asks for 20, and presses rather than dropping back.
-        assert_eq!(keeping_off(Some(in_front(pressure_gap(), 20.0))), 20.0);
-        assert_eq!(
-            keeping_off(Some(in_front(pressure_gap() - 3.0, 20.0))),
-            20.0
-        );
-        // Further back it may go quicker, by exactly what it can brake off again in the
-        // road that is left: from here, braking at `BRAKING`, it is down to 20 m/s with
-        // `PRESSURE_ROOM` and its own length to spare.
-        let coming_up = keeping_off(Some(in_front(pressure_gap() + 30.0, 20.0)));
-        let braking_distance = (coming_up * coming_up - 20.0 * 20.0) / (2.0 * BRAKING);
-        assert!((braking_distance - 30.0).abs() < 1e-3, "{coming_up}");
-        // And behind one that has stopped, it stops.
-        assert_eq!(keeping_off(Some(in_front(pressure_gap(), 0.0))), 0.0);
+    fn a_driver_looks_out_as_far_as_it_closes_in_three_seconds() {
+        // Catching something up at 30 m/s: 90 m ahead, 3 s from it.
+        assert_eq!(look_out(30.0), 30.0 * LOOK_AHEAD);
+        // Running with a truck, or dropping back from it: still `LOOK_OUT`, so a truck just
+        // in front is seen until the two touch.
+        assert_eq!(look_out(0.0), LOOK_OUT);
+        assert_eq!(look_out(-10.0), LOOK_OUT);
     }
 
     #[test]
     fn it_swerves_round_a_truck_in_front_rather_than_slowing_for_it() {
         let ahead = near(20.0, 0.0);
-        // Heading round it: the line it wants is clear, so nothing holds it up, though
-        // it is still square behind the truck.
+        // Square behind it, the line it wants is out to one side, clear of it: it goes round,
+        // and nothing here slows it.
         let wanted = passing_line(0.0, 0.0, 0.0, &[ahead], room_to_pass());
         assert!(wanted.abs() >= clear_by(), "{wanted}");
-        assert_eq!(held_up_by(&[ahead], 0.0, wanted), None);
-        // Boxed in, its line is still behind the truck: it slows for it.
-        assert_eq!(held_up_by(&[ahead], 0.0, 0.0), Some(ahead));
-        // Out of its way already, whatever line it wants: nothing to slow for.
-        assert_eq!(held_up_by(&[ahead], clear_by(), 0.0), None);
-    }
-
-    #[test]
-    fn the_throttle_takes_the_lower_of_the_two_speeds_asked_of_it() {
-        // Full throttle for the road ahead, but the truck in front wants 20 m/s of the
-        // 30 m/s it is doing: the brakes win.
-        let for_the_road = throttle_for(60.0, 30.0);
-        let for_the_truck = throttle_for(keeping_off(Some(in_front(pressure_gap(), 20.0))), 30.0);
-        assert_eq!(for_the_road, 1.0);
-        assert_eq!(for_the_road.min(for_the_truck), -1.0);
-        // With nobody in front, the road has it.
-        assert_eq!(for_the_road.min(throttle_for(keeping_off(None), 30.0)), 1.0);
     }
 
     #[test]

@@ -113,6 +113,7 @@ fn app_with(more: impl Fn(Vec2) -> Vec<Placed>) -> App {
         motion,
         faces_camera: false,
         visible: true,
+        ramp: false,
         sunk_on_slope: 0.0,
     };
     track.scenery = Scenery {
@@ -251,6 +252,7 @@ fn a_loose_panel_on_its_edge_stays_upright() {
             motion: SceneryMotion::Loose { mass: 900.0 },
             faces_camera: false,
             visible: true,
+            ramp: false,
             sunk_on_slope: 0.0,
         }]
     });
@@ -289,6 +291,7 @@ fn a_stack_of_loose_tires_falls_asleep() {
                 motion: SceneryMotion::Loose { mass: 50.0 },
                 faces_camera: false,
                 visible: true,
+                ramp: false,
                 sunk_on_slope: 0.0,
             })
             .collect()

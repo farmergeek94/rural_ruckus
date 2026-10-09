@@ -7,6 +7,10 @@ pub const MOST_LAPS: u32 = 99;
 /// The most trucks the computer can drive in a race. With the player's that is eight, which
 /// is how many places a Monster Truck Madness 2 starting grid has.
 pub const MOST_OPPONENTS: u32 = 7;
+/// What the levels of difficulty are called, easiest first.
+pub const DIFFICULTIES: [&str; 3] = ["Easy", "Normal", "Hard"];
+/// The level of difficulty a race has until the player chooses: the middle one.
+pub const NORMAL_DIFFICULTY: usize = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Screen {
@@ -77,6 +81,11 @@ pub enum Action {
     /// One computer-driven truck fewer or more, from whichever screen.
     FewerOpponents,
     MoreOpponents,
+    /// One level of difficulty down or up, from whichever screen.
+    Easier,
+    Harder,
+    /// Difficulty number `0` of `DIFFICULTIES`.
+    SetDifficulty(usize),
     /// Turn dial number `0` to step `1`.
     SetDial(usize, usize),
     /// Set setting number `0` to its value number `1`.
@@ -123,6 +132,8 @@ pub enum Happened {
     TrackHighlighted(usize),
     LapsChanged(u32),
     OpponentsChanged(u32),
+    /// Now at difficulty number `0` of `DIFFICULTIES`.
+    DifficultyChanged(usize),
     /// Dial number `0` now stands at step `1`.
     DialChanged(usize, usize),
     /// Setting number `0` now has its value number `1`.
@@ -316,6 +327,8 @@ pub struct FrontEnd {
     pub laps: u32,
     /// How many trucks the computer drives. None is a race against the clock.
     pub opponents: u32,
+    /// Which of `DIFFICULTIES` the trucks the computer drives are at.
+    pub difficulty: usize,
     pub dials: Vec<DialSteps>,
     /// Which dial `Less` and `More` turn, on the garage screen.
     pub dial_in_hand: usize,
@@ -339,6 +352,7 @@ impl FrontEnd {
         tracks: List,
         laps: u32,
         opponents: u32,
+        difficulty: usize,
         dials: Vec<DialSteps>,
         settings: Vec<SettingValues>,
     ) -> Self {
@@ -348,6 +362,7 @@ impl FrontEnd {
             tracks,
             laps: laps.clamp(1, MOST_LAPS),
             opponents: opponents.min(MOST_OPPONENTS),
+            difficulty: difficulty.min(DIFFICULTIES.len() - 1),
             dials: dials
                 .into_iter()
                 .map(|dial| DialSteps {
@@ -468,6 +483,11 @@ impl FrontEnd {
             Action::MoreLaps => self.change_laps(true, &mut happened),
             Action::FewerOpponents => self.change_opponents(false, &mut happened),
             Action::MoreOpponents => self.change_opponents(true, &mut happened),
+            Action::Easier => {
+                self.set_difficulty(self.difficulty.saturating_sub(1), &mut happened);
+            }
+            Action::Harder => self.set_difficulty(self.difficulty + 1, &mut happened),
+            Action::SetDifficulty(difficulty) => self.set_difficulty(difficulty, &mut happened),
             Action::SetDial(dial, step) => {
                 if dial < self.dials.len() {
                     self.dial_in_hand = dial;
@@ -674,6 +694,15 @@ impl FrontEnd {
         }
     }
 
+    /// Difficulty stops at the easiest and the hardest.
+    fn set_difficulty(&mut self, difficulty: usize, happened: &mut Vec<Happened>) {
+        let difficulty = difficulty.min(DIFFICULTIES.len() - 1);
+        if difficulty != self.difficulty {
+            self.difficulty = difficulty;
+            happened.push(Happened::DifficultyChanged(difficulty));
+        }
+    }
+
     /// A dial stops at its ends.
     fn set_dial(&mut self, index: usize, step: usize, happened: &mut Vec<Happened>) {
         let Some(dial) = self.dials.get_mut(index) else {
@@ -808,6 +837,7 @@ mod tests {
             List::new(vec![true; tracks], 0),
             3,
             2,
+            NORMAL_DIFFICULTY,
             vec![DialSteps { steps: 5, step: 2 }; 3],
             vec![
                 SettingValues {
@@ -892,6 +922,7 @@ mod tests {
             List::default(),
             0,
             0,
+            0,
             Vec::new(),
             Vec::new(),
         );
@@ -922,10 +953,44 @@ mod tests {
             List::default(),
             3,
             500,
+            NORMAL_DIFFICULTY,
             Vec::new(),
             Vec::new(),
         );
         assert_eq!(wild.opponents, MOST_OPPONENTS);
+    }
+
+    #[test]
+    fn difficulty_stops_at_the_easiest_and_the_hardest() {
+        let mut model = front_end(1, 1);
+        assert_eq!(model.difficulty, NORMAL_DIFFICULTY);
+        assert_eq!(
+            model.apply(Action::Harder),
+            [Happened::DifficultyChanged(2)]
+        );
+        assert_eq!(model.apply(Action::Harder), []);
+        assert_eq!(
+            model.apply(Action::SetDifficulty(0)),
+            [Happened::DifficultyChanged(0)]
+        );
+        assert_eq!(model.apply(Action::Easier), []);
+        // A click on what is chosen changes nothing, and one past the end is the hardest.
+        assert_eq!(model.apply(Action::SetDifficulty(0)), []);
+        assert_eq!(
+            model.apply(Action::SetDifficulty(9)),
+            [Happened::DifficultyChanged(2)]
+        );
+
+        let wild = FrontEnd::new(
+            List::default(),
+            List::default(),
+            3,
+            3,
+            500,
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(wild.difficulty, DIFFICULTIES.len() - 1);
     }
 
     #[test]
@@ -980,6 +1045,7 @@ mod tests {
             List::new(vec![true, false], 1),
             3,
             0,
+            NORMAL_DIFFICULTY,
             Vec::new(),
             Vec::new(),
         );

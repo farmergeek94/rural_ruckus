@@ -19,7 +19,7 @@ use bevy::ui::UiGlobalTransform;
 use bevy::ui_widgets::Button;
 
 use super::input::Does;
-use super::model::{Action, FrontEnd, List, Screen, split_in_two, visible_rows};
+use super::model::{Action, DIFFICULTIES, FrontEnd, List, Screen, split_in_two, visible_rows};
 use super::theme::Look;
 use super::{
     Catalogue, Dial, Dials, Entry, Folder, FolderBrowser, FrontEndOpen, Model, Preset, Presets,
@@ -51,7 +51,7 @@ const SCROLL_MARGIN: f32 = 40.0;
 const TITLE: &str = "RURAL RUCKUS";
 /// How much wider than a list the folder browser is, for the long paths in it.
 const BROWSER_WIDTH: f32 = 1.6;
-const HINTS: &str = "Q / E screens    arrows move and change    - / + opponents    Enter GO    drag or right stick turns the truck";
+const HINTS: &str = "Q / E screens    arrows move and change    - / + opponents    [ / ] difficulty    Enter GO    drag or right stick turns the truck";
 const BROWSING_HINTS: &str = "arrows move    Enter or right goes in    Backspace or left goes up    Space chooses    Esc leaves";
 const SEARCH_HINT: &str = "    / searches";
 const TYPING_HINTS: &str = "type to search    up / down move    Backspace erases    Enter keeps the search    Esc clears it";
@@ -125,6 +125,10 @@ fn laps_text(laps: u32) -> String {
         1 => "1 lap".into(),
         laps => format!("{laps} laps"),
     }
+}
+
+fn difficulty_text(difficulty: usize) -> &'static str {
+    DIFFICULTIES.get(difficulty).copied().unwrap_or("")
 }
 
 fn opponents_text(opponents: u32) -> String {
@@ -592,7 +596,8 @@ impl Drawing<'_> {
             });
     }
 
-    /// Beside the list of tracks: the highlighted one's map, the laps and the opponents.
+    /// Beside the list of tracks: the highlighted one's map, the laps, the opponents and how
+    /// hard they are to beat.
     fn race(&self, parent: Parent) {
         let theme = self.theme;
         parent
@@ -625,6 +630,29 @@ impl Drawing<'_> {
                     opponents_text(self.model.opponents),
                     Action::FewerOpponents,
                     Action::MoreOpponents,
+                );
+
+                // As the options screen's Quality line is drawn.
+                panel.spawn(Node {
+                    height: px(12),
+                    ..default()
+                });
+                self.heading(panel, "DIFFICULTY");
+                let last = DIFFICULTIES.len() - 1;
+                self.segment_bar(
+                    panel,
+                    Node {
+                        width: percent(100),
+                        ..default()
+                    },
+                    DIFFICULTIES.len(),
+                    self.model.difficulty,
+                    [
+                        DIFFICULTIES[0],
+                        difficulty_text(self.model.difficulty),
+                        DIFFICULTIES[last],
+                    ],
+                    Action::SetDifficulty,
                 );
             });
     }
@@ -936,67 +964,97 @@ impl Drawing<'_> {
     /// level chosen, with the first and the last level's names at its ends and the chosen
     /// value's under its middle. Where the others match no level, none is lit.
     fn level_slider(&self, line: Parent, index: usize) {
-        let theme = self.theme;
         let setting = &self.settings[index];
         let levels = setting.levels.len().min(setting.values.len());
         let name = |value: usize| setting.values.get(value).map_or("", String::as_str);
-        line.spawn(Node {
-            flex_grow: 1.0,
-            min_width: px(0),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(4),
-            ..default()
-        })
-        .with_children(|slider| {
-            slider
-                .spawn(Node {
-                    column_gap: px(4),
-                    ..default()
-                })
-                .with_children(|bar| {
-                    for level in 0..levels {
-                        let lit = setting.chosen < levels && level <= setting.chosen;
-                        let (normal, hovered) = if lit {
-                            (theme.accent, theme.accent_hovered)
-                        } else {
-                            (theme.row, theme.row_hovered)
-                        };
-                        bar.spawn((
-                            Button,
-                            Does(Action::SetSetting(index, level)),
-                            Look { normal, hovered },
-                            BackgroundColor(normal),
-                            Node {
-                                flex_grow: 1.0,
-                                flex_basis: px(0),
-                                height: px(theme.row_height - 26.0),
-                                border_radius: BorderRadius::all(px(4)),
-                                ..default()
-                            },
-                        ));
-                    }
-                });
-            slider
-                .spawn(Node {
-                    justify_content: JustifyContent::SpaceBetween,
-                    ..default()
-                })
-                .with_children(|names| {
-                    for (text, color) in [
-                        (name(0), theme.text_dim),
-                        (setting.chosen_value(), theme.accent),
-                        (name(levels.saturating_sub(1)), theme.text_dim),
-                    ] {
-                        names.spawn((
-                            Text::new(text.to_uppercase()),
-                            theme.heading(theme.small_size * 0.8),
-                            TextColor(color),
-                            TextLayout::no_wrap(),
-                            Pickable::IGNORE,
-                        ));
-                    }
-                });
-        });
+        self.segment_bar(
+            line,
+            Node {
+                flex_grow: 1.0,
+                min_width: px(0),
+                ..default()
+            },
+            levels,
+            setting.chosen,
+            [
+                name(0),
+                setting.chosen_value(),
+                name(levels.saturating_sub(1)),
+            ],
+            |level| Action::SetSetting(index, level),
+        );
+    }
+
+    /// A bar of `levels` segments, lit up to `chosen` (none where `chosen` is past the last),
+    /// laid out in `node`. Under it, `names`: the first level's, the chosen one's and the
+    /// last's. Activating a segment does `action` with its level.
+    fn segment_bar(
+        &self,
+        parent: Parent,
+        node: Node,
+        levels: usize,
+        chosen: usize,
+        names: [&str; 3],
+        action: impl Fn(usize) -> Action,
+    ) {
+        let theme = self.theme;
+        parent
+            .spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+                ..node
+            })
+            .with_children(|slider| {
+                slider
+                    .spawn(Node {
+                        column_gap: px(4),
+                        ..default()
+                    })
+                    .with_children(|bar| {
+                        for level in 0..levels {
+                            let lit = chosen < levels && level <= chosen;
+                            let (normal, hovered) = if lit {
+                                (theme.accent, theme.accent_hovered)
+                            } else {
+                                (theme.row, theme.row_hovered)
+                            };
+                            bar.spawn((
+                                Button,
+                                Does(action(level)),
+                                Look { normal, hovered },
+                                BackgroundColor(normal),
+                                Node {
+                                    flex_grow: 1.0,
+                                    flex_basis: px(0),
+                                    height: px(theme.row_height - 26.0),
+                                    border_radius: BorderRadius::all(px(4)),
+                                    ..default()
+                                },
+                            ));
+                        }
+                    });
+                slider
+                    .spawn(Node {
+                        justify_content: JustifyContent::SpaceBetween,
+                        ..default()
+                    })
+                    .with_children(|under| {
+                        let [first, chosen, last] = names;
+                        for (text, color) in [
+                            (first, theme.text_dim),
+                            (chosen, theme.accent),
+                            (last, theme.text_dim),
+                        ] {
+                            under.spawn((
+                                Text::new(text.to_uppercase()),
+                                theme.heading(theme.small_size * 0.8),
+                                TextColor(color),
+                                TextLayout::no_wrap(),
+                                Pickable::IGNORE,
+                            ));
+                        }
+                    });
+            });
     }
 
     /// A line that opens something: one button with its value, on one line. What does not
@@ -1320,11 +1378,12 @@ impl Drawing<'_> {
             })
             .collect();
         format!(
-            "{}  |  {}  |  {}  |  {}  |  {}",
+            "{}  |  {}  |  {}  |  {}, {}  |  {}",
             name(&self.catalogue.trucks, self.model.trucks.highlighted),
             name(&self.catalogue.tracks, self.model.tracks.highlighted),
             laps_text(self.model.laps),
             opponents_text(self.model.opponents).to_lowercase(),
+            difficulty_text(self.model.difficulty).to_lowercase(),
             if leaning.is_empty() {
                 "standard setup".into()
             } else {

@@ -64,6 +64,7 @@ use crate::display::{DisplaySettings, ScreenMode, Vsync};
 use crate::environment::{EnvironmentSettings, Lighting};
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
+use crate::opponents::{Difficulty, OpponentsSettings};
 use crate::particles::DirtSettings;
 use crate::physics::PhysicsSettings;
 use crate::race::{RaceCancelled, RacePause, RaceSettings};
@@ -93,6 +94,7 @@ const KEY_TRUCK: &str = "choice.truck";
 const KEY_TRACK: &str = "choice.track";
 const KEY_LAPS: &str = "choice.laps";
 const KEY_OPPONENTS: &str = "choice.opponents";
+const KEY_DIFFICULTY: &str = "choice.difficulty";
 const KEY_SUSPENSION: &str = "setup.suspension";
 const KEY_GEARING: &str = "setup.gearing";
 const KEY_REAR_STEERING: &str = "setup.rear_steering";
@@ -729,6 +731,9 @@ fn remember(
     }
     if let Some(opponents) = store.get_number(KEY_OPPONENTS)? {
         choices.opponents = opponents.clamp(0.0, ui::MOST_OPPONENTS as f64) as u32;
+    }
+    if let Some(difficulty) = store.get_number(KEY_DIFFICULTY)? {
+        choices.difficulty = difficulty.clamp(0.0, (ui::DIFFICULTIES.len() - 1) as f64) as usize;
     }
     for (key, dial) in [
         (KEY_SUSPENSION, &mut setup.suspension),
@@ -2058,6 +2063,10 @@ fn get_ready(
     commands.insert_resource(ChosenTruck(truck));
     commands.insert_resource(ChosenTrack(track));
     race.laps = choices.laps;
+    // `ui::DIFFICULTIES` names them in the same order.
+    commands.insert_resource(OpponentsSettings {
+        difficulty: Difficulty::ALL[choices.difficulty.min(Difficulty::ALL.len() - 1)],
+    });
 
     // One transaction, and only here: never per frame, and never while racing.
     if let Some(store) = &saves.0 {
@@ -2067,6 +2076,7 @@ fn get_ready(
                 .set_text(KEY_TRACK, &chosen.track_id)
                 .set_number(KEY_LAPS, choices.laps as f64)
                 .set_number(KEY_OPPONENTS, choices.opponents as f64)
+                .set_number(KEY_DIFFICULTY, choices.difficulty as f64)
                 .set_number(KEY_SUSPENSION, setup.suspension as f64)
                 .set_number(KEY_GEARING, setup.gearing as f64)
                 .set_number(KEY_REAR_STEERING, setup.rear_steering as f64)
@@ -2196,6 +2206,16 @@ fn leave_the_race(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_screen_names_each_difficulty_as_the_drivers_have_it() {
+        let names: Vec<String> = Difficulty::ALL.iter().map(|d| format!("{d:?}")).collect();
+        assert_eq!(names, ui::DIFFICULTIES);
+        assert_eq!(
+            Difficulty::ALL[ui::NORMAL_DIFFICULTY],
+            OpponentsSettings::default().difficulty
+        );
+    }
 
     #[test]
     fn a_base_game_id_names_its_archive_and_file() {

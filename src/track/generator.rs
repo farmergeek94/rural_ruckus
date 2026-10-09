@@ -111,6 +111,7 @@ pub fn builtin_track() -> TrackData {
         ground_boxes: Vec::new(),
         water_level: None,
         course: Some(course),
+        other_courses: Vec::new(),
         gates,
         start: StartPosition {
             position: start,

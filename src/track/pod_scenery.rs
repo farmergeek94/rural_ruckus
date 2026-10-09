@@ -104,6 +104,7 @@ pub(super) fn scenery_from_pod(
             motion: motion(situation_box, solid),
             faces_camera: situation_box.kind == FACES_CAMERA,
             visible,
+            ramp: situation_box.kind == box_type::RAMP,
             // Filled in once the ground is known.
             sunk_on_slope: 0.0,
         });

@@ -180,20 +180,31 @@ impl Course {
     /// that is known to be about there: where a course doubles back beside itself, the
     /// closest point of all can be on the wrong stretch. Pieces are taken whole, so the
     /// result can lie a little outside the stretch.
+    ///
+    /// The drivers ask this for every truck on every physics step, so it looks only at the
+    /// pieces of the stretch, from the piece that holds its start, found by a binary search:
+    /// a course whose corners are curves has hundreds of short pieces.
     pub fn nearest_within(&self, position: Vec2, from: f32, to: f32) -> Nearest {
         let lap = self.length();
         let stretch = to - from;
-        (0..self.centerline.len())
-            .filter_map(|segment| {
-                let start = self.starts[segment];
-                let length = self.starts[segment + 1] - start;
-                let begins_in_stretch = (start - from).rem_euclid(lap) <= stretch;
-                let holds_the_start = (from - start).rem_euclid(lap) < length;
-                (begins_in_stretch || holds_the_start).then(|| self.nearest_on(segment, position))
+        let count = self.centerline.len();
+        let start = from.rem_euclid(lap);
+        // NaN finds no stretch.
+        if !start.is_finite() || !stretch.is_finite() {
+            return self.nearest(position);
+        }
+        // The piece that holds the start, and then each piece that begins in the stretch.
+        let first = self.starts[1..=count]
+            .partition_point(|&end| end <= start)
+            .min(count - 1);
+        (0..count)
+            .map(|step| (first + step) % count)
+            .take_while(|&segment| {
+                segment == first || (self.starts[segment] - start).rem_euclid(lap) <= stretch
             })
+            .map(|segment| self.nearest_on(segment, position))
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
-            // A stretch always holds the piece it starts in. NaN distances find none.
-            .unwrap_or_else(|| self.nearest(position))
+            .expect("a course has points")
     }
 
     /// `nearest` for every vertex of a height grid at once, row by row, for vertices
@@ -320,6 +331,45 @@ mod tests {
         assert_eq!(course.nearest_within(position, -20.0, 30.0).segment, 3);
         // One that begins part of the way along a piece still holds that piece.
         assert_eq!(course.nearest_within(position, 150.0, 160.0).segment, 1);
+    }
+
+    #[test]
+    fn nearest_within_finds_what_a_search_of_every_piece_finds() {
+        // Many short pieces round a circle, as a course with its corners put back has.
+        let points: Vec<Vec2> = (0..200)
+            .map(|i| Vec2::from_angle(i as f32 * std::f32::consts::TAU / 200.0) * 150.0)
+            .collect();
+        let course = Course::new(points, 14.0);
+        let lap = course.length();
+        let every_piece = |position: Vec2, from: f32, to: f32| {
+            (0..course.centerline.len())
+                .filter(|&segment| {
+                    let start = course.starts[segment];
+                    let length = course.starts[segment + 1] - start;
+                    (start - from).rem_euclid(lap) <= to - from
+                        || (from - start).rem_euclid(lap) < length
+                })
+                .map(|segment| course.nearest_on(segment, position))
+                .min_by(|a, b| a.distance.total_cmp(&b.distance))
+                .unwrap()
+        };
+        for i in 0..300 {
+            let from = i as f32 * 13.7 - 1000.0;
+            let to = from + (i % 7) as f32 * 40.0;
+            let position = Vec2::from_angle(i as f32 * 0.37) * (100.0 + (i % 5) as f32 * 20.0);
+            let (fast, slow) = (
+                course.nearest_within(position, from, to),
+                every_piece(position, from, to),
+            );
+            assert_eq!(fast.segment, slow.segment, "{from}..{to} at {position}");
+        }
+        // A stretch longer than the lap takes in all of it.
+        assert_eq!(
+            course
+                .nearest_within(Vec2::new(150.0, 1.0), 10.0, 10.0 + 2.0 * lap)
+                .segment,
+            course.nearest(Vec2::new(150.0, 1.0)).segment
+        );
     }
 
     #[test]

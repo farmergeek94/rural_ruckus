@@ -7,7 +7,7 @@
 //! | --- | --- | --- |
 //! | `Catalogue` | in | The trucks and tracks to list. |
 //! | `Dials` | in and out | The garage's dials. The module draws and moves them, and doesn't know what they do. |
-//! | `Choices` | in and out | Which truck and track, how many laps, and how many trucks the computer drives. |
+//! | `Choices` | in and out | Which truck and track, how many laps, how many trucks the computer drives, and how hard they are to beat. |
 //! | `Settings` | in and out | The options and advanced screens' settings, each a few named values. The module draws and changes them, and doesn't know what they do. |
 //! | `TrackPreview` | in | A picture of the highlighted track. |
 //! | `Turntable` | in | On the entity the module spawns and turns. Parent to it whatever is to be shown. |
@@ -43,7 +43,7 @@ mod theme;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
-pub use model::{Action, MOST_LAPS, MOST_OPPONENTS, Screen};
+pub use model::{Action, DIFFICULTIES, MOST_LAPS, MOST_OPPONENTS, NORMAL_DIFFICULTY, Screen};
 pub use showroom::Turntable;
 pub use theme::Theme;
 
@@ -264,13 +264,16 @@ pub struct Folder {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct FolderBrowser(pub Option<Folder>);
 
-/// Indices into the `Catalogue`, the number of laps, and how many trucks the computer drives.
+/// Indices into the `Catalogue`, the number of laps, how many trucks the computer drives,
+/// and how hard they are to beat.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct Choices {
     pub truck: usize,
     pub track: usize,
     pub laps: u32,
     pub opponents: u32,
+    /// Which of `DIFFICULTIES`.
+    pub difficulty: usize,
 }
 
 impl Default for Choices {
@@ -280,6 +283,7 @@ impl Default for Choices {
             track: 0,
             laps: 3,
             opponents: 3,
+            difficulty: NORMAL_DIFFICULTY,
         }
     }
 }
@@ -389,6 +393,7 @@ fn read_what_to_show(
         searched(&catalogue.tracks, choices.track),
         choices.laps,
         choices.opponents,
+        choices.difficulty,
         dials
             .0
             .iter()
@@ -488,6 +493,7 @@ fn apply_actions(
                 }
                 Happened::LapsChanged(laps) => choices.laps = laps,
                 Happened::OpponentsChanged(opponents) => choices.opponents = opponents,
+                Happened::DifficultyChanged(difficulty) => choices.difficulty = difficulty,
                 Happened::DialChanged(index, step) => {
                     if let Some(dial) = dials.0.get_mut(index) {
                         dial.step = step;

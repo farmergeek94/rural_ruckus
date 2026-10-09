@@ -6,6 +6,7 @@
 //! | Move, and change a setting | arrows, WASD, the wheel | d-pad, left stick |
 //! | Next and previous screen | Tab or E, Shift+Tab or Q | the shoulder buttons |
 //! | Fewer and more opponents | - and + | West and North |
+//! | Easier and harder | [ and ] | |
 //! | Accept (next screen, and GO from the garage; the next value of a setting) | | South |
 //! | GO | Enter | Start |
 //! | Bind a key (on a key binding) | Enter, then the key; Esc to stop | South |
@@ -212,6 +213,12 @@ pub(super) fn read_input(
         // The key that has + on it, which is = without Shift.
         if keys.any_just_pressed([KeyCode::Equal, KeyCode::NumpadAdd]) {
             did.write(PlayerDid(Action::MoreOpponents));
+        }
+        if keys.just_pressed(KeyCode::BracketLeft) {
+            did.write(PlayerDid(Action::Easier));
+        }
+        if keys.just_pressed(KeyCode::BracketRight) {
+            did.write(PlayerDid(Action::Harder));
         }
         if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
             did.write(PlayerDid(Action::Go));

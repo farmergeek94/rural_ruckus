@@ -65,7 +65,7 @@ POD compatibility.
 | Box types 0, 1 and 11: solid or not | **Open** |
 | Cylinders and the stadium in the track file | **Open** |
 | Computer trucks' speed hints: `cspeed`, `ctype`, `cTrackWidth` | **Open** |
-| Extra courses on one track (`Extended Course Definitions`) | **Open** |
+| Extra courses on one track (`Extended Course Definitions`) | Done: read, and followed by difficulty (see the difficulty row). What MTM2 does on a track with no `[Course 2]` is **open**. |
 | `Track Race Type` | **Open**. Needed by stage 15. |
 
 Done when: each item is built, or its format is recorded as **open** after a search of the
@@ -101,7 +101,7 @@ Goal: feature parity. Confirm each item in MTM2 before you build it (**Game**).
 | --- | --- |
 | Race types other than circuit (rally, Summit Rumble, others) | Missing. Needs `Track Race Type` from stage 12. |
 | Championship or season across several tracks | Missing |
-| Difficulty of the computer's drivers | Missing |
+| Difficulty of the computer's drivers | Partial, by the user's request: easy, normal and hard. On hard they take the shortcuts and keep to the middle of the road; at full power they are put back more often in tight bends (see the feature row). |
 | Map of the track in the race | Done. M shows it; not yet seen in the game. |
 | Other camera views (bumper, far) | Partial |
 | Damage | **Open** |
@@ -221,9 +221,9 @@ The **Evidence** column says how we know that MTM2 has the feature:
 | Finish and results screen | Own | Game | Once the player finishes: every truck's place, race time and best lap, kept up to date as the rest finish. The computer then drives the player's truck on, and the camera changes to a random view every 7 seconds, from a random distance to the truck, with a swing round the truck or a fade through black. Enter races again. What MTM2's results show is not confirmed. |
 | Pause screen | Own | Game | Esc (or a gamepad's Start or Select) stops the game and shows four choices: continue, restart the race (built again from nothing, as GO builds it: trucks, scenery, countdown, the computer's setups and a random weather), save a screenshot (a PNG in `screenshots/`, without the dialog), and cancel the race, which goes back to the front end (or quits a race started from the command line). `src/race/pause.rs`. What MTM2's pause screen offered is not confirmed. Not yet looked at in the game. |
 | Race types other than circuit (rally, Summit Rumble, others) | Missing | File: [situation.md](formats/situation.md) | `Track Race Type` is **open**. Which types MTM2 has must be confirmed. The base game's three Summit Rumble arenas load, with 2 gates each, and are raced as circuits. |
-| Extra courses on one track (`Extended Course Definitions`) | Open | File: [situation.md](formats/situation.md) | |
+| Extra courses on one track (`Extended Course Definitions`) | Done | File: [situation.md](formats/situation.md) | Measured on 46 files and **reference**: MTM2's computer trucks follow `[Course 2]`, often a shortcut (Crazy '98, Sidewinder Canyon). Read into `TrackData::other_courses`. The difficulty chooses which course the computer's drivers follow. What MTM2 does on the 13 files with no `[Course 2]` is **open**; the game's drivers follow the main course there. |
 | Championship or season across several tracks | Missing | Game | Confirm what MTM2 has. |
-| Difficulty of the computer's drivers | Missing | Game | Confirm what MTM2 offers. |
+| Difficulty of the computer's drivers | Partial | Own | The user asked for easy, normal and hard. What MTM2 offers is not yet confirmed. The race screen's DIFFICULTY slider, under OPPONENTS (drawn as the options screen's Quality line; keys `[` and `]`), and `--difficulty=`, set `opponents::OpponentsSettings`. Easy follows the main course with 80 % of the engine and a quarter of the catch-up power; normal follows `[Course 1]` with 90 % and half; hard follows `[Course 2]`, MTM2's own line with its shortcuts, with all of the engine and of the catch-up power, as much as the player's truck. The extra courses have the corners that the file leaves out put back as curves, so that the drivers keep to the middle of the road (situation.md, "Corners of the extra courses"). Measured headless, seven trucks for 4 minutes (put-backs, best lap): Crazy '98 easy 4 and 61.6 s, normal 3 and 57.8 s, hard 12 and 53.4 s; Sidewinder Canyon 17 and 197.3 s, 4 and 170.1 s, 27 and 172.8 s. With the corners joined straight, hard was 36 and 86.1 s on Crazy '98. Hard's put-backs on Sidewinder were trucks too fast down into the canyons' U-turns: braking fully downhill gives far less than on the level (measured: about 6 m/s² level, 2.7 to 5.3 at 18 % down, 0.8 to 3.7 at 24 %). Drivers now count on less braking downhill (`DOWNHILL_BRAKING`). A driver that is behind still takes bends a little faster and brakes a little later (`CHASING_CORNER`, `CHASING_BRAKE`): the user turned it off and then back on. After that, Sidewinder hard 9 and 146.4 s, normal 3 and 169.4 s, easy 17 and 222.6 s; Crazy '98 hard 19 and 53.5 s, normal 4 and 57.7 s, easy 0 and 61.1 s. The same run repeated gives 12 to 19 put-backs on Crazy '98 hard, and 7 to 16 on Alpine normal: compare figures from several runs. On Crazy '98 hard, the trucks hit a fixed loader at the inside of the bend after checkpoint 4: the course passes 5.8 m from it, and a driver's line and the corner it cuts take up the rest. Drivers now steer round fixed solid scenery on the road or reaching into it, as round a stopped truck (`Obstacle`), looking 3 s ahead for it, and slow for nothing in front of them, truck or scenery; ramps are driven over. On the courses of 10 base game tracks and the community tracks, only two fixed objects stand on a course: Scrapyard Run's column `GYCOLM.BIN` and Sidewinder Canyon's checkpoint pillar `SN4CHK2.BIN`. Not yet measured or driven. |
 
 ### Presentation
 

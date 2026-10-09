@@ -33,6 +33,7 @@ fn main() {
     // CPU (`front_end::integrated_graphics`, the options screen's Quality at Balanced); an
     // option after it on the command line wins over it. `--opponents=3` races
     // against that many trucks driven by the computer, which are copies of the player's.
+    // `--difficulty=hard` (easy, normal or hard) is how hard they are to beat.
     // `--weather=rain` races in that weather (clear, overcast, fog, rain, storm or snow), and
     // `--weather=random` in one picked at random, at a time of day picked at random, and
     // `--time=night` at that time of day (day, dusk or night), unless the weather is random. `--no-backdrop` leaves out the distant
@@ -48,6 +49,7 @@ fn main() {
     let mut camera_settings = camera::CameraSettings::default();
     let mut environment_settings = environment::EnvironmentSettings::default();
     let mut weather_settings = weather::WeatherSettings::default();
+    let mut opponents_settings = opponents::OpponentsSettings::default();
     let mut backdrop_settings = backdrop::BackdropSettings::default();
     let mut water_settings = water::WaterSettings::default();
     let mut log_fps = false;
@@ -174,10 +176,22 @@ fn main() {
                 race_at_once = true;
                 opponents = number(flag);
             }
+            Some(flag) if flag.starts_with("--difficulty=") => {
+                let name = flag.split_once('=').map_or("", |(_, name)| name);
+                opponents_settings.difficulty = match name.to_ascii_lowercase().as_str() {
+                    "easy" => opponents::Difficulty::Easy,
+                    "normal" => opponents::Difficulty::Normal,
+                    "hard" => opponents::Difficulty::Hard,
+                    _ => {
+                        eprintln!("{flag}: the difficulty is Easy, Normal or Hard");
+                        std::process::exit(2);
+                    }
+                };
+            }
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
                     "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-blend-ground --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
-                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --no-water-reflections --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
+                     --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --no-water-reflections --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --difficulty=EASY|NORMAL|HARD --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
             }
@@ -243,6 +257,7 @@ fn main() {
         .insert_resource(camera_settings)
         .insert_resource(environment_settings)
         .insert_resource(weather_settings)
+        .insert_resource(opponents_settings)
         .insert_resource(backdrop_settings)
         .insert_resource(water_settings)
         .insert_resource(display_settings)
