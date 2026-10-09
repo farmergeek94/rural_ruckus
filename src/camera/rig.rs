@@ -68,7 +68,9 @@ impl Default for RigConfig {
     fn default() -> Self {
         Self {
             distance: 13.0,
-            height: 3.5,
+            // About 9° down at the truck over `distance`. Lower sits nearer the ground and
+            // shows less of the track ahead over the truck's roof.
+            height: 2.0,
             look_above: 1.5,
             aim_stiffness: 10.0,
             aim_height_stiffness: 4.0,
@@ -246,7 +248,7 @@ mod tests {
         let pose = rig.step(&config, &target(Vec3::ZERO, Vec3::ZERO), 1.0 / 60.0);
         assert_eq!(pose.aim, Vec3::new(0.0, 1.5, 0.0));
         assert!(
-            pose.eye.distance(Vec3::new(0.0, 5.0, 13.0)) < 1e-5,
+            pose.eye.distance(Vec3::new(0.0, 3.5, 13.0)) < 1e-5,
             "{pose:?}"
         );
     }
@@ -274,7 +276,7 @@ mod tests {
         let pose = rig.step(&config, &far, 1.0 / 60.0);
         assert_eq!(pose.aim, far.position + Vec3::Y * 1.5);
         // Behind it, which for a target facing +X is towards -X.
-        assert!(pose.eye.distance(far.position + Vec3::new(-13.0, 5.0, 0.0)) < 1e-4);
+        assert!(pose.eye.distance(far.position + Vec3::new(-13.0, 3.5, 0.0)) < 1e-4);
     }
 
     #[test]
