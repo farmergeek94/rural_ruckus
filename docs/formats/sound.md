@@ -1,6 +1,6 @@
 # Sounds
 
-MTM2's sounds are `.WAV` files in the base game's archives. `src/pod/wave.rs` reads them.
+MTM2's sounds are `.WAV` files in the base game's archives. `crates/pod/src/wave.rs` reads them.
 
 ## The files
 

@@ -1,5 +1,5 @@
 //! A track as plain data. Everything the game knows about a track comes from a
-//! `TrackData`, whether it was generated in code or (later) loaded from a content pack.
+//! `TrackData`, whether it was generated in code or loaded from an archive.
 //!
 //! Only plain types live here: no entities, asset handles or resources.
 
@@ -432,6 +432,30 @@ mod tests {
 
     use super::*;
 
+    /// A flat, empty track, 100 m across, with pole position at its origin.
+    fn flat_track() -> TrackData {
+        TrackData {
+            name: "Flat".into(),
+            heights: HeightGrid::from_fn(8, 100.0, |_, _| 0.0),
+            surface: Vec::new(),
+            ground: None,
+            scenery: Scenery::default(),
+            backdrop: None,
+            skies: Skies::default(),
+            footing: Vec::new(),
+            ground_boxes: Vec::new(),
+            water_level: None,
+            course: None,
+            other_courses: Vec::new(),
+            gates: Vec::new(),
+            start: StartPosition {
+                position: Vec2::ZERO,
+                yaw: 0.0,
+            },
+            grid: Vec::new(),
+        }
+    }
+
     #[test]
     fn a_grid_that_runs_out_carries_on_behind_its_last_place() {
         let place = |z: f32| StartPosition {
@@ -440,7 +464,7 @@ mod tests {
         };
         let track = TrackData {
             grid: vec![place(6.0)],
-            ..crate::track::builtin_track()
+            ..flat_track()
         };
         assert_eq!(track.grid_place(0).position, track.start.position);
         assert_eq!(track.grid_place(1).position, Vec2::new(0.0, 6.0));
@@ -473,7 +497,7 @@ mod tests {
         // One cell with a tile of two texels: grey on its -X half, sand on its +X half.
         let grey_and_sand = vec![40, 40, 40, 255, 213, 209, 184, 255];
         let track = |footing: Vec<Footing>| {
-            let mut track = crate::track::builtin_track();
+            let mut track = flat_track();
             track.ground = Some(GroundTextures {
                 tile_size: 2,
                 tiles: vec![[grey_and_sand.clone(), grey_and_sand.clone()].concat()],
@@ -485,7 +509,7 @@ mod tests {
             track.footing = footing;
             track
         };
-        let quarter = crate::track::builtin_track().heights.size() / 4.0;
+        let quarter = flat_track().heights.size() / 4.0;
         let (grey, sand) = (-quarter, quarter);
 
         let unnamed = track(vec![Footing::Unnamed]);
@@ -494,8 +518,6 @@ mod tests {
         // A track that names its ground is taken at its word.
         assert!(!track(vec![Footing::Firm]).loose_at(sand, 0.0));
         assert!(track(vec![Footing::Loose]).loose_at(grey, 0.0));
-        // The built-in track is dirt.
-        assert!(crate::track::builtin_track().loose_at(grey, 0.0));
     }
 
     #[test]

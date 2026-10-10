@@ -151,8 +151,8 @@ Part of MTM2, but not wanted until the user asks:
 | Load a track POD from the command line or the front end | Done | | |
 | Load a truck POD | Done | File: [truck.md](formats/truck.md) | |
 | The base game's own tracks and trucks in the front end's lists | Done | File: [pod.md](formats/pod.md) | 15 tracks in 13 archives and 20 trucks in `TRUCK2.POD`. All load. Not yet on the command line, which takes archive paths. |
-| Community Patch 3 true-colour textures (PNG, TGA) | Done | File: [textures.md](formats/textures.md) | `src/hd_texture.rs` |
-| Mount the base game's archives behind a track or truck | Done | File: [pod.md](formats/pod.md) | `src/base_game.rs`. Only the archives that hold a borrowed file are read. What MTM2 does with the order in `POD.INI` is **open**; no two base archives disagree on a file. |
+| Community Patch 3 true-colour textures (PNG, TGA) | Done | File: [textures.md](formats/textures.md) | `crates/pod/src/hd_texture.rs` |
+| Mount the base game's archives behind a track or truck | Done | File: [pod.md](formats/pod.md) | `crates/pod/src/base_game.rs`. Only the archives that hold a borrowed file are read. What MTM2 does with the order in `POD.INI` is **open**; no two base archives disagree on a file. |
 | Files that a track or truck names but does not contain | Done | File: [pod.md](formats/pod.md) | All found in the base archives for the 12 tracks and 12 trucks examined, except one model that Critic names and no archive holds. |
 | Truck textures with no palette beside them | Done | File: [truck.md](formats/truck.md) | Reference: MTM2 uses `METALCR2.ACT` from its own archives. So does the game. |
 | MTM1 tracks | Open | File: [level.md](formats/level.md) | The first line of a `.LVL` may tell MTM1 from MTM2. Its values are open. |

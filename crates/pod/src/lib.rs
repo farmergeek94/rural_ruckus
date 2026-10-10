@@ -1,13 +1,34 @@
-//! Reads Monster Truck Madness 2 (Terminal Reality) POD archives and the track and truck
-//! files inside them.
+//! Reads Monster Truck Madness 2 (Terminal Reality / Microsoft, 1998) `.POD` archives,
+//! the game's own and community-made ones, and converts what is in them into the content
+//! model of Monster Truck Rural Ruckus (the `content` crate).
 //!
-//! Everything here describes the files as they are: positions stay in feet, heights in
-//! raw steps, angles as written, in MTM2's own axes. Converting to another engine's
-//! conventions is the caller's job. There is no file system access and nothing panics
-//! on bad input.
+//! Two layers:
 //!
-//! The formats are documented in `docs/formats/` at the root of the repository, along
-//! with where each fact came from.
+//! - The crate root reads an archive and the files in it into plain Rust structs, one
+//!   module per file format (`PodArchive`, `Track`, `Truck`, `Model`, ...). It describes
+//!   the files as they are: positions stay in feet, heights in raw steps, angles as
+//!   written, in MTM2's own axes. There is no file system access and nothing panics on
+//!   bad input. The formats are documented in `docs/formats/` at the root of the
+//!   repository, with where each fact came from.
+//! - `track`, `truck` and `sound` convert: feet to metres, a corner origin to a centred
+//!   one, a flipped Z axis, headings to yaw, and MTM2's files into
+//!   `content::track::TrackData`, `content::truck::TruckData` and
+//!   `content::sound::EngineLoops`. The conversion of units and axes happens there and
+//!   nowhere else (`docs/formats/conventions.md`).
+//!
+//! A track or truck names files that are only in the base game's archives: `BaseGame`
+//! holds those archives on disk, and reads each one when a file in it is first asked
+//! for. `archives_in` lists the archives in a folder.
+//!
+//! Nothing here knows the game: no entities, no engine types, only the content model.
+
+mod base_game;
+mod hd_decode;
+pub mod sound;
+pub mod track;
+pub mod truck;
+
+pub use base_game::{BaseGame, archives_in};
 
 use std::collections::BTreeMap;
 

@@ -18,6 +18,6 @@ must flip one axis to show them, and flipping Z turns a heading into `-psi`. It 
 with `MyTrack.pod`, whose converted circuit starts northwards with the far checkpoint to
 the west, and with JSTrackViewer, which does the same.
 
-The conversion happens once for a track, in `src/track/pod_import.rs`, and once for a
-truck, in `src/truck/pod_import.rs`. The `pod` module keeps MTM2's own units and axes so
-that it stays a faithful description of the files.
+The conversion happens once for a track, in `crates/pod/src/track/mod.rs`, and once for a
+truck, in `crates/pod/src/truck.rs`. The `pod` crate's parsers keep MTM2's own units
+and axes so that they stay a faithful description of the files.

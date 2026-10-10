@@ -141,9 +141,13 @@ impl TruckData {
 
 const BUILTIN_BODY_COLOR: [u8; 3] = [191, 26, 26];
 
+/// Half the size of the built-in box that stands in for a body a truck doesn't bring, in
+/// metres: how far it reaches from the chassis centre along each axis.
+pub const CHASSIS_HALF_EXTENTS: Vec3 = Vec3::new(1.1, 0.45, 2.3);
+
 /// The built-in truck's lamps: those of a body the size of its box.
 fn builtin_lamps() -> Vec<TruckLamp> {
-    let half = super::display::CHASSIS_HALF_EXTENTS;
+    let half = CHASSIS_HALF_EXTENTS;
     let (headlights, tail_lights) = lamps_for_body(-half, half);
     [headlights, tail_lights].concat()
 }
@@ -151,7 +155,7 @@ fn builtin_lamps() -> Vec<TruckLamp> {
 /// The beam most of the base game's headlights have: 75 ft long, 0.7 ft wide at the lamp
 /// and 11 ft at its end (see `docs/formats/truck.md`). For a truck that has headlights
 /// with no beam, or none at all.
-pub(super) fn headlight_beam() -> Beam {
+pub fn headlight_beam() -> Beam {
     const METRES_PER_FOOT: f32 = 0.3048;
     Beam {
         reach: 75.0 * METRES_PER_FOOT,
@@ -162,7 +166,7 @@ pub(super) fn headlight_beam() -> Beam {
 
 /// Which way a headlight shines that the game aims: straight ahead and a little down, as
 /// the base game's headlights are (0.17 rad).
-pub(super) fn headlight_facing() -> Vec3 {
+pub fn headlight_facing() -> Vec3 {
     Vec3::new(0.0, -0.17f32.sin(), -0.17f32.cos())
 }
 
@@ -170,7 +174,7 @@ pub(super) fn headlight_facing() -> Vec3 {
 /// axes, the front towards -Z): two white headlights with beams on its front, a little in
 /// from its sides and a little over halfway up, and two red lamps on its back. For a truck
 /// that brings none.
-pub(super) fn lamps_for_body(min: Vec3, max: Vec3) -> (Vec<TruckLamp>, Vec<TruckLamp>) {
+pub fn lamps_for_body(min: Vec3, max: Vec3) -> (Vec<TruckLamp>, Vec<TruckLamp>) {
     let across = (max.x - min.x) / 2.0;
     let middle = (max.x + min.x) / 2.0;
     let height = |share: f32| min.y + (max.y - min.y) * share;

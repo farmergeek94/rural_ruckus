@@ -706,7 +706,7 @@ impl MadeUpCd {
         let root = std::env::temp_dir().join(format!("ruckus-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         // A header that says there are no files.
-        let empty = vec![0; monster_truck_rural_ruckus::pod::ARCHIVE_HEADER_LENGTH];
+        let empty = vec![0; pod::ARCHIVE_HEADER_LENGTH];
         for folder in ["Shared", "English", "French"] {
             std::fs::create_dir_all(root.join("cd").join(folder)).unwrap();
             std::fs::write(root.join("cd").join(folder).join("EMPTY.POD"), &empty).unwrap();

@@ -1,9 +1,24 @@
+[workspace]
+# The game is the root package. `cargo test` and `cargo clippy` at the root cover the
+# three crates, as `cargo run` runs the game.
+members = ["crates/*"]
+default-members = [".", "crates/*"]
+
 [package]
 name = "monster_truck_rural_ruckus"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# The game's content model: a track, a truck and the engine's sounds as plain data
+# (`crates/content`). The game is built against it, and every loader fills it in.
+content = { package = "ruckus_content", path = "crates/content" }
+# The reader for Monster Truck Madness 2 archives (`crates/pod`). Only `main.rs`,
+# `front_end.rs` and `base_game.rs` may name it.
+pod = { path = "crates/pod" }
+# Writes the screenshots that the pause screen saves. Bevy already builds this version for
+# its own image loading, so it adds nothing to compile.
+png = "0.18"
 # avian3d releases are tied to one Bevy minor version: upgrade them together.
 bevy = "0.19"
 # The physics engine (see `docs/avian.md`, and `physics.rs` for how it is set up). Only
@@ -21,9 +36,6 @@ avian3d = { version = "0.7", default-features = false, features = [
 # in-memory backend for tests. No redb type appears in `store`'s API, so that it can be
 # swapped or upgraded.
 redb = "4.3"
-# Decodes the PNG textures that MTM2 Community Patch 3 packs in archives. Bevy already
-# builds this version for its own image loading, so it adds nothing to compile.
-png = "0.18"
 # cpal is already here through Bevy's audio. The feature asks the OS for real-time
 # priority on the audio thread (through RTKit on Linux), so that the game's own threads
 # cannot hold it off its 43 ms buffer: see the notes in `src/sound/mod.rs`. RTKit is

@@ -25,7 +25,7 @@ const MOST_SUNK: f32 = 0.1;
 /// Fills in `sunk_on_slope` for every object of `scenery`. A loose or moving object is not
 /// lowered: a loose one would be pushed out of the ground as it wakes, and a moving one
 /// keeps its height whatever the ground under it does.
-pub(super) fn settle(scenery: &mut Scenery, heights: &HeightGrid) {
+pub fn settle(scenery: &mut Scenery, heights: &HeightGrid) {
     let feet: Vec<Foot> = scenery.models.iter().map(Foot::of).collect();
     for object in &mut scenery.objects {
         object.sunk_on_slope = match object.motion {

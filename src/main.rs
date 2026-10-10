@@ -200,9 +200,9 @@ fn main() {
                 std::process::exit(2);
             }
             // An archive is a truck if it holds a truck file, and a track otherwise.
-            _ if truck::pod_holds_truck(argument.as_ref()) => {
+            _ if pod::truck::pod_holds_truck(argument.as_ref()) => {
                 race_at_once = true;
-                match truck::load_pod(argument.as_ref(), &base) {
+                match pod::truck::load_pod(argument.as_ref(), &base) {
                     Ok(data) => {
                         app.insert_resource(truck::ChosenTruck(data));
                     }
@@ -212,7 +212,7 @@ fn main() {
                     }
                 }
             }
-            _ => match track::load_pod(argument.as_ref(), &base) {
+            _ => match pod::track::load_pod(argument.as_ref(), &base) {
                 Ok(data) => {
                     race_at_once = true;
                     app.insert_resource(track::Track(data));

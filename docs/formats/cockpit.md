@@ -7,7 +7,7 @@ dials, steering wheel and mirror go on the screen.
 No reference project reads these files, and nothing here comes from the game's program.
 Every fact is **measured** on the base game's `COCKPIT.POD` (in `Shared`) and on the 33
 truck files in `trucks/` and the base game's archives, unless marked **open** or **Own**
-(the game's own choice). The parser is `src/pod/cockpit.rs`.
+(the game's own choice). The parser is `crates/pod/src/cockpit.rs`.
 
 ## Where the files are
 
@@ -80,7 +80,7 @@ size, which agrees with the bytes.
   window's 153,600 pixels in `PBIG480.RAW`, the rest being the roll cage and the dials.
   In each steering wheel picture the top corners are index 0 and the hub is not.
   Rendered, index 0 is the windscreen and the space round the wheel. The game draws it
-  as clear (`pod::SEE_THROUGH_INDEX`, `src/truck/pod_import.rs`).
+  as clear (`pod::SEE_THROUGH_INDEX`, `crates/pod/src/truck.rs`).
 - **`.AAI` files.** Most pictures have one beside them (`PBIG480.AAI`, `PW480C00.AAI`):
   a 32-bit number 1, a 32-bit count, then that many records of four 16-bit numbers. The
   length is 8 + 8 x count in all 61 files. A record's first two numbers are x and y on
@@ -123,7 +123,7 @@ look turned by more than 35 degrees.
 
 ## What the game does with it
 
-`truck/pod_import.rs` makes `truck::Dashboard` from it; `camera/dashboard.rs` draws it.
+`crates/pod/src/truck.rs` makes `truck::Dashboard` from it; `camera/dashboard.rs` draws it.
 
 - The picture is stretched over the whole window, whatever its shape (**Own**; MTM2 had
   a 4:3 screen): across by the window's width over 640, down by its height over 480.

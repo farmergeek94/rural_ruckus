@@ -1,5 +1,5 @@
 //! Whether a race is on. Not a slice: the one piece of state every slice shares, as
-//! `mipmaps` is the one shared helper.
+//! `content::mipmaps` is the one shared helper.
 //!
 //! Everything a race is made of is spawned on entering `Racing`, carrying
 //! `DespawnOnExit(GameState::Racing)`, so that leaving a race leaves nothing behind and

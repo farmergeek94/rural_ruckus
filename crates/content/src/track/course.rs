@@ -211,7 +211,7 @@ impl Course {
     /// within `reach` metres of the centreline. Much cheaper than asking per vertex,
     /// because each segment only visits the vertices around it. Takes no account of a world
     /// that repeats: it is for the built-in track, which doesn't.
-    pub(super) fn nearest_per_vertex(
+    pub fn nearest_per_vertex(
         &self,
         resolution: usize,
         size: f32,

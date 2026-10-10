@@ -178,7 +178,7 @@ file counts reads.
   `LITEFUZZ.RAW` (grey) and `REDFUZZ.RAW` (red) are 256 x 256 noise, in `STARTUP.POD`.
   MTM2 presumably drew the beam as a textured cone. The game draws each lamp's picture as
   a glow that adds to what is behind it, and each beam as a spot light as long and wide
-  as its cone, coloured by the beam texture's mean colour (`src/truck/pod_import.rs`).
+  as its cone, coloured by the beam texture's mean colour (`crates/pod/src/truck.rs`).
 - **Types**, by what the lamps of each look like (not proved): 0 headlights (forward, a
   75 ft beam, `HEADLITE`), 1 brake lights (backwards, red, no beam), 3 roof lights
   (forward, a 40 ft beam), 4 beacons that turn or blink, 5 reversing lights (`BRLTRV`).
@@ -187,7 +187,7 @@ file counts reads.
 - **Trucks without beams** (**measured**): 8 of the 12 community trucks examined have no
   lights, and Maximum Destruction's two headlights (type 0) have a beam of length 0 and a
   picture only 0.28 ft across. Its rear lamps have pitches of 0.6 and 1.1. The game gives
-  every truck a beam of its own (`light_the_road` in `src/truck/pod_import.rs`).
+  every truck a beam of its own (`light_the_road` in `crates/pod/src/truck.rs`).
 
 ## Open
 

@@ -49,7 +49,7 @@ Hang Time) name `aliensky.raw` and `earthsky.act`.
   `METALCR2.ACT` leaves 240 to 255 black. **Reference** for the second shift
   (JSTrackViewer, `lvl-parser.js`, for MTM1's engine): the sky palette's colours 192 to
   207 are copied into slots 240 to 255. The parser scores both shifts for each sky
-  (`src/pod/sky.rs`); every pixel of every base sky falls in the slots it chooses
+  (`crates/pod/src/sky.rs`); every pixel of every base sky falls in the slots it chooses
   (**measured**).
 - **Which way up**: row 0 is the top of the sky and the last row the horizon. The left
   and right edges meet; the top and bottom do not. **Measured**: `CLOUDY2` goes from

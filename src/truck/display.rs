@@ -8,9 +8,9 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::prelude::*;
 
 use super::axle::{Axle, LinkToAxle};
-use super::config::FRONT_WHEELS;
 use super::interpolate::WheelPose;
 use super::looks::{Models, Paintwork, Part};
+use super::{CHASSIS_HALF_EXTENTS, FRONT_WHEELS};
 use super::{TruckConfig, TruckData, TruckLooksSettings, Wheel};
 
 /// Put this on an entity and the truck is built as its children, standing as it does at
@@ -18,9 +18,6 @@ use super::{TruckConfig, TruckData, TruckLooksSettings, Wheel};
 /// `TruckConfig::standing_height` below it. No body, collider or `Truck` marker.
 #[derive(Component)]
 pub struct TruckDisplay(pub TruckData);
-
-/// The built-in truck's body, which is also the collider of a truck that gives no shape.
-pub(super) const CHASSIS_HALF_EXTENTS: Vec3 = Vec3::new(1.1, 0.45, 2.3);
 
 /// The asset stores a truck is drawn with. All absent in a headless app, where a truck is
 /// built as bare pivots, and the images alone where there is nothing to texture with.

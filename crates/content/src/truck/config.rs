@@ -180,7 +180,7 @@ fn dial_between(dial: f32, low: f32, centre: f32, high: f32) -> f32 {
 }
 
 /// How many of `TruckConfig::wheel_rest`, counting from the first, are front wheels.
-pub(super) const FRONT_WHEELS: usize = 2;
+pub const FRONT_WHEELS: usize = 2;
 
 /// For working out how far the springs give under the truck's weight, in m/s².
 const GRAVITY: f32 = 9.81;
@@ -222,7 +222,7 @@ impl TruckConfig {
     }
 
     /// The top of each wheel's travel, where its hub meets the bump stop.
-    pub(super) fn wheel_mounts(&self) -> [Vec3; 4] {
+    pub fn wheel_mounts(&self) -> [Vec3; 4] {
         self.wheel_rest
             .map(|rest| rest + Vec3::Y * self.suspension_bump)
     }
@@ -262,7 +262,7 @@ impl Default for TruckConfig {
             suspension_bump: 0.5,
             suspension_droop: 0.3,
             // The shocks of a Monster Truck Madness 2 truck stand about half as far out as
-            // its wheels (see `pod_import`).
+            // its wheels (see the `pod` crate's truck converter).
             spring_spread: 0.5,
             // Soft for a race truck, to ride the bumps at the speeds the extra power brings:
             // the body moves at about 1.08 Hz. Softer uses more of the travel over a bump or

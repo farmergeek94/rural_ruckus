@@ -3752,7 +3752,9 @@ dependencies = [
  "cpal",
  "libdbus-sys",
  "png",
+ "pod",
  "redb",
+ "ruckus_content",
 ]
 
 [[package]]
@@ -4654,6 +4656,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pod"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "png",
+ "ruckus_content",
+]
+
+[[package]]
 name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5021,6 +5032,13 @@ dependencies = [
  "heapless 0.8.0",
  "num-traits",
  "smallvec",
+]
+
+[[package]]
+name = "ruckus_content"
+version = "0.1.0"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]

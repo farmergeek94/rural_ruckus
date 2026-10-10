@@ -4,7 +4,7 @@
 
 use bevy::prelude::*;
 
-use super::data::direction_yaw;
+use super::direction_yaw;
 use super::{Course, Footing, Gate, HeightGrid, Scenery, StartPosition, TrackData};
 
 /// Side length of the (square) terrain, in metres.
@@ -314,5 +314,11 @@ mod tests {
         let difference =
             track.heights.height_at(left.x, left.y) - track.heights.height_at(right.x, right.y);
         assert!(difference.abs() < 0.3, "side slope of {difference} m");
+    }
+
+    #[test]
+    fn the_built_in_track_is_dirt() {
+        let track = builtin_track();
+        assert!(track.loose_at(-track.heights.size() / 4.0, 0.0));
     }
 }

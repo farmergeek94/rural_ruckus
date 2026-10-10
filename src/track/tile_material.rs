@@ -67,9 +67,8 @@ pub struct TileLighting {
     pub simple: u32,
 }
 
-/// How many animated textures one material can show. Past that many, a texture shows its
-/// first frame only. The most any track seen has is 3.
-pub const MAX_TEXTURE_CYCLES: usize = 31;
+/// How many animated textures one material can show: the content model's limit.
+pub use content::MAX_TEXTURE_CYCLES;
 
 /// Which frame each animated texture of a material is on, as `tiles.wgsl` declares it: how
 /// many tiles on from its first frame's. The shader adds that to the tile a vertex names,

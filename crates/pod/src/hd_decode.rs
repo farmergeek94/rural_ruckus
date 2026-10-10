@@ -1,10 +1,10 @@
 //! Decodes the true-colour textures of MTM2 Community Patch 3, PNG and TGA, to RGBA.
 //!
-//! Not a slice: a helper for `track` and `truck`, which may not use each other. `pod` finds
-//! and checks the files but cannot decode them, as it uses nothing but `std`, and a PNG
-//! takes the `png` crate.
+//! A helper for the `track` and `truck` converters, which may not use each other. The parsers
+//! (`hd_texture`) find and check the files but cannot decode them, as they use nothing but
+//! `std`, and a PNG takes the `png` crate.
 
-use crate::pod::{HdFormat, HdTexture};
+use crate::{HdFormat, HdTexture};
 
 /// The texture as red, green, blue and alpha bytes, row by row from the top, the order a
 /// .RAW is in. `None` if the file is damaged, or its size isn't the one its header gave.

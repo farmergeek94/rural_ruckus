@@ -2,8 +2,8 @@
 //!
 //! The `truck` slice decides what an engine does (its `Engine`: the speed, the fuel,
 //! whether it runs); this slice decides what that sounds like. Every truck sounds the base
-//! game's one engine: three loops that the gear chooses between (`loops`, with
-//! `pod_import` finding them in `SOUND.POD`). Without the base game the engines are
+//! game's one engine: three loops that the gear chooses between (`loops`, which the base
+//! game finds in `SOUND.POD`: `base_game::BaseGame::engine_loops`). Without the base game the engines are
 //! silent. (A synthesized diesel was tried and set aside on 2026-10-10, by the user's
 //! request, to stay with the base game's sound for now.)
 //!
@@ -24,7 +24,6 @@
 //! nothing but hold its settings (`SoundSettings`).
 
 mod loops;
-mod pod_import;
 
 use bevy::audio::{AddAudioSource, AudioPlugin};
 use bevy::prelude::*;

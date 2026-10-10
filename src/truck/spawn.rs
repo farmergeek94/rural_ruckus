@@ -11,7 +11,8 @@ use std::f32::consts::FRAC_PI_2;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use super::display::{self, CHASSIS_HALF_EXTENTS, Paint};
+use super::CHASSIS_HALF_EXTENTS;
+use super::display::{self, Paint};
 use super::drive::TipGuard;
 use super::interpolate::PhysicsPose;
 use super::lamps;

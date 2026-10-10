@@ -72,7 +72,7 @@ use crate::sound::SoundSettings;
 use crate::store::{self, Store};
 use crate::track::{self, ChosenTrack, TrackData, TrackSettings};
 use crate::truck::{
-    self, ChosenTruck, ComputerTrucks, SpeedUnits, Transmission, TruckData, TruckDisplay,
+    ChosenTruck, ComputerTrucks, SpeedUnits, Transmission, TruckData, TruckDisplay,
     TruckLooksSettings, TruckSetup,
 };
 use crate::ui::{
@@ -432,11 +432,11 @@ impl Browsing {
 
 /// The trucks and tracks to list: in the folders, and in the base game.
 fn catalogue_for(settings: &FrontEndSettings, base: &BaseGame) -> Catalogue {
-    let base_trucks = truck::peek_base(base)
+    let base_trucks = pod::truck::peek_base(base)
         .into_iter()
         .map(|truck| base_entry(&truck.archive, &truck.file, truck.name))
         .collect();
-    let base_tracks = track::peek_base(base)
+    let base_tracks = pod::track::peek_base(base)
         .into_iter()
         .map(|track| base_entry(&track.archive, &track.file, track.name))
         .collect();
@@ -444,14 +444,14 @@ fn catalogue_for(settings: &FrontEndSettings, base: &BaseGame) -> Catalogue {
         trucks: list_archives(
             &settings.trucks_folder,
             settings.builtin.then(|| TruckData::builtin().name),
-            truck::peek_pod,
+            pod::truck::peek_pod,
             "no truck in this archive",
             base_trucks,
         ),
         tracks: list_archives(
             &settings.tracks_folder,
             settings.builtin.then(|| track::builtin_track().name),
-            track::peek_pod,
+            pod::track::peek_pod,
             "no track in this archive",
             base_tracks,
         ),
@@ -1753,16 +1753,16 @@ fn note_what_is_highlighted(
 fn load_truck(id: &str, base: &BaseGame) -> Result<TruckData, String> {
     match (id, in_base(id)) {
         (BUILTIN, _) => Ok(TruckData::builtin()),
-        (_, Some((archive, file))) => truck::load_base(base, archive, file),
-        (path, None) => truck::load_pod(Path::new(path), base),
+        (_, Some((archive, file))) => pod::truck::load_base(base, archive, file),
+        (path, None) => pod::truck::load_pod(Path::new(path), base),
     }
 }
 
 fn load_track(id: &str, base: &BaseGame) -> Result<TrackData, String> {
     match (id, in_base(id)) {
         (BUILTIN, _) => Ok(track::builtin_track()),
-        (_, Some((archive, file))) => track::load_base(base, archive, file),
-        (path, None) => track::load_pod(Path::new(path), base),
+        (_, Some((archive, file))) => pod::track::load_base(base, archive, file),
+        (path, None) => pod::track::load_pod(Path::new(path), base),
     }
 }
 

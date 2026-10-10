@@ -1,7 +1,8 @@
-//! Turns a Monster Truck Madness 2 truck, as the `pod` crate reads it, into `TruckData`.
+//! Turns a Monster Truck Madness 2 truck, as the crate's parsers read it, into the content
+//! model's `TruckData`.
 //!
 //! This is the one place where a truck's conventions are converted to the game's, as
-//! `track/pod_import.rs` is for a track's, and the reasons for each rule are in
+//! `track` is for a track's, and the reasons for each rule are in
 //! `docs/formats/truck.md`:
 //!
 //! - MTM2 works in feet, with X to the truck's right, Y up and Z forwards, which is
@@ -18,20 +19,30 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bevy::prelude::*;
+use content::{Rect, Vec2, Vec3};
 
+use crate::PodArchive;
 use crate::base_game::BaseGame;
-use crate::hd_texture;
-use crate::pod::{self, PodArchive};
+use crate::hd_decode;
 
-use super::data::{headlight_beam, headlight_facing, lamps_for_body};
-use super::{
-    AxleLink, AxleLinks, Beam, Dashboard, DashboardPicture, Dial, NormalMap, SteeringWheel,
-    TruckConfig, TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel, TruckTexture,
-    TruckTextureCycle,
+use content::truck::{
+    AxleLink, AxleLinks, Beam, CHASSIS_HALF_EXTENTS, Dashboard, DashboardPicture, Dial, NormalMap,
+    SteeringWheel, TruckConfig, TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel,
+    TruckTexture, TruckTextureCycle, headlight_beam, headlight_facing, lamps_for_body,
 };
 
 const METRES_PER_FOOT: f32 = 0.3048;
+
+/// A colour as the screen shows it (sRGB, 0 to 255) as light, from 0 to 1.
+fn srgb_to_linear(value: u8) -> f32 {
+    let value = value as f32 / 255.0;
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 /// Miles an hour in a metre a second.
 const MPH_PER_METRE_PER_SECOND: f32 = 3600.0 / 1609.344;
 
@@ -76,7 +87,7 @@ pub fn pod_holds_truck(path: &Path) -> bool {
     std::fs::read(path)
         .ok()
         .and_then(|bytes| PodArchive::parse(bytes).ok())
-        .is_some_and(|archive| pod::Truck::is_in(&archive))
+        .is_some_and(|archive| crate::Truck::is_in(&archive))
 }
 
 /// The name of the truck in an archive on disk, for a list of trucks: the archive's
@@ -86,7 +97,7 @@ pub fn peek_pod(path: &Path) -> Result<Option<String>, String> {
     let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
     let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
     let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    pod::Truck::name_in(&archive)
+    crate::Truck::name_in(&archive)
         .transpose()
         .map_err(|error| describe(&error))
 }
@@ -106,10 +117,12 @@ pub struct BaseTruck {
 pub fn peek_base(base: &BaseGame) -> Vec<BaseTruck> {
     let mut found = Vec::new();
     for (archive, entries) in base.directories() {
-        for entry in pod::Truck::files_in(entries) {
+        for entry in crate::Truck::files_in(entries) {
             let name = base
                 .read_one(archive, entry)
-                .and_then(|bytes| pod::Truck::name_from(&bytes).map_err(|error| error.to_string()))
+                .and_then(|bytes| {
+                    crate::Truck::name_from(&bytes).map_err(|error| error.to_string())
+                })
                 .map_err(|error| format!("{}: {error}", entry.name));
             found.push(BaseTruck {
                 archive: archive.to_path_buf(),
@@ -127,7 +140,8 @@ pub fn load_base(base: &BaseGame, archive: &Path, file: &str) -> Result<TruckDat
     let pod_archive = base
         .archive(archive)
         .ok_or_else(|| describe(&"is not a base archive that can be read"))?;
-    let truck = pod::Truck::from_file(pod_archive, file, base).map_err(|error| describe(&error))?;
+    let truck =
+        crate::Truck::from_file(pod_archive, file, base).map_err(|error| describe(&error))?;
     Ok(truck_from_pod(&truck))
 }
 
@@ -136,14 +150,14 @@ pub fn load_pod(path: &Path, base: &BaseGame) -> Result<TruckData, String> {
     let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
     let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
     let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    let truck = pod::Truck::from_archives(&archive, base).map_err(|error| describe(&error))?;
+    let truck = crate::Truck::from_archives(&archive, base).map_err(|error| describe(&error))?;
     Ok(truck_from_pod(&truck))
 }
 
 /// How far below where its file draws them a truck's body rides on its hubs, in metres.
 pub const BODY_DROP: f32 = 0.25;
 
-pub fn truck_from_pod(truck: &pod::Truck) -> TruckData {
+pub fn truck_from_pod(truck: &crate::Truck) -> TruckData {
     let mut config = TruckConfig::default();
 
     // No field gives the size of a tire. Its model is a wheel centred on its origin, with
@@ -185,7 +199,7 @@ pub fn truck_from_pod(truck: &pod::Truck) -> TruckData {
         made: Vec::new(),
         known: HashMap::new(),
     };
-    let mut convert = |model: &Option<pod::Model>| {
+    let mut convert = |model: &Option<crate::Model>| {
         model
             .as_ref()
             .map(|model| convert_model(model, &mut textures))
@@ -258,7 +272,7 @@ pub fn truck_from_pod(truck: &pod::Truck) -> TruckData {
 
 /// The dashboard, if it has a picture to look ahead through: without one there is nothing
 /// to lay the dials on.
-fn dashboard(cockpit: &pod::Cockpit) -> Option<Dashboard> {
+fn dashboard(cockpit: &crate::Cockpit) -> Option<Dashboard> {
     let views: [Option<DashboardPicture>; 4] = std::array::from_fn(|way| {
         cockpit
             .backgrounds
@@ -268,7 +282,7 @@ fn dashboard(cockpit: &pod::Cockpit) -> Option<Dashboard> {
     });
     views[0].as_ref()?;
     let layout = &cockpit.layout;
-    let dial = |gauge: &pod::Gauge, units_per_reading: f32| {
+    let dial = |gauge: &crate::Gauge, units_per_reading: f32| {
         Some(Dial {
             center: Vec2::from(gauge.center?),
             radius: gauge.radius?,
@@ -309,13 +323,13 @@ fn dashboard(cockpit: &pod::Cockpit) -> Option<Dashboard> {
 }
 
 /// A cockpit picture in colour, with its see-through pixels clear.
-fn dashboard_picture(picture: &pod::CockpitPicture) -> DashboardPicture {
+fn dashboard_picture(picture: &crate::CockpitPicture) -> DashboardPicture {
     let rgba = picture
         .picture
         .indices()
         .iter()
         .flat_map(|&index| {
-            if index == pod::SEE_THROUGH_INDEX {
+            if index == crate::SEE_THROUGH_INDEX {
                 return [0; 4];
             }
             let [red, green, blue] = picture.palette.color(index);
@@ -363,7 +377,7 @@ fn light_the_road(lamps: &mut Vec<TruckLamp>, kinds: &[i32], body: &[Vec3]) {
             body.iter().copied().fold(Vec3::MIN, Vec3::max),
         )
     } else {
-        let half = super::display::CHASSIS_HALF_EXTENTS;
+        let half = CHASSIS_HALF_EXTENTS;
         (-half, half)
     };
     let (headlights, _) = lamps_for_body(min, max);
@@ -377,7 +391,7 @@ fn light_the_road(lamps: &mut Vec<TruckLamp>, kinds: &[i32], body: &[Vec3]) {
 /// A truck file's light, as the game's lamp. Its glow is the lamp's own picture; the colour
 /// of its light is its beam's texture's, or, with no beam, the picture's. See
 /// `docs/formats/truck.md`.
-fn lamp(light: &pod::TruckLight, truck: &pod::Truck, textures: &mut Textures) -> TruckLamp {
+fn lamp(light: &crate::TruckLight, truck: &crate::Truck, textures: &mut Textures) -> TruckLamp {
     // A heading turns from forwards towards the right: measured, see the format document.
     let (heading, pitch) = (light.heading, light.pitch);
     let facing = to_game([
@@ -418,15 +432,18 @@ fn lamp(light: &pod::TruckLight, truck: &pod::Truck, textures: &mut Textures) ->
 /// The colour of the light in the texture `name`: the mean of its pixels that are not
 /// black, in linear light, scaled so that the brightest of red, green and blue is 1.
 /// `None` for a texture the truck hasn't got, or one that is black all over.
-fn light_color(truck: &pod::Truck, name: &str) -> Option<[f32; 3]> {
+fn light_color(truck: &crate::Truck, name: &str) -> Option<[f32; 3]> {
     let source = truck.textures.get(&name.to_ascii_uppercase())?;
     let rgba = source.texture.to_rgba(&source.palette);
     let mut sum = Vec3::ZERO;
     let mut count = 0;
     for pixel in rgba.as_chunks::<4>().0 {
         if pixel[..3] != [0, 0, 0] {
-            let linear = Color::srgb_u8(pixel[0], pixel[1], pixel[2]).to_linear();
-            sum += Vec3::new(linear.red, linear.green, linear.blue);
+            sum += Vec3::new(
+                srgb_to_linear(pixel[0]),
+                srgb_to_linear(pixel[1]),
+                srgb_to_linear(pixel[2]),
+            );
             count += 1;
         }
     }
@@ -439,7 +456,7 @@ fn light_color(truck: &pod::Truck, name: &str) -> Option<[f32; 3]> {
 /// right-hand bars meet the body at `axlebarOffset`, and the left-hand ones mirror them.
 /// An MTM2.1 truck's second set is the first raised by `superiorAxlebarOffset`: at the
 /// front axle, at the rear axle, and at the body.
-fn axle_bars(file: &pod::TruckFile) -> Vec<AxleLink> {
+fn axle_bars(file: &crate::TruckFile) -> Vec<AxleLink> {
     let Some([x, y, z]) = file.axle_bar_offset else {
         return Vec::new();
     };
@@ -474,7 +491,7 @@ fn axle_bars(file: &pod::TruckFile) -> Vec<AxleLink> {
 
 /// Two shocks at each wheel, one in front of the axle and one behind, standing from the
 /// body, at the height of its origin, down to the axle. Every truck has them.
-fn shocks(file: &pod::TruckFile) -> Vec<AxleLink> {
+fn shocks(file: &crate::TruckFile) -> Vec<AxleLink> {
     let tires = &file.tires;
     let axles = [
         (0, tires.front_left, tires.front_right),
@@ -498,7 +515,7 @@ fn shocks(file: &pod::TruckFile) -> Vec<AxleLink> {
 
 /// The driveshaft's two halves, from where the truck file puts it on the body, on the
 /// truck's middle line, to the middle of each axle.
-fn driveshaft(file: &pod::TruckFile) -> Vec<AxleLink> {
+fn driveshaft(file: &crate::TruckFile) -> Vec<AxleLink> {
     let Some([_, y, z]) = file.driveshaft else {
         return Vec::new();
     };
@@ -532,7 +549,7 @@ type PartKey = (
     Option<(Vec<usize>, u32)>,
 );
 
-fn convert_model(model: &pod::Model, textures: &mut Textures) -> TruckModel {
+fn convert_model(model: &crate::Model, textures: &mut Textures) -> TruckModel {
     let mut parts: Vec<TruckMesh> = Vec::new();
     let mut part_of: HashMap<PartKey, usize> = HashMap::new();
 
@@ -574,7 +591,7 @@ fn convert_model(model: &pod::Model, textures: &mut Textures) -> TruckModel {
                 color,
                 cutout,
                 opacity,
-                ..default()
+                ..Default::default()
             });
             parts.len() - 1
         });
@@ -582,8 +599,8 @@ fn convert_model(model: &pod::Model, textures: &mut Textures) -> TruckModel {
 
         // Reversed, because flipping Z turns the face inside out. A two-sided face is
         // also drawn as written, which is its back, since the material culls back faces.
-        let reversed: Vec<&pod::Corner> = face.corners.iter().rev().collect();
-        let as_written: Vec<&pod::Corner> = face.corners.iter().collect();
+        let reversed: Vec<&crate::Corner> = face.corners.iter().rev().collect();
+        let as_written: Vec<&crate::Corner> = face.corners.iter().collect();
         let sides = if face.is_two_sided() { 2 } else { 1 };
         for corners in [reversed, as_written].into_iter().take(sides) {
             add_face(mesh, model, face, &corners);
@@ -595,8 +612,8 @@ fn convert_model(model: &pod::Model, textures: &mut Textures) -> TruckModel {
 /// An animated texture's frames, as textures of the truck. `None`, for a texture that stays
 /// on its first frame, where a frame is missing, or the cycle has one frame or no time.
 fn texture_cycle(
-    cycle: &pod::TextureCycle,
-    face: &pod::Face,
+    cycle: &crate::TextureCycle,
+    face: &crate::Face,
     textures: &mut Textures,
 ) -> Option<TruckTextureCycle> {
     if cycle.frames.len() < 2 || cycle.seconds_per_frame.is_nan() || cycle.seconds_per_frame <= 0.0
@@ -615,7 +632,12 @@ fn texture_cycle(
 }
 
 /// One face, seen from the side its corners wind anticlockwise round.
-fn add_face(mesh: &mut TruckMesh, model: &pod::Model, face: &pod::Face, corners: &[&pod::Corner]) {
+fn add_face(
+    mesh: &mut TruckMesh,
+    model: &crate::Model,
+    face: &crate::Face,
+    corners: &[&crate::Corner],
+) {
     let positions: Vec<Vec3> = corners
         .iter()
         .map(|corner| to_game(model.vertices[corner.vertex]))
@@ -669,7 +691,7 @@ enum Alpha {
 }
 
 impl Alpha {
-    fn of(face: &pod::Face) -> Self {
+    fn of(face: &crate::Face) -> Self {
         if face.is_cutout() {
             Self::Cutout
         } else if face.blend_alpha().is_some() {
@@ -682,7 +704,7 @@ impl Alpha {
 
 /// The textures made so far, and how to make more.
 struct Textures<'a> {
-    truck: &'a pod::Truck,
+    truck: &'a crate::Truck,
     made: Vec<TruckTexture>,
     known: HashMap<(String, Alpha), usize>,
 }
@@ -716,7 +738,7 @@ impl Textures<'_> {
         let normal_map = self.truck.normal_maps.get(&key.0).and_then(|source| {
             Some(NormalMap {
                 size: source.size(),
-                rgba: hd_texture::decode(source)?,
+                rgba: hd_decode::decode(source)?,
             })
         });
         self.made.push(TruckTexture {
@@ -732,7 +754,7 @@ impl Textures<'_> {
     /// other face ignores. **Reference:** JSTruckViewer, `docs/BIN_HD_FORMAT.md`.
     fn hd_texture(&self, name: &str, alpha: Alpha) -> Option<TruckTexture> {
         let source = self.truck.hd_textures.get(name)?;
-        let mut rgba = hd_texture::decode(source)?;
+        let mut rgba = hd_decode::decode(source)?;
         if alpha == Alpha::Ignored {
             for pixel in rgba.as_chunks_mut::<4>().0 {
                 pixel[3] = 255;
@@ -754,8 +776,8 @@ mod tests {
 
     const FOOT: f32 = METRES_PER_FOOT;
 
-    fn truck_file() -> pod::TruckFile {
-        pod::TruckFile {
+    fn truck_file() -> crate::TruckFile {
+        crate::TruckFile {
             name: "Test Foot".into(),
             extended: false,
             body_model: "foot.bin".into(),
@@ -766,7 +788,7 @@ mod tests {
             driveshaft: None,
             axle_bar_offset: None,
             upper_axle_bar_offset: None,
-            tires: pod::Tires {
+            tires: crate::Tires {
                 front_left: [-4.5, -3.5, 6.5],
                 front_right: [4.5, -3.5, 6.5],
                 rear_left: [-4.5, -3.5, -6.0],
@@ -778,8 +800,8 @@ mod tests {
         }
     }
 
-    fn truck(body: Option<pod::Model>, tire: Option<pod::Model>) -> pod::Truck {
-        pod::Truck {
+    fn truck(body: Option<crate::Model>, tire: Option<crate::Model>) -> crate::Truck {
+        crate::Truck {
             file: truck_file(),
             body,
             left_tire: tire,
@@ -795,15 +817,15 @@ mod tests {
 
     /// One triangle on the truck's right side, looking right (+X), wound as the files
     /// wind them: by the right-hand rule on the numbers as written.
-    fn panel(kind: i32, vertex_normals: Vec<[f32; 3]>) -> pod::Model {
-        let corner = |vertex| pod::Corner {
+    fn panel(kind: i32, vertex_normals: Vec<[f32; 3]>) -> crate::Model {
+        let corner = |vertex| crate::Corner {
             vertex,
             uv: [0.25, 7.0],
         };
-        pod::Model {
+        crate::Model {
             vertices: vec![[3.0, 0.0, 0.0], [3.0, 1.0, 0.0], [3.0, 0.0, 1.0]],
             vertex_normals,
-            faces: vec![pod::Face {
+            faces: vec![crate::Face {
                 kind,
                 texture: None,
                 texture_cycle: None,
@@ -884,9 +906,9 @@ mod tests {
 
     #[test]
     fn a_two_sided_face_is_drawn_from_behind_as_well() {
-        let mut model = panel(pod::face_type::MATERIAL, Vec::new());
-        model.faces[0].material = Some(pod::Material {
-            flags: pod::material_flag::TWO_SIDED,
+        let mut model = panel(crate::face_type::MATERIAL, Vec::new());
+        model.faces[0].material = Some(crate::Material {
+            flags: crate::material_flag::TWO_SIDED,
             base_alpha: 1.0,
         });
         let data = truck_from_pod(&truck(Some(model), None));
@@ -899,9 +921,9 @@ mod tests {
     /// The GMC's glass: flags 0x167 (blend), base alpha 0.35.
     #[test]
     fn a_blended_face_is_a_mesh_of_its_own_that_says_how_opaque_it_is() {
-        let mut model = panel(pod::face_type::MATERIAL, Vec::new());
+        let mut model = panel(crate::face_type::MATERIAL, Vec::new());
         let mut glass = model.faces[0].clone();
-        glass.material = Some(pod::Material {
+        glass.material = Some(crate::Material {
             flags: 0x167,
             base_alpha: 0.35,
         });
@@ -1008,7 +1030,7 @@ mod tests {
         let mut body = panel(24, Vec::new());
         body.faces[0].texture = Some("AENGANI1.RAW".into());
         body.faces[0].texture_cycle = Some(0);
-        body.texture_cycles = vec![pod::TextureCycle {
+        body.texture_cycles = vec![crate::TextureCycle {
             frames: vec!["AENGANI1.RAW".into(), "AENGANI2.RAW".into()],
             seconds_per_frame: 2729.0 / 65536.0,
         }];
@@ -1020,9 +1042,9 @@ mod tests {
         for (name, index) in [("AENGANI1.RAW", 1), ("AENGANI2.RAW", 2)] {
             truck.textures.insert(
                 name.into(),
-                pod::TruckTexture {
-                    texture: pod::Texture::parse(&[index; 4]).unwrap(),
-                    palette: pod::Palette::parse(&[index; 768]).unwrap(),
+                crate::TruckTexture {
+                    texture: crate::Texture::parse(&[index; 4]).unwrap(),
+                    palette: crate::Palette::parse(&[index; 768]).unwrap(),
                 },
             );
         }
@@ -1097,11 +1119,11 @@ mod tests {
     }
 
     /// A picture of palette indices, and a palette where index `i` is grey `i`.
-    fn cockpit_picture(width: usize, height: usize, indices: &[u8]) -> pod::CockpitPicture {
+    fn cockpit_picture(width: usize, height: usize, indices: &[u8]) -> crate::CockpitPicture {
         let greys: Vec<u8> = (0..=255u8).flat_map(|grey| [grey; 3]).collect();
-        pod::CockpitPicture {
-            picture: pod::Picture::parse(indices, width, height).unwrap(),
-            palette: pod::Palette::parse(&greys).unwrap(),
+        crate::CockpitPicture {
+            picture: crate::Picture::parse(indices, width, height).unwrap(),
+            palette: crate::Palette::parse(&greys).unwrap(),
         }
     }
 
@@ -1109,12 +1131,12 @@ mod tests {
     fn a_cockpit_becomes_a_dashboard_in_the_games_units() {
         let background = cockpit_picture(2, 1, &[0, 7]);
         let wheel = |index| cockpit_picture(1, 1, &[index]);
-        let mut layout = pod::CockpitLayout {
+        let mut layout = crate::CockpitLayout {
             window: Some([0.0, 10.0, 2.0, 20.0]),
             steering_wheel: Some([1.0, 2.0, 3.0, 4.0]),
             ..Default::default()
         };
-        layout.speedometer = pod::Gauge {
+        layout.speedometer = crate::Gauge {
             center: Some([1.0, 2.0]),
             radius: Some(3.0),
             zero_angle: Some(180.0),
@@ -1122,12 +1144,12 @@ mod tests {
             ..Default::default()
         };
         // No radius: no tachometer.
-        layout.tachometer = pod::Gauge {
+        layout.tachometer = crate::Gauge {
             center: Some([1.0, 2.0]),
             ..layout.speedometer.clone()
         };
         layout.tachometer.radius = None;
-        let cockpit = pod::Cockpit {
+        let cockpit = crate::Cockpit {
             file: "POWERBIG.480".into(),
             screen: [640, 480],
             layout,

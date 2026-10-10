@@ -1,0 +1,14 @@
+[package]
+name = "pod"
+version = "0.1.0"
+edition = "2024"
+description = "Reads Monster Truck Madness 2 archives and converts their tracks, trucks and sounds into the game's content model"
+
+[dependencies]
+# The content model this crate fills in. Its vectors come with it.
+content = { package = "ruckus_content", path = "../content" }
+# Decodes the PNG textures that MTM2 Community Patch 3 packs in archives. Bevy already
+# builds this version for its own image loading, so it adds nothing to compile.
+png = "0.18"
+# The game's logger (Bevy's `LogPlugin`) picks these messages up.
+log = "0.4"

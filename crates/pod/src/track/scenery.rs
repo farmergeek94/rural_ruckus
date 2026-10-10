@@ -13,15 +13,16 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use bevy::prelude::*;
+use content::{Vec2, Vec3};
 
-use crate::hd_texture;
-use crate::mipmaps::mip_chain;
-use crate::pod::{self, BoxShape, box_type};
+use crate::hd_decode;
+use crate::{BoxShape, box_type};
+use content::mipmaps::mip_chain;
 
-use super::{
-    Backdrop, KeyframedFace, Keyframes, MAX_TEXTURE_CYCLES, Scenery, SceneryModel, SceneryMotion,
-    SceneryObject, TextureCycle,
+use content::MAX_TEXTURE_CYCLES;
+use content::track::{
+    Backdrop, KeyframedFace, Keyframes, Scenery, SceneryModel, SceneryMotion, SceneryObject,
+    TextureCycle,
 };
 
 const METRES_PER_FOOT: f32 = 0.3048;
@@ -49,7 +50,7 @@ const TILE_SIZE_WITHOUT_TEXTURES: usize = 8;
 
 /// `to_ground` takes a position in MTM2 feet to the game's ground plane.
 pub(super) fn scenery_from_pod(
-    track: &pod::Track,
+    track: &crate::Track,
     to_ground: impl Fn([f32; 3]) -> Vec2,
 ) -> Scenery {
     let mut tiles = Tiles {
@@ -121,7 +122,7 @@ pub(super) fn scenery_from_pod(
 
 /// A moving box goes along its velocity, and a solid box with a mass can be knocked about.
 /// Anything else stays put: "0.000000 mass means unmoveable" (the Traxx editor's notes).
-fn motion(situation_box: &pod::SituationBox, solid: bool) -> SceneryMotion {
+fn motion(situation_box: &crate::SituationBox, solid: bool) -> SceneryMotion {
     let [x, up, z] = situation_box.velocity;
     // Z is flipped, as for positions.
     let velocity = Vec3::new(x, up, -z) * METRES_PER_FOOT;
@@ -139,7 +140,7 @@ fn motion(situation_box: &pod::SituationBox, solid: bool) -> SceneryMotion {
 /// The track's backdrop, in its own tiles: its textures are larger than the scenery's
 /// (256 pixels a side, where the scenery's are 64), and would lose their detail made to fit
 /// the scenery's.
-pub(super) fn backdrop_from_pod(track: &pod::Track) -> Option<Backdrop> {
+pub(super) fn backdrop_from_pod(track: &crate::Track) -> Option<Backdrop> {
     if track.backdrop_models.is_empty() {
         return None;
     }
@@ -171,13 +172,13 @@ pub(super) fn backdrop_from_pod(track: &pod::Track) -> Option<Backdrop> {
 
 fn convert_model(
     name: &str,
-    model: &pod::Model,
-    animated: Option<&pod::AnimatedModel>,
+    model: &crate::Model,
+    animated: Option<&crate::AnimatedModel>,
     tiles: &mut Tiles,
 ) -> SceneryModel {
     let mut mesh = SceneryModel {
         name: name.to_string(),
-        ..default()
+        ..Default::default()
     };
     // For each vertex of the mesh, the vertex of the model it is.
     let mut sources = Vec::new();
@@ -195,7 +196,7 @@ fn convert_model(
         };
 
         // Reversed, because flipping Z turns the face inside out.
-        let reversed: Vec<&pod::Corner> = face.corners.iter().rev().collect();
+        let reversed: Vec<&crate::Corner> = face.corners.iter().rev().collect();
         let corners: Vec<(Vec3, [f32; 2])> = reversed
             .iter()
             .map(|corner| {
@@ -275,7 +276,10 @@ fn wedge(name: String, [length, width, height]: [f32; 3]) -> SceneryModel {
     ];
     // A wedge is convex, so a triangle faces out when it faces away from the middle.
     let middle = corners.iter().sum::<Vec3>() / corners.len() as f32;
-    let mut model = SceneryModel { name, ..default() };
+    let mut model = SceneryModel {
+        name,
+        ..Default::default()
+    };
     for face in faces {
         for pair in face[1..].windows(2) {
             let [a, b, c] = [face[0], pair[0], pair[1]].map(|corner| corners[corner as usize]);
@@ -304,7 +308,7 @@ fn to_game([x, up, z]: [f32; 3]) -> Vec3 {
 }
 
 /// Every face of the model, as `corners_of` gives it.
-fn written_faces(model: &pod::Model) -> HashSet<Vec<[u32; 3]>> {
+fn written_faces(model: &crate::Model) -> HashSet<Vec<[u32; 3]>> {
     model
         .faces
         .iter()
@@ -317,8 +321,8 @@ fn written_faces(model: &pod::Model) -> HashSet<Vec<[u32; 3]>> {
 /// of them starts. By position rather than by vertex, since a file can hold one point
 /// more than once.
 fn corners_of<'a>(
-    model: &pod::Model,
-    corners: impl Iterator<Item = &'a pod::Corner>,
+    model: &crate::Model,
+    corners: impl Iterator<Item = &'a crate::Corner>,
 ) -> Vec<[u32; 3]> {
     let points: Vec<[u32; 3]> = corners
         .map(|corner| model.vertices[corner.vertex].map(f32::to_bits))
@@ -361,10 +365,10 @@ fn add_face(mesh: &mut SceneryModel, corners: &[(Vec3, [f32; 2])], tile: u32, cy
 
 /// The size most of the textures of `models` have, which the others are made to fit: the
 /// larger, where two sizes are as common. A texture's PNG counts in place of its .RAW.
-fn tile_size<'a>(track: &pod::Track, models: impl Iterator<Item = &'a pod::Model>) -> usize {
+fn tile_size<'a>(track: &crate::Track, models: impl Iterator<Item = &'a crate::Model>) -> usize {
     let mut count_of_size = HashMap::new();
     let names = models
-        .flat_map(pod::Model::textures)
+        .flat_map(crate::Model::textures)
         .map(str::to_ascii_uppercase)
         .filter(|name| {
             track.model_textures.contains_key(name) || track.model_hd_textures.contains_key(name)
@@ -391,7 +395,7 @@ fn fits(size: usize, tile_size: usize) -> bool {
 
 /// The tiles made so far, and how to make more.
 struct Tiles<'a> {
-    track: &'a pod::Track,
+    track: &'a crate::Track,
     tile_size: usize,
     pixels: Vec<Vec<u8>>,
     known: HashMap<TileKey, u32>,
@@ -424,7 +428,7 @@ impl Tiles<'_> {
     /// tile and the ones after it. `None` where it is shown still, as its first frame: in
     /// the backdrop, for a cycle of one frame or of no time, or past the most one material
     /// can show.
-    fn cycle(&mut self, cycle: &pod::TextureCycle, cutout: bool) -> Option<(u32, u32)> {
+    fn cycle(&mut self, cycle: &crate::TextureCycle, cutout: bool) -> Option<(u32, u32)> {
         let frames: Vec<String> = cycle
             .frames
             .iter()
@@ -473,7 +477,7 @@ impl Tiles<'_> {
     fn image(&self, name: &str, cutout: bool) -> Option<(usize, Vec<u8>)> {
         let track = self.track;
         if let Some(hd) = track.model_hd_textures.get(name)
-            && let Some(mut rgba) = hd_texture::decode(hd)
+            && let Some(mut rgba) = hd_decode::decode(hd)
         {
             // A PNG brings its own alpha, which a cutout face keeps. **Reference:**
             // JSTrackViewer tests a cutout face's texture against half alpha, and draws
@@ -636,19 +640,19 @@ mod tests {
         assert_eq!(rgba, tile);
     }
 
-    fn square(corners: [usize; 4]) -> pod::Face {
-        pod::Face {
-            kind: pod::face_type::MATERIAL,
+    fn square(corners: [usize; 4]) -> crate::Face {
+        crate::Face {
+            kind: crate::face_type::MATERIAL,
             texture: None,
             texture_cycle: None,
             color: 0,
-            material: Some(pod::Material {
-                flags: pod::material_flag::TWO_SIDED,
+            material: Some(crate::Material {
+                flags: crate::material_flag::TWO_SIDED,
                 base_alpha: 1.0,
             }),
             corners: corners
                 .into_iter()
-                .map(|vertex| pod::Corner {
+                .map(|vertex| crate::Corner {
                     vertex,
                     uv: [0.0; 2],
                 })
@@ -656,8 +660,8 @@ mod tests {
         }
     }
 
-    fn model(faces: Vec<pod::Face>) -> pod::Model {
-        pod::Model {
+    fn model(faces: Vec<crate::Face>) -> crate::Model {
+        crate::Model {
             vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
             vertex_normals: Vec::new(),
             faces,

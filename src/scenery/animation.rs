@@ -187,7 +187,7 @@ fn weights_at(keyframes: &Keyframes, seconds: f64, weights: &mut [f32]) {
 }
 
 /// The normals of the mesh with its vertices at `positions`: each face's from where its
-/// corners are, as `track/pod_scenery.rs` works out the first frame's.
+/// corners are, as the `pod` crate's scenery converter works out the first frame's.
 fn normals_of(keyframes: &Keyframes, positions: &[[f32; 3]]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0; 3]; positions.len()];
     for face in &keyframes.faces {

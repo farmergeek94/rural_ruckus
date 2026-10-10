@@ -241,7 +241,7 @@ the last to the first, on one clock, so that every copy of a model moves in step
 face's normal is worked out again from its corners, so a face that turns is lit as it
 faces. The rate is read as 16.16 fixed point seconds from one frame to the next, as for
 an animated texture: 1 s for the dinosaur, 0.5 s for the pump jack. The first frame is
-what is solid. `src/pod/mod.rs` reads the first frame into `Track::models` and every
+what is solid. `crates/pod/src/mod.rs` reads the first frame into `Track::models` and every
 frame's vertices into `Track::animated_models`. A frame that is missing, or has another
 vertex count, leaves the model still. The scenery moves the mesh
 (`scenery/animation.rs`). Bevy 0.19 shows such a model in its first frame if it comes

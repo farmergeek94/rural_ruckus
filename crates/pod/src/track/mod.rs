@@ -1,4 +1,5 @@
-//! Turns a Monster Truck Madness 2 track, as the `pod` crate reads it, into `TrackData`.
+//! Turns a Monster Truck Madness 2 track, as the crate's parsers read it, into the content
+//! model's `TrackData`.
 //!
 //! This is the one place where MTM2's conventions are converted to the game's, and the
 //! reasons for each rule are in `docs/formats/`:
@@ -12,19 +13,20 @@
 //!   and 9, and dirt, mud, sand, grass and rocky ground (`Footing::Loose`) are 2 and 4
 //!   to 7. A texture with no type is `Footing::Unnamed`.
 
+mod scenery;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use bevy::prelude::*;
+use content::Vec2;
 
 use crate::base_game::BaseGame;
-use crate::hd_texture;
-use crate::pod::{self, FEET_PER_CELL, FEET_PER_HEIGHT_STEP, PodArchive};
+use crate::hd_decode;
+use crate::{FEET_PER_CELL, FEET_PER_HEIGHT_STEP, PodArchive};
 
-use super::data::{direction_yaw, yaw_direction};
-use super::{
+use content::track::{
     BoxFaces, Course, Diagonals, Footing, Gate, GroundBox, GroundCell, GroundTextures, HeightGrid,
-    StartPosition, TrackData,
+    StartPosition, TrackData, direction_yaw, yaw_direction,
 };
 
 const METRES_PER_FOOT: f32 = 0.3048;
@@ -58,7 +60,7 @@ pub fn peek_pod(path: &Path) -> Result<Option<String>, String> {
     let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
     let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
     let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    Ok(pod::Track::name_in(&archive))
+    Ok(crate::Track::name_in(&archive))
 }
 
 /// A track in one of the base game's archives.
@@ -76,10 +78,10 @@ pub struct BaseTrack {
 pub fn peek_base(base: &BaseGame) -> Vec<BaseTrack> {
     let mut found = Vec::new();
     for (archive, entries) in base.directories() {
-        for entry in pod::Track::files_in(entries) {
+        for entry in crate::Track::files_in(entries) {
             let name = base
                 .read_one(archive, entry)
-                .map(|bytes| pod::Track::name_from(&bytes))
+                .map(|bytes| crate::Track::name_from(&bytes))
                 .map_err(|error| format!("{}: {error}", entry.name));
             found.push(BaseTrack {
                 archive: archive.to_path_buf(),
@@ -97,7 +99,8 @@ pub fn load_base(base: &BaseGame, archive: &Path, file: &str) -> Result<TrackDat
     let pod_archive = base
         .archive(archive)
         .ok_or_else(|| describe(&"is not a base archive that can be read"))?;
-    let track = pod::Track::from_file(pod_archive, file, base).map_err(|error| describe(&error))?;
+    let track =
+        crate::Track::from_file(pod_archive, file, base).map_err(|error| describe(&error))?;
     track_from_pod(&track).map_err(|error| describe(&error))
 }
 
@@ -106,11 +109,11 @@ pub fn load_pod(path: &Path, base: &BaseGame) -> Result<TrackData, String> {
     let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
     let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
     let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    let track = pod::Track::from_archives(&archive, base).map_err(|error| describe(&error))?;
+    let track = crate::Track::from_archives(&archive, base).map_err(|error| describe(&error))?;
     track_from_pod(&track).map_err(|error| describe(&error))
 }
 
-pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
+pub fn track_from_pod(track: &crate::Track) -> Result<TrackData, String> {
     let cells = track.heightmap.size();
     if !cells.is_multiple_of(2) {
         // Flipping Z would swap which cells of the chessboard are which.
@@ -174,7 +177,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
         .vehicles
         .first()
         .ok_or("the track has no starting grid")?;
-    let grid_place = |vehicle: &pod::Vehicle| StartPosition {
+    let grid_place = |vehicle: &crate::Vehicle| StartPosition {
         position: to_ground(vehicle.position),
         yaw: -vehicle.psi,
     };
@@ -226,8 +229,8 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
             course_from_segments(&segments, &heights, true)
         })
         .collect();
-    let mut scenery = super::pod_scenery::scenery_from_pod(track, to_ground);
-    super::settle::settle(&mut scenery, &heights);
+    let mut scenery = scenery::scenery_from_pod(track, to_ground);
+    content::track::settle(&mut scenery, &heights);
     Ok(TrackData {
         name: track.situation.name.clone(),
         heights,
@@ -242,7 +245,7 @@ pub fn track_from_pod(track: &pod::Track) -> Result<TrackData, String> {
             .filter(|&feet| feet > 0.0)
             .map(|feet| feet * METRES_PER_FOOT),
         scenery,
-        backdrop: super::pod_scenery::backdrop_from_pod(track),
+        backdrop: scenery::backdrop_from_pod(track),
         skies: skies_from_pod(&track.skies),
         course,
         other_courses,
@@ -276,10 +279,10 @@ fn clear_places(
 /// A checkpoint is as wide as its model, which is long along its X axis: a trigger box,
 /// or a banner over the road. A checkpoint with no model is an invisible box, and its
 /// `width` is its whole size along that same axis (situation.md).
-fn checkpoint_half_width_feet(track: &pod::Track, checkpoint: &pod::SituationBox) -> f32 {
+fn checkpoint_half_width_feet(track: &crate::Track, checkpoint: &crate::SituationBox) -> f32 {
     let name = match &checkpoint.shape {
-        pod::BoxShape::Model(name) => name,
-        pod::BoxShape::Dimensions([_, width, _]) => return width / 2.0,
+        crate::BoxShape::Model(name) => name,
+        crate::BoxShape::Dimensions([_, width, _]) => return width / 2.0,
     };
     match track.models.get(&name.to_ascii_uppercase()) {
         Some(model) => {
@@ -380,7 +383,7 @@ fn corner(piece: (Vec2, Vec2), next: (Vec2, Vec2), ground: &HeightGrid) -> Vec<V
 /// The track's ground textures, if it carries its own, and the tiles they are made into,
 /// which the ground boxes will add theirs to. Tracks that borrow the base game's textures
 /// don't have them, and get none rather than a patchwork.
-fn ground_textures(track: &pod::Track) -> Option<(TileSet<'_>, Vec<GroundCell>)> {
+fn ground_textures(track: &crate::Track) -> Option<(TileSet<'_>, Vec<GroundCell>)> {
     let map = track.texture_map.as_ref()?;
     let mut tiles = TileSet {
         track,
@@ -404,7 +407,7 @@ fn ground_textures(track: &pod::Track) -> Option<(TileSet<'_>, Vec<GroundCell>)>
 
 /// What the ground is underfoot in each cell, in the same order as `ground_textures`'s
 /// cells. Empty for a track without a texture map or texture types.
-fn footing(track: &pod::Track) -> Vec<Footing> {
+fn footing(track: &crate::Track) -> Vec<Footing> {
     let (Some(map), Some(types)) = (&track.texture_map, &track.texture_types) else {
         return Vec::new();
     };
@@ -431,7 +434,7 @@ fn footing(track: &pod::Track) -> Vec<Footing> {
 }
 
 /// A texture laid flat, as on the ground, corners in the order lowest, +X, +Z, far.
-fn flat_face(cell: pod::TextureCell, tile: usize) -> GroundCell {
+fn flat_face(cell: crate::TextureCell, tile: usize) -> GroundCell {
     let corners = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)]
         .map(|(u, v)| cell.texture_coords(u, 1.0 - v).into());
     GroundCell { tile, corners }
@@ -440,7 +443,7 @@ fn flat_face(cell: pod::TextureCell, tile: usize) -> GroundCell {
 /// A texture stood upright on the side of a ground box, corners in the order bottom left,
 /// bottom right, top left, top right, as seen from outside. Which way up and which way
 /// round is not known (see `docs/formats/ground_boxes.md`).
-fn side_face(cell: pod::TextureCell, tile: usize) -> GroundCell {
+fn side_face(cell: crate::TextureCell, tile: usize) -> GroundCell {
     let corners = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)]
         .map(|(u, v)| cell.texture_coords(u, v).into());
     GroundCell { tile, corners }
@@ -448,7 +451,7 @@ fn side_face(cell: pod::TextureCell, tile: usize) -> GroundCell {
 
 /// The ground's textures as tiles, each made once, numbered in order of first use.
 struct TileSet<'a> {
-    track: &'a pod::Track,
+    track: &'a crate::Track,
     tile_of_texture: HashMap<u16, usize>,
     tiles: Vec<Vec<u8>>,
     tile_size: Option<usize>,
@@ -480,7 +483,7 @@ impl TileSet<'_> {
             .get(texture)
             .and_then(Option::as_ref);
         if let Some(hd) = hd
-            && let Some(rgba) = hd_texture::decode(hd)
+            && let Some(rgba) = hd_decode::decode(hd)
         {
             // The ground is opaque: whatever alpha the file has means nothing here.
             return Some((hd.size(), opaque(rgba)));
@@ -506,7 +509,7 @@ impl TileSet<'_> {
 /// The track's ground boxes, one per cell, covered in tiles from `tiles` where there are
 /// any. A box whose textures can't all be found is left plain.
 fn ground_boxes(
-    track: &pod::Track,
+    track: &crate::Track,
     to_ground: impl Fn([f32; 3]) -> Vec2,
     mut tiles: Option<&mut TileSet>,
 ) -> Vec<GroundBox> {
@@ -544,18 +547,18 @@ fn opaque(mut rgba: Vec<u8>) -> Vec<u8> {
 }
 
 /// A box's faces in our axes: with Z flipped, the side MTM2 has facing +Z faces -Z here.
-fn box_faces(faces: &[pod::TextureCell; 6], tiles: &mut TileSet) -> Option<BoxFaces> {
+fn box_faces(faces: &[crate::TextureCell; 6], tiles: &mut TileSet) -> Option<BoxFaces> {
     let mut side = |face: usize| Some(side_face(faces[face], tiles.tile(faces[face].texture)?));
-    let (plus_x, minus_x) = (side(pod::face::EAST)?, side(pod::face::WEST)?);
-    let (plus_z, minus_z) = (side(pod::face::SOUTH)?, side(pod::face::NORTH)?);
+    let (plus_x, minus_x) = (side(crate::face::EAST)?, side(crate::face::WEST)?);
+    let (plus_z, minus_z) = (side(crate::face::SOUTH)?, side(crate::face::NORTH)?);
     let mut flat = |face: usize| Some(flat_face(faces[face], tiles.tile(faces[face].texture)?));
     Some(BoxFaces {
         plus_x,
         minus_x,
         plus_z,
         minus_z,
-        top: flat(pod::face::TOP)?,
-        bottom: flat(pod::face::BOTTOM)?,
+        top: flat(crate::face::TOP)?,
+        bottom: flat(crate::face::BOTTOM)?,
     })
 }
 
@@ -602,15 +605,15 @@ fn travel_direction(center: Vec2, authored: Vec2, course: &[(Vec2, Vec2)]) -> Ve
     }
 }
 
-/// The skies, coloured as MTM2 colours a sky (see `pod::sky_rgba`).
-fn skies_from_pod(skies: &pod::Skies) -> super::Skies {
-    let picture = |sky: &Option<pod::Sky>| {
-        sky.as_ref().map(|sky| super::SkyPicture {
+/// The skies, coloured as MTM2 colours a sky (see `crate::sky_rgba`).
+fn skies_from_pod(skies: &crate::Skies) -> content::track::Skies {
+    let picture = |sky: &Option<crate::Sky>| {
+        sky.as_ref().map(|sky| content::track::SkyPicture {
             size: sky.texture.size(),
-            rgba: pod::sky_rgba(&sky.texture, &sky.palette),
+            rgba: crate::sky_rgba(&sky.texture, &sky.palette),
         })
     };
-    super::Skies {
+    content::track::Skies {
         own: picture(&skies.own),
         cloudy: picture(&skies.cloudy),
         dusk: picture(&skies.dusk),

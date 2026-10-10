@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
-use super::loops::{EngineLoops, Loop};
+use crate::Wave;
 use crate::base_game::BaseGame;
-use crate::pod::Wave;
+use content::sound::{EngineLoops, Loop};
 
 /// The shortest a loop may be, in seconds, to be taken for one. The shortest found is
 /// 1.08 s; two files that share less than this do not share a loop, and something is
@@ -19,7 +19,7 @@ use crate::pod::Wave;
 const SHORTEST_LOOP: f32 = 0.5;
 
 /// The engine's loops, from whichever base archives hold its files.
-pub(super) fn engine_loops(base: &BaseGame) -> Result<EngineLoops, String> {
+pub fn engine_loops(base: &BaseGame) -> Result<EngineLoops, String> {
     let start = read(base, "STARTIDL.WAV")?;
     let idle_to_middle = read(base, "IDLE2M1.WAV")?;
     let middle_to_idle = read(base, "M1-2-IDL.WAV")?;

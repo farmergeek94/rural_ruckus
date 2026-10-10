@@ -1,8 +1,8 @@
 //! The track being raced on: the ground, the course around it, and its checkpoints.
 //!
-//! A track is plain data (`TrackData`), either generated in code or converted from a
-//! Monster Truck Madness 2 POD archive. This slice holds the current one in the `Track`
-//! resource and builds the terrain from it: one height grid feeds both the render mesh
+//! A track is plain data (`TrackData`, from the `content` crate), either generated in code
+//! (`generator`) or filled in by a loader such as the `pod` crate. This slice holds the
+//! current one in the `Track` resource and builds the terrain from it: one height grid feeds both the render mesh
 //! and the physics heightfield collider, so the two can never disagree.
 //!
 //! Where the ground repeats (`HeightGrid::repeats`), as a Monster Truck Madness 2 world
@@ -13,16 +13,10 @@
 
 mod blend;
 mod collider;
-mod course;
-mod data;
 mod generator;
 mod ground_boxes;
-mod height_grid;
 mod map;
 mod mesh;
-mod pod_import;
-mod pod_scenery;
-mod settle;
 mod shading;
 mod tile_material;
 
@@ -40,16 +34,14 @@ use bevy::state::app::StatesPlugin;
 use crate::game_state::GameState;
 
 pub use collider::build_collider;
-pub use course::{Course, Nearest};
-pub use data::{
-    Backdrop, BoxFaces, Footing, Gate, GroundBox, GroundCell, GroundTextures, KeyframedFace,
-    Keyframes, Scenery, SceneryModel, SceneryMotion, SceneryObject, Skies, SkyPicture,
-    StartPosition, TextureCycle, TrackData, direction_yaw, yaw_direction,
+pub use content::track::{
+    Backdrop, BoxFaces, Course, Diagonals, Footing, Gate, GroundBox, GroundCell, GroundTextures,
+    HeightGrid, KeyframedFace, Keyframes, Nearest, Scenery, SceneryModel, SceneryMotion,
+    SceneryObject, Skies, SkyPicture, StartPosition, TextureCycle, TrackData, direction_yaw,
+    yaw_direction,
 };
 pub use generator::builtin_track;
-pub use height_grid::{Diagonals, HeightGrid};
 pub use map::{MAP_COURSE, MAP_GATE, MAP_START, MapFrame, map_frame, map_image};
-pub use pod_import::{BaseTrack, load_base, load_pod, peek_base, peek_pod, track_from_pod};
 pub use tile_material::{
     GroundShading, MAX_TEXTURE_CYCLES, TileCycles, TileLighting, TileMaterial, TileTextures,
     tile_array,

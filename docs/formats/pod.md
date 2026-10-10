@@ -58,7 +58,7 @@ palettes, tires and axles. MTM2 finds them in its own archives.
 - **Measured:** 354 file names occur in more than one of the 19 archives, and every copy
   has the same content. So the search order of the base archives does not matter.
 - The game looks in the track's or truck's own archive first, in any folder, then in the
-  base archives (`src/base_game.rs`). That MTM2 does the same is **open**, but no other
+  base archives (`crates/pod/src/base_game.rs`). That MTM2 does the same is **open**, but no other
   rule lets a track replace a file of the base game.
 - A texture's own palette (see [textures.md](textures.md)) comes only from the archive
   that holds the texture. `AlpineMtns.pod` carries `ROTOR1.RAW` without a `ROTOR1.ACT`,

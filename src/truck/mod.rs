@@ -14,9 +14,10 @@
 //! On a world that repeats (`RepeatingWorld`), a truck that goes over an edge of the map is
 //! moved across to the other (`wrap`), and `TruckWrapped` says so.
 //!
-//! A truck is plain data (`TruckData`): the built-in one, or one converted from a Monster
-//! Truck Madness 2 archive by `pod_import`. Such an archive gives a truck's shape and its
-//! looks, and nothing of how it drives, which is `TruckConfig`'s defaults for every truck.
+//! A truck is plain data (`TruckData`, from the `content` crate): the built-in one, or one
+//! a loader filled in, as the `pod` crate does from a Monster Truck Madness 2 archive. Such
+//! an archive gives a truck's shape and its looks, and nothing of how it drives, which is
+//! `TruckConfig`'s defaults for every truck.
 //!
 //! Each physics step, in `FixedUpdate`: the `gearbox` chooses the gear and how the clutch
 //! couples the engine to the wheels, the `engine` steps the engine's speed, torque, boost
@@ -26,9 +27,7 @@
 //! the sound slice read.
 
 mod axle;
-mod config;
 mod contacts;
-mod data;
 mod display;
 mod drive;
 mod engine;
@@ -37,7 +36,6 @@ mod input;
 mod interpolate;
 mod lamps;
 mod looks;
-mod pod_import;
 mod reset;
 mod spawn;
 mod speedometer;
@@ -49,20 +47,18 @@ use bevy::state::app::StatesPlugin;
 
 use crate::game_state::GameState;
 
-pub use config::{TruckConfig, TruckSetup};
 pub use contacts::{TireContacts, decide_tire_contacts};
-pub use data::{
-    AxleLink, AxleLinks, Beam, Dashboard, DashboardPicture, Dial, NormalMap, SteeringWheel,
-    TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel, TruckTexture, TruckTextureCycle,
+pub use content::truck::{
+    AxleLink, AxleLinks, Beam, Dashboard, DashboardPicture, Dial, EngineConfig, NormalMap,
+    SteeringWheel, TruckConfig, TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel,
+    TruckSetup, TruckTexture, TruckTextureCycle,
 };
+use content::truck::{CHASSIS_HALF_EXTENTS, FRONT_WHEELS};
 pub use display::TruckDisplay;
-pub use engine::{Engine, EngineConfig};
+pub use engine::Engine;
 pub use gearbox::{FORWARD_GEARS, Gear, Gearbox};
 pub use input::TruckInput;
 pub use lamps::TruckLamps;
-pub use pod_import::{
-    BODY_DROP, BaseTruck, load_base, load_pod, peek_base, peek_pod, pod_holds_truck, truck_from_pod,
-};
 pub use reset::PlaceTruck;
 pub use spawn::Wheel;
 pub use wrap::{RepeatingWorld, TruckWrapped};

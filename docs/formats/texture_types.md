@@ -106,13 +106,13 @@ line) has no type. 347,281 ground cells of the 12 tracks have a texture that is 
 the list.
 
 All five textures with a type from 800 to 999 are ice, and no texture looked at with
-another type is ice. The game takes 800 to 999 as ice (`track/pod_import.rs`). Look again
+another type is ice. The game takes 800 to 999 as ice (`crates/pod/src/track/mod.rs`). Look again
 at any new track with a texture of these types. Alpine has 1,408 cells of ice.
 
 ## What the game does with the types
 
 Tires throw up dirt and dust only on loose ground (`TrackData::loose_at`).
-`track/pod_import.rs` sorts a listed texture by its type: hundreds 2 (dirt), 4 (mud), 5
+`crates/pod/src/track/mod.rs` sorts a listed texture by its type: hundreds 2 (dirt), 4 (mud), 5
 (sand), 6 (grass) and 7 (rocky ground), from the base game's lists above, are loose
 (`Footing::Loose`), so Alpine's snow (600 and 601) is loose; 800 to 999 is ice; every
 other type (road, water, metal, rock, railway track, and 0) is firm ground, which throws

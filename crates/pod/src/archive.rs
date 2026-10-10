@@ -171,7 +171,7 @@ pub(super) mod tests {
     use super::*;
 
     /// Builds an archive the way the format lays it out: header, directory, then data.
-    pub(in crate::pod) fn build_archive(comment: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(crate) fn build_archive(comment: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut bytes = (files.len() as u32).to_le_bytes().to_vec();
         bytes.extend(fixed_width(comment, COMMENT_LENGTH));
 

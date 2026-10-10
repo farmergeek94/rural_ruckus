@@ -1,0 +1,11 @@
+[package]
+name = "ruckus_content"
+version = "0.1.0"
+edition = "2024"
+description = "The content model of Monster Truck Rural Ruckus: a track, a truck and the engine's sounds as plain data"
+
+[dependencies]
+# For its vectors (`Vec2`, `Vec3`, `Quat`, `Rect`), and for the `Component` and `Resource`
+# derives on the two tuning types the game keeps on entities. No default features: no
+# renderer, no window, no assets. The game enables the rest.
+bevy = { version = "0.19", default-features = false }

@@ -1,7 +1,7 @@
 //! The base game's engine, as its three loops.
 //!
 //! The base game has one engine (no truck file names an engine sound): three loops, idle,
-//! M1 and M2, which `pod_import` finds in `SOUND.POD`. The gear chooses the loop
+//! M1 and M2, which the base game finds in `SOUND.POD`. The gear chooses the loop
 //! (`loop_for`), as the user describes MTM2: M1 is first gear or reverse pulling away, M2
 //! every other gear, and idle the engine idling, in neutral or standing in first or
 //! reverse with no throttle. Within its loop the engine's speed (`truck::Engine::revs`)
@@ -18,9 +18,10 @@ use std::sync::Arc;
 use bevy::audio::{ChannelCount, Decodable, SampleRate, Source, SpatialScale, Volume};
 use bevy::prelude::*;
 
-use super::{EngineStarted, FULL_VOLUME_WITHIN, SoundSettings, pod_import};
+use super::{EngineStarted, FULL_VOLUME_WITHIN, SoundSettings};
 use crate::base_game::BaseGame;
 use crate::truck::{Engine, Gear, Gearbox, TruckInput, TruckVisual};
+use content::sound::Loop;
 
 /// The loops, by index: in `LoopHandles`, `EngineVoice::layer` and `SPEEDS`.
 const IDLE: usize = 0;
@@ -49,23 +50,6 @@ const OFF_THROTTLE: f32 = 0.6;
 /// How loud an engine is at full throttle, at full `SoundSettings::volume`, as a share of
 /// its recording. Under 1, so that eight engines near the camera do not clip.
 const LOUDNESS: f32 = 0.5;
-
-/// The engine's three loops, as plain data.
-#[derive(Clone, Debug)]
-pub(super) struct EngineLoops {
-    pub(super) idle: Loop,
-    pub(super) m1: Loop,
-    pub(super) m2: Loop,
-}
-
-/// A sound that repeats without a break.
-#[derive(Clone, Debug)]
-pub(super) struct Loop {
-    /// Samples a second.
-    pub(super) sample_rate: u32,
-    /// One channel, from -1 to 1.
-    pub(super) samples: Arc<[f32]>,
-}
 
 /// A loop, for the audio player.
 #[derive(Asset, TypePath, Clone, Debug)]
@@ -140,7 +124,7 @@ pub(super) fn load_loops(
     base: Res<BaseGame>,
     mut sounds: ResMut<Assets<LoopSound>>,
 ) {
-    match pod_import::engine_loops(&base) {
+    match base.engine_loops() {
         Ok(loops) => {
             let [idle, m1, m2] =
                 [loops.idle, loops.m1, loops.m2].map(|each| sounds.add(LoopSound(each)));
