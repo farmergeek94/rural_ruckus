@@ -17,6 +17,13 @@
 //! A truck is plain data (`TruckData`): the built-in one, or one converted from a Monster
 //! Truck Madness 2 archive by `pod_import`. Such an archive gives a truck's shape and its
 //! looks, and nothing of how it drives, which is `TruckConfig`'s defaults for every truck.
+//!
+//! Each physics step, in `FixedUpdate`: the `gearbox` chooses the gear and how the clutch
+//! couples the engine to the wheels, the `engine` steps the engine's speed, torque, boost
+//! and clutch from that and asks each wheel for a force (`Engine::wheel_force`), and `drive`
+//! sweeps the tires and hands the suspension, grip and drive forces to the physics
+//! (`TruckSystems::Drive`). The engine's state is what the dashboard, the speedometer and
+//! the sound slice read.
 
 mod axle;
 mod config;
@@ -24,6 +31,7 @@ mod contacts;
 mod data;
 mod display;
 mod drive;
+mod engine;
 mod gearbox;
 mod input;
 mod interpolate;
@@ -48,6 +56,7 @@ pub use data::{
     TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel, TruckTexture, TruckTextureCycle,
 };
 pub use display::TruckDisplay;
+pub use engine::{Engine, EngineConfig};
 pub use gearbox::{FORWARD_GEARS, Gear, Gearbox};
 pub use input::TruckInput;
 pub use lamps::TruckLamps;
@@ -112,7 +121,9 @@ impl Plugin for TruckPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    gearbox::change_gears.before(TruckSystems::Drive),
+                    (gearbox::change_gears, engine::run_engines)
+                        .chain()
+                        .before(TruckSystems::Drive),
                     drive::drive_truck.in_set(TruckSystems::Drive),
                 ),
             )
@@ -150,7 +161,7 @@ pub enum SpeedUnits {
 pub enum Transmission {
     #[default]
     Automatic,
-    /// The player changes the forward gears with `Control::ShiftUp` and
+    /// The player changes the forward gears and neutral with `Control::ShiftUp` and
     /// `Control::ShiftDown`. Reverse still goes in by itself.
     Manual,
 }
@@ -277,7 +288,8 @@ pub enum TruckSystems {
     /// after this set to follow a truck on screen without judder.
     PlaceVisuals,
     /// Works out each truck's suspension and tire forces, in `FixedUpdate`, and hands them
-    /// to the physics for the coming step. Add forces of your own through `Forces` in
-    /// `FixedUpdate` too: they add to these, in any order.
+    /// to the physics for the coming step. The gearbox and the engine have been stepped
+    /// before it, in that order (`Gearbox`, then `Engine`). Add forces of your own through
+    /// `Forces` in `FixedUpdate` too: they add to these, in any order.
     Drive,
 }

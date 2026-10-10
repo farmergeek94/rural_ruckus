@@ -20,9 +20,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::views::{CameraView, Look};
 use crate::game_state::GameState;
-use crate::truck::{
-    ChosenTruck, Dashboard, DashboardPicture, Dial, Gearbox, Player, TruckInput,
-};
+use crate::truck::{ChosenTruck, Dashboard, DashboardPicture, Dial, Engine, Player, TruckInput};
 
 /// How thick a needle is, in the dashboard's pixels. The game's own.
 const NEEDLE_WIDTH: f32 = 2.5;
@@ -32,8 +30,9 @@ const NEEDLE_COLOR: Color = Color::srgb(0.2, 0.5, 0.96);
 /// marks (100 mph is 265 degrees round, 9,000 rpm 235), and never all the way round. The
 /// game's own.
 const MOST_SWEEP: f32 = 300.0 * std::f32::consts::PI / 180.0;
-/// The tachometer: the needle stands at `IDLE_RPM` and goes up to `TOP_RPM` at the rev
-/// limit of the gear the truck is in (`truck::Gearbox::revs`). The game's own, not MTM2's.
+/// The tachometer: the needle stands at `IDLE_RPM` with the engine at idle and goes up to
+/// `TOP_RPM` at its governed speed (`truck::Engine::revs`). The dial's figures are the
+/// game's own, not MTM2's nor the engine's.
 const IDLE_RPM: f32 = 1000.0;
 const TOP_RPM: f32 = 7000.0;
 /// Where the horizon is put in the dashboard's 3D window, as a share of the way down it,
@@ -166,7 +165,7 @@ pub(super) fn show_dashboard(
         (&Needle, &mut UiTransform, &mut Visibility),
         (Without<Wheel>, Without<DashboardRoot>),
     >,
-    player: Single<(&LinearVelocity, &TruckInput, &Gearbox), Player>,
+    player: Single<(&LinearVelocity, &TruckInput, &Engine), Player>,
 ) {
     let Some(root) = root else {
         return;
@@ -198,7 +197,7 @@ pub(super) fn show_dashboard(
     } else {
         Visibility::Hidden
     };
-    let (velocity, input, gearbox) = *player;
+    let (velocity, input, engine) = *player;
     let dashboard = &root.dashboard;
     for (mut image, mut visibility) in &mut wheel {
         visibility.set_if_neq(seen);
@@ -224,7 +223,11 @@ pub(super) fn show_dashboard(
             // A stalled engine does not turn.
             Needle::Revs => (
                 dashboard.tachometer,
-                if gearbox.stalled() { 0.0 } else { revs(gearbox.revs()) },
+                if engine.running() {
+                    revs(engine.revs())
+                } else {
+                    0.0
+                },
             ),
         };
         if let Some(dial) = dial {

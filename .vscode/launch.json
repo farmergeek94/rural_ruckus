@@ -206,6 +206,18 @@
             "env": { "RUST_BACKTRACE": "1" }
         },
         {
+            "name": "Debug sound tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=sound"],
+                "filter": { "name": "sound", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
             "name": "Debug weather tests",
             "type": "lldb",
             "request": "launch",

@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use super::EngineConfig;
+
 /// Everything you'd tune to change how the truck feels.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct TruckConfig {
@@ -64,12 +66,17 @@ pub struct TruckConfig {
     /// back. Lower and the truck bounces off its stops.
     pub bump_stop_damper: f32,
 
-    /// Peak drive force in N, per wheel.
+    /// Peak drive force in N, per wheel: the locked first-gear pull at the engine's best
+    /// speed (see `engine`). The pull tuning knob.
     pub engine_force: f32,
     /// Peak braking force in N, per wheel.
     pub brake_force: f32,
-    /// Speed at which the engine runs out of pull, in m/s.
+    /// The speed, in m/s, at which the top gear meets the engine's governed speed. Each
+    /// lower gear meets it at its share of this (`gearbox::GEAR_TOPS`).
     pub top_speed: f32,
+    /// The engine: its speeds, torque curve, governors, turbo and clutch. Every truck has
+    /// the same one for now; a POD gives nothing of how a truck drives.
+    pub engine: EngineConfig,
     /// Speed-proportional drag in N·s/m, per wheel.
     pub rolling_resistance: f32,
 
@@ -288,6 +295,7 @@ impl Default for TruckConfig {
             engine_force: 26_400.0,
             brake_force: 19_050.0,
             top_speed: 60.0,
+            engine: EngineConfig::default(),
             rolling_resistance: 109.0,
             grip: 1.1,
             handbrake_grip: 0.45,

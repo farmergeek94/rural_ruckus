@@ -68,11 +68,12 @@ use crate::opponents::{Difficulty, OpponentsSettings};
 use crate::particles::DirtSettings;
 use crate::physics::PhysicsSettings;
 use crate::race::{RaceCancelled, RacePause, RaceSettings};
+use crate::sound::SoundSettings;
 use crate::store::{self, Store};
 use crate::track::{self, ChosenTrack, TrackData, TrackSettings};
 use crate::truck::{
-    self, ChosenTruck, ComputerTrucks, SpeedUnits, Transmission, TruckData, TruckDisplay, TruckLooksSettings,
-    TruckSetup,
+    self, ChosenTruck, ComputerTrucks, SpeedUnits, Transmission, TruckData, TruckDisplay,
+    TruckLooksSettings, TruckSetup,
 };
 use crate::ui::{
     self, Catalogue, Choices, Dial, Dials, Entry, ExitPressed, Folder, FolderBrowser, FolderChosen,
@@ -184,6 +185,7 @@ impl Plugin for FrontEndPlugin {
             .init_resource::<ControlsHelpSettings>()
             .init_resource::<SpeedUnits>()
             .init_resource::<Transmission>()
+            .init_resource::<SoundSettings>()
             .init_resource::<TruckLooksSettings>()
             .init_resource::<WaterSettings>()
             .init_resource::<DirtSettings>()
@@ -759,6 +761,7 @@ struct Options {
     help: ControlsHelpSettings,
     speed: SpeedUnits,
     gears: Transmission,
+    sound: SoundSettings,
     truck_looks: TruckLooksSettings,
     water: WaterSettings,
     dirt: DirtSettings,
@@ -779,6 +782,7 @@ impl Options {
             help: default(),
             speed: default(),
             gears: default(),
+            sound: default(),
             truck_looks: default(),
             water: default(),
             dirt: default(),
@@ -798,6 +802,7 @@ impl Options {
             help: *world.resource(),
             speed: *world.resource(),
             gears: *world.resource(),
+            sound: *world.resource(),
             truck_looks: *world.resource(),
             water: *world.resource(),
             dirt: *world.resource(),
@@ -816,6 +821,7 @@ impl Options {
         world.insert_resource(self.help);
         world.insert_resource(self.speed);
         world.insert_resource(self.gears);
+        world.insert_resource(self.sound);
         world.insert_resource(self.truck_looks);
         world.insert_resource(self.water);
         world.insert_resource(self.dirt);
@@ -836,6 +842,7 @@ struct OptionResources<'w> {
     help: ResMut<'w, ControlsHelpSettings>,
     speed: ResMut<'w, SpeedUnits>,
     gears: ResMut<'w, Transmission>,
+    sound: ResMut<'w, SoundSettings>,
     truck_looks: ResMut<'w, TruckLooksSettings>,
     water: ResMut<'w, WaterSettings>,
     dirt: ResMut<'w, DirtSettings>,
@@ -855,6 +862,7 @@ impl OptionResources<'_> {
             help: *self.help,
             speed: *self.speed,
             gears: *self.gears,
+            sound: *self.sound,
             truck_looks: *self.truck_looks,
             water: *self.water,
             dirt: *self.dirt,
@@ -874,6 +882,7 @@ impl OptionResources<'_> {
         self.help.set_if_neq(options.help);
         self.speed.set_if_neq(options.speed);
         self.gears.set_if_neq(options.gears);
+        self.sound.set_if_neq(options.sound);
         self.truck_looks.set_if_neq(options.truck_looks);
         self.water.set_if_neq(options.water);
         self.dirt.set_if_neq(options.dirt);
@@ -959,6 +968,8 @@ const SCREEN_MODES: [ScreenMode; 3] = [
 ];
 const VSYNCS: [Vsync; 3] = [Vsync::Off, Vsync::On, Vsync::Strict];
 const SHADOW_CASCADES: [f32; 4] = [0.0, 1.0, 2.0, 4.0];
+/// The engines' loudness, from silent to full: Normal is the slice's default.
+const ENGINE_VOLUMES: [f32; 4] = [0.0, 0.35, 0.7, 1.0];
 /// In metres.
 const SHADOW_DISTANCES: [f32; 4] = [50.0, 100.0, 150.0, 300.0];
 const ANISOTROPIES: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
@@ -1270,7 +1281,7 @@ const OPTIONS: &[OptionLine] = &[
         key: "option.gears",
         section: GAME,
         label: "Gears",
-        detail: "Who changes the five forward gears. Manual: Left Shift changes up and Left Ctrl down (or the keys bound to them), or the gamepad's bumpers. Reverse goes in by itself when the truck stops and the brake is held.",
+        detail: "Who changes the three forward gears. Manual, with neutral below first: Left Shift changes up and Left Ctrl down (or the keys bound to them), or the gamepad's bumpers. Reverse goes in by itself when the truck stops and the brake is held.",
         values: &["Automatic", "Manual"],
         get: |options| (options.gears == Transmission::Manual) as usize,
         set: |options, value| {
@@ -1280,6 +1291,15 @@ const OPTIONS: &[OptionLine] = &[
                 Transmission::Automatic
             };
         },
+    },
+    OptionLine {
+        key: "option.engine_sound",
+        section: GAME,
+        label: "Engine sound",
+        detail: "How loud the trucks' engines are.",
+        values: &["Off", "Quiet", "Normal", "Loud"],
+        get: |options| nearest(&ENGINE_VOLUMES, options.sound.volume),
+        set: |options, value| options.sound.volume = ENGINE_VOLUMES[value],
     },
     OptionLine {
         key: "option.controls_help",

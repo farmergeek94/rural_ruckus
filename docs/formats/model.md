@@ -1,14 +1,14 @@
 # Models (.BIN)
 
-Little-endian throughout. A model is a stream of records, each a run of 32-bit integers
-that begins with a number saying what it is, up to an end record. There is no header
-as such: the first record is always a magnification and the second a vertex list.
+Little-endian throughout. A model is a stream of records up to an end record. Each
+record is a run of 32-bit integers that begins with its type. There is no header: the
+first record is always a magnification and the second a vertex list.
 
-**Measured** on the 32 models of `AlpineMtns.pod`, all of which read through to their end
-record, 3464 faces in all, and on the 9 truck models of `99BFoot.pod` and
-`VirginiaGiant2003.pod`, 4119 faces. The record lengths were first taken from **reference**
-(JSTrackViewer, which has them from the game engine's own table by way of the Traxx
-editor's source) and every length that occurs in these files is confirmed by that.
+**Measured** on the 32 models of `AlpineMtns.pod` (3464 faces) and the 9 truck models of
+`99BFoot.pod` and `VirginiaGiant2003.pod` (4119 faces), all of which read to their end
+record. The record lengths are **reference** (JSTrackViewer, from the game engine's own
+table by way of the Traxx editor's source). Every length that occurs in these files
+agrees with them.
 
 ## Records that occur
 
@@ -31,21 +31,20 @@ editor's source) and every length that occurs in these files is confirmed by tha
 
 Types 62 (a texture with a 64-byte name, read like type 13), 65 (4376 bytes) and 66
 (32 bytes) are also from Community Patch 3. Their lengths are **reference** only
-(JSTruckViewer, `docs/BIN_HD_FORMAT.md`): none has been seen. Type 67 is unassigned: it
-was given to a normal-map record and then taken back, so it stops the read like any
-unknown type. Other types in
-the engine's table (**reference** only, none seen) are skipped by their
+(JSTruckViewer, `docs/BIN_HD_FORMAT.md`): none has been seen. Type 67 is unassigned (a
+normal-map record, given and taken back), so it stops the read like any unknown type.
+Other types in the engine's table (**reference** only, none seen) are skipped by their
 known length, or stop the read with what was read so far kept and `Model::incomplete`
-saying why. A file that starts with 0x20 is not a model but an animation control file
-naming the models that are its frames: see below.
+saying why. A file that starts with 0x20 is an animation control file, not a model: see
+below.
 
 ## Vertices
 
 Three ints each: **x, up, z, in 1/256 ft**, relative to the model's origin, in MTM2's
-left-handed axes. **Measured**, and tied to the terrain measurements: from the heightmap
-and track file alone, each model was found to sit a constant height above the ground
-(terrain.md). That height is exactly how far the model reaches below its origin at 256
-units to the foot, because the editor stands a model on its lowest point:
+left-handed axes. **Measured**, and tied to terrain.md: from the heightmap and track
+file alone, each model sits a constant height above the ground. That height is how far
+the model reaches below its origin at 256 units to the foot, because the editor stands a
+model on its lowest point:
 
 | Model | Sits above ground | Lowest vertex / 256 |
 | --- | --- | --- |
@@ -58,42 +57,42 @@ units to the foot, because the editor stands a model on its lowest point:
 | `TIRRV21` | 2.5 ft | -2.50 |
 | `18ESNCAT` | 6.0 ft | -6.00 |
 
-(Two others, with two placements each, were set by hand and differ by about a foot.)
+Two others, with two placements each, were set by hand and differ by about a foot.
 
 ## Vertex normals
 
 Record 3 is in most truck models and in no track model. It follows the vertex list and
 holds **one normal for each vertex**, in the same axes, as three ints of length 65535
-like the normals stored in faces. **Measured**: the count equals the vertex count in all
-9 of Bigfoot's models, and the next record always lands on a known type. Max-D's
-`DRVSHAFT.BIN` has no normal list at all: its vertex list is followed by the texture and
-by flat-shaded faces (type 24), which need none. On Bigfoot's tire all 179 are
-of unit length, 155 point away from the hub (the rest are the dished wheel), and at all
-688 corners the normal is on the side that the face's winding says is out. **Reference**
-agrees as far as it goes: JSTrackViewer calls the record `MRGL_ILIST` and steps over it at
-12 bytes a vertex, and calls face type 41 `ZGFACETTMAP`, the G being Gouraud shading.
+like a face's normal. **Measured**: the count equals the vertex count in all 9 of
+Bigfoot's models, and the next record always lands on a known type. Max-D's
+`DRVSHAFT.BIN` has no normal list: its texture and flat-shaded faces (type 24), which
+need none, follow the vertex list. On Bigfoot's tire all 179 normals are of unit length,
+155 point away from the hub (the rest are the dished wheel), and at all 688 corners the
+normal is on the side that the face's winding says is out. **Reference** agrees as far
+as it goes: JSTrackViewer calls the record `MRGL_ILIST` and steps over it at 12 bytes a
+vertex, and calls face type 41 `ZGFACETTMAP`, the G being Gouraud shading.
 
-A normal can be on the wrong side of a face all the same. Of the 2476 faces of Bigfoot's
-body, 90 are, and 80 of those are the back of a panel that is meant to be seen from both
-sides: the same corners listed twice, once each way round, sharing vertices that can only
-have one normal. (A further 8% of the body's normals are zero.) So the winding is what
-says which side a face is seen from, and a vertex normal is used only where it agrees
-with its face, the face's own normal otherwise.
+A normal can be on the wrong side of a face. Of the 2476 faces of Bigfoot's body, 90 are,
+and 80 of those are the back of a panel seen from both sides: the same corners listed
+twice, once each way round, sharing vertices that can have only one normal. A further
+8% of the body's normals are zero. So the winding says which side a face is seen from. A
+vertex normal is used only where it agrees with its face, the face's own normal
+otherwise.
 
 ## Faces
 
 - Corners are listed in order round the face, 3 or 4 of them in these files.
-- **Winding: measured.** Taken with the right-hand rule on the numbers as written, the
-  corner order gives the normal stored in the face, for 3332 of 3464 faces. The other
-  132 are four-cornered faces that aren't flat. Because the game flips Z, which turns
-  every face inside out, it takes the corners in the opposite order.
+- **Winding: measured.** With the right-hand rule on the numbers as written, the corner
+  order gives the stored normal for 3332 of 3464 faces. The other 132 are four-cornered
+  faces that are not flat. The game flips Z, which turns every face inside out, so it
+  takes the corners in the opposite order.
 - The stored normal has a length of 65535. The int after it is not understood and not
   needed.
 - **Texture coordinates** are 16.16 fixed point, with 0 to 255 (`0xff0000`) spanning the
-  texture whatever its size in pixels, as (across, down) from its top left. **Measured**
-  in that 0 and `0xff0000` are by far the commonest values. `METLCRN1` has 30 corners
-  holding what is plainly leftover text from its authoring tool, so out-of-range values
-  must be tolerated; the game clamps them.
+  texture whatever its size in pixels, as (across, down) from its top left. **Measured**:
+  0 and `0xff0000` are by far the commonest values. `METLCRN1` has 30 corners holding
+  leftover text from its authoring tool, so out-of-range values must be tolerated. The
+  game clamps them.
 - **Cutouts: reference.** MTM2 has no alpha channel. On faces of type 17 (and 51), texels
   that come out pure black through the palette are holes. On other faces black is black.
   A face of type 64 is a cutout if its material says so, and a PNG texture uses its alpha
@@ -101,27 +100,26 @@ with its face, the face's own normal otherwise.
 - **Near-black keys: measured, rule open.** Of the 135 different 8-bit textures on cutout
   faces in the base game's archives and 12 community tracks, 116 have pure black.
   `AZ8FN2.RAW` and `AZ8FN3.RAW` (ferns on The Excavation, `AZTEC.POD`, faces of type 51)
-  have none: through their own palettes, their background is index 205, (7, 7, 7), over
-  37035 and 40383 of 65536 texels. The pure-black rule leaves that background as a dark
-  square; `AZ8FN1.RAW` beside them, with a pure-black background, is cut correctly.
-  Whether MTM2 cut (7, 7, 7) is **open**. A 16-bit 5-5-5 texture would make it black, but
-  a rule of "every channel under 8" would also cut 3600 to 7500 texels inside each of the
-  Graveyard's trees, fences and gates (`JUNK.POD`), and no file can show which is right.
-  **Override (ours, not MTM2's):** the scenery cuts a texture with no pure black by the
-  colour of its top two corners, where they are the same and no channel is over 7. Of the
-  16 other cutout textures with no pure black, that cuts none; with no limit, it would cut
-  13 of them (banners, hedges and walls), two entirely.
+  have none: their background is index 205, (7, 7, 7), over 37035 and 40383 of 65536
+  texels. The pure-black rule leaves it as a dark square. `AZ8FN1.RAW` beside them has a
+  pure-black background and is cut correctly. Whether MTM2 cut (7, 7, 7) is **open**. A
+  16-bit 5-5-5 texture would make it black, but a rule of "every channel under 8" would
+  also cut 3600 to 7500 texels inside each of the Graveyard's trees, fences and gates
+  (`JUNK.POD`). No file can show which is right. **Override (ours, not MTM2's):** the
+  scenery cuts a texture with no pure black by the colour of its top two corners, where
+  they are the same and no channel is over 7. Of the 16 other cutout textures with no
+  pure black, that cuts none. With no limit it would cut 13 of them (banners, hedges and
+  walls), two entirely.
 - Textures are 64 x 64, 8-bit, through the track's palette, like the ground's. A truck's
   are up to 256 x 256, each through a palette of its own: see [truck.md](truck.md).
 
 ## Materials (Community Patch 3)
 
 A material record is 12 ints with its type, **reference** (JSTrackViewer,
-`src/worker/bin-decoder.js`). **Measured**: at that length every model in
-`BAJBEACH_MTM2_HD.POD`, `TDSNAKE.POD` and `GMC1500TT.POD` reads exactly to its end
-record, 62 models in all. Only a face of type 64 takes the material. Faces of other types
-that follow a material record ignore it (**reference**). Snake River and the GMC truck have
-such faces.
+`src/worker/bin-decoder.js`). **Measured**: at that length all 62 models in
+`BAJBEACH_MTM2_HD.POD`, `TDSNAKE.POD` and `GMC1500TT.POD` read exactly to their end
+record. Only a face of type 64 takes the material; other face types that follow it ignore
+it (**reference**). Snake River and the GMC truck have such faces.
 
 The first int is flags, and the fifth is the base alpha, in 16.16 fixed point
 (**reference**, JSTruckViewer `docs/BIN_HD_FORMAT.md`). The game uses three flags:
@@ -134,27 +132,27 @@ The first int is flags, and the fifth is the base alpha, in 16.16 fixed point
 
 The flags that occur are `0x83` and `0x8f` (Baja, whose `0x8f` is its vegetation),
 `0x81` and `0x1089` (Snake River), and `0x16b` and `0x167` (the GMC truck, whose base
-alpha of 0.35 is glass). The other bits (lit, additive, no depth write, emissive, tint),
-and the other ints, are not used yet.
+alpha of 0.35 is glass). The other bits (lit, additive, no depth write, emissive, tint)
+and the other ints are not used yet.
 
 A two-sided face can also have its back written in the file. **Measured** on Baja Beach:
-in 8 of its models (the four trees, the two huts, the ship and the plane), 554 faces have a second face with
-the same corners in the reverse order. Both faces are two-sided, and the texture positions
-are different. The importer draws the back of a two-sided face only when the model does not
-have that face in the reverse order. If it did, the two backs are in the same position
-with different textures, and they flicker. **Measured** on all our tracks: no other track
-or truck has such faces.
+in 8 of its models (the four trees, the two huts, the ship and the plane), 554 faces have
+a second face with the same corners in the reverse order. Both are two-sided, with
+different texture positions. The importer draws the back of a two-sided face only when
+the model does not have that face in the reverse order; two backs in the same position
+with different textures flicker. **Measured** on all our tracks: no other track or truck
+has such faces.
 
-Some files also write a face two times, in the same order. On Baja Beach the copies
-are the same (the fence and the raft). On Rute 756 Jam (`BFVPROP.BIN`) they have
-different textures. How the game selects between those is **open**. The importer
-draws them as the file gives them.
+Some files write a face two times in the same order. On Baja Beach the copies are the
+same (the fence and the raft). On Rute 756 Jam (`BFVPROP.BIN`) they have different
+textures. How the game selects between those is **open**. The importer draws them as the
+file gives them.
 
 ## Animated textures (record 29)
 
 A texture record that names more than one texture. The layout and length (32 x count +
 28 bytes) are **reference** (JSTrackViewer, `src/worker/bin-decoder.js`, which calls it
-MRGL_TEXTURECYCLE and takes its first name), and **measured**: every model that has one
+MRGL_TEXTURECYCLE and takes its first name) and **measured**: every model that has one
 reads to its end record at that length, and the names are texture files in the archive.
 
 | Offset | Field | Notes |
@@ -163,7 +161,7 @@ reads to its end record at that length, and the names are texture files in the a
 | 4 | ? | 0 in every file seen. **Open**. |
 | 8 | count | How many names: 2 to 8 in our files. |
 | 12 | ? | 0 in every file seen. **Open**. |
-| 16 | rate | A number that differs from cycle to cycle. See below. |
+| 16 | rate | Differs from cycle to cycle. See below. |
 | 20, 24 | ? | 0 in every file seen. **Open**. |
 | 28 | names | count x 32 bytes, each a file name that ends at its first NUL. Some files have rubbish after the NUL. |
 
@@ -180,36 +178,35 @@ reads to its end record at that length, and the names are texture files in the a
 The names read as the frames of an animation (`rotor1` to `rotor8`, `88light1` and
 `88light2`). How MTM2 steps through them, and what the rate means, is **open**.
 
-**Own.** The game here shows the frames in the order written, round and round, each for
-the same time, with no blending, all on one clock. It reads the rate as 16.16 fixed point
-and uses that as seconds per frame: 1024 is 1/64 s for the rotor, 43690 is 2/3 s for the
-warning light. That reading is the game's own choice. What supports it is only that
-several rates are simple fractions of 65536 (1024, 32767 and 43690 are 1/64, about 1/2
-and about 2/3 of it), as the 16.16 numbers of this format are (texture coordinates, above, and a
-material's base alpha); no file shows the unit. The scenery puts a cycle's frames in
-consecutive tiles and steps through them in its material (`track/tiles.wgsl`); a truck
-switches the texture of the material (`truck/looks.rs`). The backdrop shows the first
-frame. **Measured**: every frame is in its archive, on every track and truck we have.
+**Own.** The game shows the frames in the order written, round and round, each for the
+same time, with no blending, all on one clock. It reads the rate as 16.16 fixed point
+seconds per frame: 1024 is 1/64 s for the rotor, 43690 is 2/3 s for the warning light.
+The only support is that several rates are simple fractions of 65536 (1024, 32767 and
+43690 are 1/64, about 1/2 and about 2/3 of it), as the format's other 16.16 numbers are
+(texture coordinates and a material's base alpha). No file shows the unit. The scenery
+puts a cycle's frames in consecutive tiles and steps through them in its material
+(`track/tiles.wgsl`); a truck switches the texture of the material (`truck/looks.rs`).
+The backdrop shows the first frame. **Measured**: every frame is in its archive, on every
+track and truck we have.
 
 ## Order and Jump (records 12 and 18)
 
 Both are stepped over by their lengths, 7 and 2 ints with the type (**reference**,
-JSTrackViewer, `src/worker/bin-decoder.js`, which also notes that the game follows a jump
-when it draws, rather than stepping over it). What the Order's numbers mean is **open**.
+JSTrackViewer, `src/worker/bin-decoder.js`, which notes that the game follows a jump when
+it draws). What the Order's numbers mean is **open**.
 
-The only model with them is Alpine's `HELI.BIN`. **Measured**: its Jump's second int,
-added to where the Jump starts, lands on the start of a record, for all three: the first
-jumps from after the vertices to the Order near the end, the other two to the end record.
-The Order's last two ints, added likewise, land on the starts of the body's first record
-and of the rotor's animated texture. Read straight through, stepping over both, the
-helicopter reads every face once and to its end record, and the rotor's faces take the
-animated texture (**measured**). What a model would need if it
-had faces that a Jump jumps over is **open**; no such model has been seen.
+The only model with them is Alpine's `HELI.BIN`. **Measured**: each Jump's second int,
+added to where the Jump starts, lands on the start of a record. The first jumps from
+after the vertices to the Order near the end, the other two to the end record. The
+Order's last two ints, added likewise, land on the starts of the body's first record and
+of the rotor's animated texture. Stepping over both, the helicopter reads every face once
+and to its end record, and the rotor's faces take the animated texture (**measured**).
+What a model would need if a Jump jumped over faces is **open**; none has been seen.
 
 ## Animation control files (keyframes)
 
-A .BIN whose first int is 32 (0x20) is not a model but a list of the models that are the
-frames of one. **Reference** (JSTrackViewer, `src/worker/bin-decoder.js` and
+A .BIN whose first int is 32 (0x20) is a list of the models that are the frames of one.
+**Reference** (JSTrackViewer, `src/worker/bin-decoder.js` and
 `src/worker/track-worker.js`): the count is at int 2, the names are 16 bytes each from int
 6, the record is 344 bytes (86 ints), and the frames are separate models. **Measured** on
 the four in our files:
@@ -224,10 +221,9 @@ the four in our files:
 | 24 | names | 16 bytes each, NUL-padded file names of the frame models, with `.bin`. Zero after the last. |
 | 344 | 0 | An end record. Every file is 348 bytes. |
 
-Every frame is a model in the same archive, and all the frames of one file have as many
-vertices as its first, and as many records of each type (**measured**, on the base game
-and on our tracks). So the frames of one animation read as one model with
-its vertices in other places.
+Every frame is a model in the same archive, with as many vertices as the first frame and
+as many records of each type (**measured**, on the base game and on our tracks). So the
+frames read as one model with its vertices in other places.
 
 | File | Archive | Frames | Vertices | Rate | Placed |
 | --- | --- | --- | --- | --- | --- |
@@ -239,16 +235,18 @@ its vertices in other places.
 A track places a control file exactly as it places a model: the box's model line names it
 (**measured**). How MTM2 moves between the frames, and what the rate means, is **open**.
 
-**Own.** The game draws the first frame's faces, textures and texture positions, and
-moves each vertex in a straight line from where one frame puts it to where the next does,
-round and round from the last to the first, on one clock, so that every copy of a model
-moves in step. Every face's normal is worked out again from where its corners are, so a
-face that turns is lit as it faces. It reads the rate as 16.16 fixed point, as for an
-animated texture, and uses it as seconds from one frame to the next: 1 s for the
-dinosaur, 0.5 s for the pump jack. What is solid is the first frame. `src/pod/mod.rs`
-reads the first frame into `Track::models` and every frame's vertices into
-`Track::animated_models`; a frame that is missing, or has another vertex count, leaves the
-model still. The scenery moves the mesh (`scenery/animation.rs`). Bevy 0.19 shows a model like this in its first frame if it comes into view after it is spawned, unless the game makes Bevy write the model's data again (`refresh_morphs_in_view`).
+**Own.** The game draws the first frame's faces, textures and texture positions. It moves
+each vertex in a straight line from one frame's place to the next, round and round from
+the last to the first, on one clock, so that every copy of a model moves in step. Each
+face's normal is worked out again from its corners, so a face that turns is lit as it
+faces. The rate is read as 16.16 fixed point seconds from one frame to the next, as for
+an animated texture: 1 s for the dinosaur, 0.5 s for the pump jack. The first frame is
+what is solid. `src/pod/mod.rs` reads the first frame into `Track::models` and every
+frame's vertices into `Track::animated_models`. A frame that is missing, or has another
+vertex count, leaves the model still. The scenery moves the mesh
+(`scenery/animation.rs`). Bevy 0.19 shows such a model in its first frame if it comes
+into view after it is spawned, unless the game makes Bevy write the model's data again
+(`refresh_morphs_in_view`).
 
 ## Placing a model in a track
 
@@ -265,25 +263,24 @@ as a truck's.
 A checkpoint is as wide as its model: 110 ft for Alpine's banners, 192 ft for its finish
 line, whose model `CKBOX.BIN` is a plain 192 x 32 x 32 ft box. That box is the editor's
 trigger volume (its texture is the arrows that track makers line up with the direction
-of travel), and the game does not draw it. That it is invisible in MTM2 too, and that
+of travel), and the game does not draw it. That MTM2 does not draw it either, and that
 names starting `CKBOX` are the way to tell, is **reference** (community documentation).
 
 ## Backdrops
 
 The models that the track file's Backdrop section names (situation.md).
 
-- **Measured** on the 9 in our archives: each is a ring of
-  8 to 32 upright faces round its origin, 163 to 202 ft out, reaching 28 to 87 ft below
-  the origin and 28 to 51 ft above it. Every face is a cutout (type 17): the black of the
-  texture is the sky.
+- **Measured** on the 9 in our archives: each is a ring of 8 to 32 upright faces round
+  its origin, 163 to 202 ft out, reaching 28 to 87 ft below the origin and 28 to 51 ft
+  above it. Every face is a cutout (type 17): the black of the texture is the sky.
 - The corners of some models run one way round and of others the other (Alpine's
   `11EDROP.BIN` and Hang Time's `C3DROP.BIN`), so the game draws both sides.
 - **Reference** (JSTrackViewer, `src/scene.js`, citing the Traxx editor's source): the
-  original game draws the backdrop centred on the camera every frame, so that it never
-  comes nearer, first and with no depth test, so that everything else is drawn over it,
-  without lighting or fog, and at the size it was made, without the height stretch that
-  objects get. The game here keeps it centred on the camera and scales it up to just inside
-  the camera's far plane, which looks the same from its middle (`src/backdrop.rs`).
+  original game draws the backdrop centred on the camera every frame, first and with no
+  depth test, without lighting or fog, and at the size it was made, without the height
+  stretch that objects get. The game here keeps it centred on the camera and scales it up
+  to just inside the camera's far plane, which looks the same from its middle
+  (`src/backdrop.rs`).
 - A backdrop's textures are larger than the scenery's (256 x 256 in 6 of the 9) and have
   palettes of their own: see textures.md.
 

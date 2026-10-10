@@ -38,6 +38,7 @@ pub mod pod;
 pub mod race;
 pub mod scenery;
 pub mod sky;
+pub mod sound;
 pub mod store;
 pub mod track;
 pub mod truck;

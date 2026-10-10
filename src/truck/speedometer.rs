@@ -3,7 +3,7 @@
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 
-use super::{Gear, Gearbox, Player, SpeedUnits};
+use super::{Engine, Gear, Gearbox, Player, SpeedUnits};
 use crate::game_state::GameState;
 
 /// Metres per second to kilometres per hour, and to miles per hour.
@@ -29,13 +29,13 @@ pub(super) fn spawn_speedometer(mut commands: Commands, units: Res<SpeedUnits>) 
 }
 
 pub(super) fn update_speedometer(
-    truck: Single<(&LinearVelocity, &Gearbox), Player>,
+    truck: Single<(&LinearVelocity, &Gearbox, &Engine), Player>,
     units: Res<SpeedUnits>,
     mut text: Single<&mut Text, With<SpeedText>>,
 ) {
-    let (velocity, gearbox) = *truck;
+    let (velocity, gearbox, engine) = *truck;
     let mut shown = speed_text(velocity.0.length(), gearbox.gear(), *units);
-    if gearbox.stalled() {
+    if !engine.running() {
         shown.push_str(" stalled");
     }
     // Only when it changes, so that the text is not laid out again every frame.
@@ -66,6 +66,9 @@ mod tests {
             speed_text(27.778, Gear::Forward(4), SpeedUnits::Mph),
             "62 mph   Gear 4"
         );
-        assert_eq!(speed_text(2.0, Gear::Reverse, SpeedUnits::Mph), "4 mph   Gear R");
+        assert_eq!(
+            speed_text(2.0, Gear::Reverse, SpeedUnits::Mph),
+            "4 mph   Gear R"
+        );
     }
 }

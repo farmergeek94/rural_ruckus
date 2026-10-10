@@ -26,6 +26,7 @@ mod texture_map;
 mod texture_types;
 mod textures;
 mod truck_file;
+mod wave;
 
 pub use archive::{Entry, HEADER_LENGTH as ARCHIVE_HEADER_LENGTH, PodArchive};
 use base::Files;
@@ -45,6 +46,7 @@ pub use texture_map::{TextureCell, TextureMap};
 pub use texture_types::{TextureType, TextureTypes};
 pub use textures::{Palette, Picture, Texture, parse_texture_list};
 pub use truck_file::{Side, Tires, TruckFile, TruckLight, Wheel};
+pub use wave::Wave;
 
 /// The folder each kind of file lives in. Files name each other by bare file name, and
 /// the same name turns up in more than one folder, so each lookup says where to look

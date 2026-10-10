@@ -79,8 +79,8 @@ use bevy::tasks::{ComputeTaskPool, TaskPool};
 
 use super::interpolate::WheelPose;
 use super::{
-    Gearbox, GroundGrip, Held, Truck, TruckConfig, TruckInput, TruckWheelColliders, TruckWheels, Wheel,
-    WheelCollider, WheelCore,
+    Engine, GroundGrip, Held, Truck, TruckConfig, TruckInput, TruckWheelColliders, TruckWheels,
+    Wheel, WheelCollider, WheelCore,
 };
 use crate::collision_groups::{GROUND, GROUND_BOXES};
 
@@ -544,7 +544,7 @@ type DrivenTruck = (
     Option<&'static mut TipGuard>,
     Option<&'static GroundGrip>,
     Has<Held>,
-    &'static Gearbox,
+    &'static Engine,
 );
 
 /// Where one tire is swept from and how, worked out for every tire before any is swept, so
@@ -724,7 +724,7 @@ pub(super) fn drive_truck(
             mut guard,
             ground_grip,
             held,
-            gearbox,
+            engine,
         ),
         planned,
     ) in trucks.iter_mut().zip(&planned)
@@ -1165,9 +1165,9 @@ pub(super) fn drive_truck(
                 } else if braking {
                     input.throttle * config.brake_force
                 } else {
-                    // As much of it as the gear lets through (see `gearbox`).
-                    let pull = (1.0 - forward_speed.abs() / config.top_speed).max(0.0);
-                    input.throttle * config.engine_force * pull * gearbox.push
+                    // What the engine pushes each wheel with through the gear and the
+                    // clutch, or brakes it with off the throttle (see `engine`).
+                    engine.wheel_force
                 };
                 // The tip guard brakes in place of what was asked for, as far as it is on.
                 let guarded = if forward_speed.abs() > 0.5 {

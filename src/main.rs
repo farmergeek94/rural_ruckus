@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use monster_truck_rural_ruckus::{
     backdrop, base_game, camera, controls_help, diagnostics, display, environment, footing,
     frame_pacing, front_end, game_state, graphics_debug, lighting, opponents, particles, physics,
-    physics_debug, race, scenery, sky, store, track, truck, water, weather,
+    physics_debug, race, scenery, sky, sound, store, track, truck, water, weather,
 };
 
 /// Where what the player chose is remembered, beside the working directory as `tracks/` and
@@ -298,7 +298,11 @@ fn main() {
         particles::ParticlesPlugin,
         weather::WeatherPlugin,
         // Nested because a tuple of plugins tops out at 15.
-        (truck::TruckPlugin, footing::FootingPlugin),
+        (
+            truck::TruckPlugin,
+            footing::FootingPlugin,
+            sound::SoundPlugin,
+        ),
         race::RacePlugin,
         opponents::OpponentsPlugin,
         camera::ChaseCameraPlugin,

@@ -24,6 +24,13 @@ redb = "4.3"
 # Decodes the PNG textures that MTM2 Community Patch 3 packs in archives. Bevy already
 # builds this version for its own image loading, so it adds nothing to compile.
 png = "0.18"
+# cpal is already here through Bevy's audio. The feature asks the OS for real-time
+# priority on the audio thread (through RTKit on Linux), so that the game's own threads
+# cannot hold it off its 43 ms buffer: see the notes in `src/sound/mod.rs`. RTKit is
+# reached over D-Bus; the D-Bus library is built from the crate's own copy, so that no
+# development package is needed.
+cpal = { version = "0.17", features = ["audio_thread_priority"] }
+libdbus-sys = { version = "0.2", features = ["vendored"] }
 
 # Our own code is unoptimised so the debugger can show every local and step line by line,
 # while full optimisation for dependencies keeps Bevy and Avian usable in debug builds.
