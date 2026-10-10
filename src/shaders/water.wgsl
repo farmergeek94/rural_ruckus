@@ -7,9 +7,10 @@
 // - The chop: short waves on top, which only bend the light. The wind raises them, and
 //   more in its gusts, which sweep over the water as dark, ruffled patches (cat's paws).
 //   In a strong gust the swell's crests break into whitecaps.
-// - Rings that spread out from where trucks disturb the water (`ripples.rs`), each a
-//   short train of waves that widens and fades as it goes, with foam on its crests while
-//   it is young.
+// - The field of heights round the camera that the trucks disturb (`field.rs`): their
+//   bow waves, wakes and rings, which the graphics card spreads, and the foam they churn
+//   up, which lies on the water and fades. It really moves the surface on the patch, and
+//   bends the light and whitens the water everywhere it is shown.
 //
 // And where the water is shallow, from a map of its depth (`shore.rs`): foam along the
 // water's edge, which moves up and down the ground with the swell, lines of surf that roll
@@ -49,15 +50,11 @@
 #endif
 #endif
 
-struct Ripples {
-    // Per ripple: where it started (X, Z), when on `globals.time`, in seconds, and its
-    // strength in metres.
-    // As long as `MAX_RIPPLES` in `ripples.rs`.
-    ripples: array<vec4<f32>, 48>,
-    count: u32,
-}
-
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<storage, read> water: Ripples;
+// The field of heights (`field.wgsl`): per texel the height, in metres, how much it
+// rises for each metre along X and Z, and the foam. Texel `i` holds every cell of the
+// world whose index is `i` modulo `FIELD_TEXELS`, so it is read round and round.
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var field: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var field_sampler: sampler;
 struct Mirroring {
     // The sky's colour, in linear light.
     sky: vec4<f32>,
@@ -92,9 +89,17 @@ struct Shore {
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var depth_map: texture_2d<f32>;
 
 // As in `surface.rs`: how far the patch round the camera reaches, and how far apart its
-// vertices are, in metres.
+// vertices are, in metres; and the same for the fine patch ahead of the camera, round the
+// truck, which shows the bow wave and the wake as a shape, and how far ahead of the camera
+// its middle is.
 const PATCH_SIZE: f32 = 240.0;
 const PATCH_SPACING: f32 = 1.5;
+const FINE_SIZE: f32 = 36.0;
+const FINE_SPACING: f32 = 0.5;
+const FINE_AHEAD: f32 = 10.0;
+// How much of the way out from the fine patch's middle to its edge its surface starts to
+// ease towards the coarse patch's, which it meets at the edge without a crack.
+const FINE_EASE: f32 = 0.8;
 // How much of the way out from its middle the patch starts to ease its waves flat, so
 // that it meets the flat sheet round it without a step. Past `PATCH_SIZE` it is flat.
 const PATCH_EASE: f32 = 0.7;
@@ -125,25 +130,43 @@ const GUST_PERIODS: vec3<f32> = vec3(11.0, 4.7, 2.3);
 const TAU: f32 = 6.2831853;
 const GRAVITY: f32 = 9.81;
 
-// How fast a ring spreads, in m/s. Real ripples of about a metre go at 1 to 2 m/s. A little
-// quicker reads better at the speed trucks go.
-const RIPPLE_SPEED: f32 = 3.0;
-// The length of the waves in a ring, in metres.
-const RIPPLE_WAVELENGTH: f32 = 0.8;
-// How wide a ring's train of waves is when it starts, in metres, and how much wider it
-// grows for each metre it spreads. A train a few wavelengths wide is a few thin crests,
-// as real ripples are, rather than one broad band.
-const RIPPLE_WIDTH: f32 = 1.1;
-const RIPPLE_SPREAD: f32 = 0.15;
-// How long a ring takes to fade to a third, in seconds.
-const RIPPLE_FADE: f32 = 1.2;
-// How much a ring thins for each metre it spreads, as it shares itself round a longer
-// circle.
-const RIPPLE_THINNING: f32 = 0.25;
-// How much foam a ring's crests carry for their height, and how soon it goes, in seconds
-// (to a third). Foam is churned up where the water is broken, and does not travel far.
-const FOAM: f32 = 3.0;
-const FOAM_FADE: f32 = 0.5;
+// As in `field.rs`: how many texels the field's window round the camera is along a side,
+// and how far apart they are, in metres.
+const FIELD_TEXELS: f32 = 512.0;
+const FIELD_SPACING: f32 = 0.5;
+// How much of the way out from the camera to the window's edge the field is shown in
+// full. Past that it fades to nothing by the edge, where the window comes round.
+const FIELD_SHOWN: f32 = 0.8;
+// How white the field's foam is, for how much there is.
+const FIELD_FOAM: f32 = 1.0;
+// How far the foam's lumps swirl about, in metres, and how long one swirl takes, in
+// seconds: the foam turns over on the water, and is never the same picture twice.
+const FOAM_SWIRL: f32 = 0.5;
+const FOAM_SWIRL_PERIOD: f32 = 6.0;
+// How much of the foam's whiteness is left between its lumps where the foam is thin: the
+// dark water shows through there. Where it is thick, from `SOLID_FOAM` on, the gaps close:
+// churned water is white all over.
+const FOAM_GAPS: f32 = 0.3;
+const SOLID_FOAM: vec2<f32> = vec2(0.8, 1.4);
+// What the water is like where it is shallow: its colour, in linear light, lighter and
+// greener than deep water (`WATER_COLOR` in `surface.rs`), and how deep it is where the
+// deep colour has taken over, in metres.
+const SHALLOW_COLOR: vec3<f32> = vec3(0.02, 0.12, 0.11);
+const SHALLOW_DEPTH: f32 = 2.5;
+// How rough foam is, from 0 (as smooth as the water) to 1: foam does not glint.
+const FOAM_ROUGHNESS: f32 = 0.7;
+// How much the field's waves bend the light, for how steep they are: more than they
+// are, so that a low wake still catches the light.
+const FIELD_SLOPE: f32 = 2.5;
+// How soft the edge of the field's foam is: a patch of foam covers the water where the
+// foam's noise is under how much foam there is, over this much of the noise.
+const FOAM_EDGE: f32 = 0.3;
+// How much the lumps of foam stand up out of the water, as the light shades them. Flat
+// foam is a white blanket.
+const FOAM_BUMP: f32 = 4.0;
+// The bump is found over a few centimetres of the foam's noise rather than over a pixel,
+// which is steeper: this brings it to about what a pixel's gave.
+const FOAM_BUMP_SCALE: f32 = 0.02;
 // How big the patches of foam are, in metres. Foam is never an even band.
 const FOAM_PATCH: f32 = 0.35;
 // How much of what is round it the water mirrors, seen edge on. Looked straight down
@@ -189,8 +212,8 @@ const SURF_SPACING: f32 = 0.45;
 const SURF_PERIOD: f32 = 3.2;
 // How much foam there is on a line of surf, in the wind that the chop is written for.
 const SURF_FOAM: f32 = 0.8;
-// How much more foam a ring's crest carries where it breaks in the shallows, and how
-// shallow that is, in metres.
+// How much foam a crest of the field carries for its height where it breaks in the
+// shallows, and how shallow that is, in metres.
 const RING_BREAK: f32 = 30.0;
 const RING_BREAK_DEPTH: f32 = 0.8;
 // How far off the waves are half as strong, in metres. Far away they are smaller than a
@@ -199,7 +222,9 @@ const WAVE_DISTANCE: f32 = 60.0;
 
 // Smooth noise from 0 to 1, varying over about a unit.
 fn hash(cell: vec2<f32>) -> f32 {
-    return fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+    // Within a few hundred of 0: `sin` of a large number is not to be trusted.
+    let near = cell - floor(cell / 289.0) * 289.0;
+    return fract(sin(dot(near, vec2(127.1, 311.7))) * 43758.5453);
 }
 
 fn noise(position: vec2<f32>) -> f32 {
@@ -293,6 +318,21 @@ fn still_depth(position: vec2<f32>) -> f32 {
     return mix(near, far, within.y);
 }
 
+// The field at `position`: its height (x), how it slopes along X and Z (y, z) and its
+// foam (w), fading to nothing towards the edge of its window round the camera.
+fn field_at(position: vec2<f32>) -> vec4<f32> {
+    let out = max(
+        abs(position.x - view.world_position.x),
+        abs(position.y - view.world_position.z),
+    ) / (FIELD_TEXELS * FIELD_SPACING / 2.0);
+    let shown = 1.0 - smoothstep(FIELD_SHOWN, 1.0, out);
+    if shown <= 0.0 {
+        return vec4(0.0);
+    }
+    let uv = position / (FIELD_TEXELS * FIELD_SPACING);
+    return textureSampleLevel(field, field_sampler, uv, 0.0) * shown;
+}
+
 // How far the swell moves the patch's vertices up and down at a point `out_from_middle` of
 // the way from its middle to its edge: all the way, easing to none.
 fn patch_ease(out_from_middle: f32) -> f32 {
@@ -303,6 +343,39 @@ fn patch_ease(out_from_middle: f32) -> f32 {
 // vertices.
 fn patch_middle() -> vec2<f32> {
     return round(view.world_position.xz / PATCH_SPACING) * PATCH_SPACING;
+}
+
+// Where the middle of the fine patch is: `FINE_AHEAD` metres ahead of the camera, where
+// the truck it follows is, on the coarse patch's grid, so that the fine patch's edge lies
+// along the coarse patch's rows of vertices.
+fn fine_middle() -> vec2<f32> {
+    // The view's own Z points backwards.
+    let back = view.world_from_view[2].xz;
+    var ahead = vec2(0.0);
+    if length(back) > 0.1 {
+        ahead = -normalize(back);
+    }
+    return round((view.world_position.xz + ahead * FINE_AHEAD) / PATCH_SPACING) * PATCH_SPACING;
+}
+
+// How high the moving water stands over its level at `position`, in metres: the swell
+// and the field.
+fn lift(position: vec2<f32>) -> f32 {
+    return swell(position, globals.time).x + field_at(position).x;
+}
+
+// How high the coarse patch's surface stands at `position`: its vertices are `PATCH_SPACING`
+// apart on the grid, and straight between them.
+fn coarse_lift(position: vec2<f32>) -> f32 {
+    let corner = floor(position / PATCH_SPACING) * PATCH_SPACING;
+    let within = (position - corner) / PATCH_SPACING;
+    let near = mix(lift(corner), lift(corner + vec2(PATCH_SPACING, 0.0)), within.x);
+    let far = mix(
+        lift(corner + vec2(0.0, PATCH_SPACING)),
+        lift(corner + vec2(PATCH_SPACING, PATCH_SPACING)),
+        within.x,
+    );
+    return mix(near, far, within.y);
 }
 
 #ifndef PREPASS_PIPELINE
@@ -318,7 +391,14 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
         world_position = vec4(world_position.xyz + vec3(patch_middle().x, 0.0, patch_middle().y), 1.0);
         let out_from_middle = max(abs(mesh_vertex.position.x), abs(mesh_vertex.position.z)) / (PATCH_SIZE / 2.0);
         let ease = patch_ease(out_from_middle);
-        world_position.y += swell(world_position.xz, globals.time).x * ease;
+        world_position.y += lift(world_position.xz) * ease;
+    } else if wind.round_camera == 2u {
+        world_position = vec4(world_position.xyz + vec3(fine_middle().x, 0.0, fine_middle().y), 1.0);
+        let out_from_middle = max(abs(mesh_vertex.position.x), abs(mesh_vertex.position.z)) / (FINE_SIZE / 2.0);
+        // Its own surface in the middle, the coarse patch's at the edge. The fine patch is
+        // well inside where the coarse one eases flat.
+        let to_coarse = smoothstep(FINE_EASE, 1.0, out_from_middle);
+        world_position.y += mix(lift(world_position.xz), coarse_lift(world_position.xz), to_coarse);
     }
     out.world_position = world_position;
     out.position = position_world_to_clip(world_position.xyz);
@@ -361,30 +441,6 @@ fn wind_speed(time: f32) -> f32 {
     let quick = swing.z;
     let gust = 0.55 * slow + 0.3 * middle + 0.15 * quick;
     return WIND_SPEED + GUSTINESS * gust;
-}
-
-// The slope of one ring at `position` (x and y), the foam on it (z), and how high its
-// crest stands there (w), for foam where it breaks in the shallows.
-fn ring(position: vec2<f32>, ripple: vec4<f32>) -> vec4<f32> {
-    let offset = position - ripple.xy;
-    let from_center = length(offset);
-    let age = globals.time - ripple.z;
-    let radius = RIPPLE_SPEED * age;
-    let width = RIPPLE_WIDTH + RIPPLE_SPREAD * radius;
-    let across = from_center - radius;
-    // Most of the water is nowhere near most rings.
-    if abs(across) > 3.0 * width || from_center < 0.001 {
-        return vec4(0.0);
-    }
-    let height = ripple.w * exp(-age / RIPPLE_FADE) / (1.0 + RIPPLE_THINNING * radius);
-    let envelope = exp(-(across * across) / (width * width));
-    let k = TAU / RIPPLE_WAVELENGTH;
-    // The ring's height is height * envelope * cos(k * across); this is how it changes
-    // going outwards.
-    let outwards = height * envelope
-        * (-2.0 * across / (width * width) * cos(k * across) - k * sin(k * across));
-    let crest = height * envelope * max(cos(k * across), 0.0);
-    return vec4(offset / from_center * outwards, crest * exp(-age / FOAM_FADE), crest);
 }
 
 #ifndef PREPASS_PIPELINE
@@ -491,11 +547,15 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
     let position = in.world_position.xz;
-    // The sheet leaves the water round the camera to the patch, and the patch leaves the
-    // rest to the sheet, by the same test (see `surface.rs`).
+    // The sheet leaves the water round the camera to the patch, the patch leaves the rest
+    // to the sheet and what is round the truck to the fine patch, by the same tests (see
+    // `surface.rs`).
     let from_middle = abs(position - patch_middle());
     let in_patch = max(from_middle.x, from_middle.y) < PATCH_SIZE / 2.0;
-    if in_patch != (wind.round_camera == 1u) {
+    let from_fine = abs(position - fine_middle());
+    let in_fine = max(from_fine.x, from_fine.y) < FINE_SIZE / 2.0;
+    let drawn_by = select(select(0u, 1u, in_patch), 2u, in_fine);
+    if drawn_by != wind.round_camera {
         discard;
     }
 
@@ -509,22 +569,47 @@ fn fragment(
     let breeze = wind_now / CHOP_WIND;
 
     let swell_here = swell(position, time);
+    let field_here = field_at(position);
     // How deep the water is here, as it is drawn: on the patch, the swell moves it.
     var depth = still_depth(position);
-    if wind.round_camera == 1u {
-        depth += swell_here.x * patch_ease(max(from_middle.x, from_middle.y) / (PATCH_SIZE / 2.0));
+    if wind.round_camera != 0u {
+        depth += (swell_here.x + field_here.x) * patch_ease(max(from_middle.x, from_middle.y) / (PATCH_SIZE / 2.0));
     }
     let breaking = 1.0 - smoothstep(0.0, RING_BREAK_DEPTH, depth);
-    var slope = swell_here.yz + chop(position, time) * breeze * mix(0.5, 1.8, gust);
-    var foam = 0.0;
-    for (var index = 0u; index < water.count; index++) {
-        let found = ring(position, water.ripples[index]);
-        slope += found.xy;
-        foam += found.z + found.w * RING_BREAK * breaking;
-    }
+    var slope = swell_here.yz + field_here.yz * FIELD_SLOPE + chop(position, time) * breeze * mix(0.5, 1.8, gust);
+    let foam = field_here.w * FIELD_FOAM + max(field_here.x, 0.0) * RING_BREAK * breaking;
     slope *= nearness;
 
-    var normal = normalize(vec3(-slope.x, 1.0, -slope.y));
+    // The field's foam: ragged patches, in lumps of a few sizes, which cover the water
+    // where there is most foam and break up into specks where there is little. Only
+    // worked out where there is foam at all: most of the water has none, and the noise
+    // for it is the dearest thing in this shader on a built-in GPU.
+    var covered = 0.0;
+    var foam_bump = vec2(0.0);
+    if foam > 0.002 {
+        let swirl = vec2(
+            noise(position / 3.0 + time / FOAM_SWIRL_PERIOD),
+            noise(position / 3.0 + 11.0 - time / FOAM_SWIRL_PERIOD),
+        ) * (2.0 * FOAM_SWIRL) - FOAM_SWIRL;
+        let swirled = position + swirl;
+        let lumps = noise(swirled / 0.25 + 7.0) * 0.5 + noise(swirled / 0.7 + 31.0) * 0.3
+            + noise(position / 2.1 + 57.0) * 0.2;
+        // Thinner between the lumps, where the dark water shows through the bubbles.
+        let gaps = mix(FOAM_GAPS, 1.0, smoothstep(SOLID_FOAM.x, SOLID_FOAM.y, foam));
+        covered = smoothstep(0.0, FOAM_EDGE, foam - (1.0 - lumps))
+            * mix(gaps, 1.0, smoothstep(0.3, 0.8, lumps));
+        // The lumps of foam are lit as lumps: the normal leans with the slope of their
+        // noise, found a little way along X and Z, which is near enough for a bump. (Not
+        // from the picture's derivatives: those are not to be had inside a branch.)
+        let step = 0.03;
+        let along_x = noise((swirled + vec2(step, 0.0)) / 0.25 + 7.0) * 0.5
+            + noise((swirled + vec2(step, 0.0)) / 0.7 + 31.0) * 0.3;
+        let along_z = noise((swirled + vec2(0.0, step)) / 0.25 + 7.0) * 0.5
+            + noise((swirled + vec2(0.0, step)) / 0.7 + 31.0) * 0.3;
+        let fine = noise(swirled / 0.25 + 7.0) * 0.5 + noise(swirled / 0.7 + 31.0) * 0.3;
+        foam_bump = vec2(along_x - fine, along_z - fine) / step * FOAM_BUMP * covered * FOAM_BUMP_SCALE;
+    }
+    var normal = normalize(vec3(-slope.x + foam_bump.x, 1.0, -slope.y + foam_bump.y));
     // Seen from under the water, the surface faces down.
     if !is_front {
         normal = -normal;
@@ -532,11 +617,15 @@ fn fragment(
     pbr_input.N = normal;
     pbr_input.world_normal = normal;
 
-    let patches = noise(position / FOAM_PATCH) * 0.6 + noise(position / (FOAM_PATCH * 3.1)) * 0.4;
     // Whitecaps: the swell's highest crests, where a strong gust is blowing.
     let crest = swell_here.x / (SWELL_HEIGHTS.x + SWELL_HEIGHTS.y + SWELL_HEIGHTS.z);
     let whitecaps = smoothstep(0.6, 0.9, crest) * gust
         * smoothstep(WHITECAP_WIND.x, WHITECAP_WIND.y, wind_now);
+    // The patches of foam on whitecaps and along the shore: only worked out there.
+    var patches = 0.5;
+    if whitecaps > 0.0 || depth < SURF_DEPTH {
+        patches = noise(position / FOAM_PATCH) * 0.6 + noise(position / (FOAM_PATCH * 3.1)) * 0.4;
+    }
     // The shore: a band of foam along the water's edge, never quite even, and lines of surf
     // rolling in to it, which come in at constant depths, so run along the shore.
     let edge = (1.0 - smoothstep(0.0, EDGE_FOAM_DEPTH, depth)) * (0.7 + 0.5 * patches);
@@ -544,7 +633,7 @@ fn fragment(
     let surf = surf_line * (1.0 - smoothstep(0.2, SURF_DEPTH, depth)) * SURF_FOAM
         * min(breeze, 1.5) * mix(0.7, 1.3, gust) * mix(0.5, 1.1, patches);
     let whiteness = clamp(
-        (foam * FOAM + whitecaps) * smoothstep(0.35, 0.7, patches) + edge + surf,
+        covered + whitecaps * smoothstep(0.35, 0.7, patches) + edge + surf,
         0.0,
         0.85,
     );
@@ -552,7 +641,9 @@ fn fragment(
     // and hides what is under it (Fresnel).
     let facing = abs(dot(normal, pbr_input.V));
     let glancing = pow(1.0 - facing, 3.0);
-    let color = pbr_input.material.base_color;
+    var color = pbr_input.material.base_color;
+    // Shallow water is lighter and greener than deep.
+    color = vec4(mix(SHALLOW_COLOR, color.rgb, smoothstep(0.0, SHALLOW_DEPTH, depth)), color.a);
     // The deeper the water the view goes through, the less of the ground under it shows:
     // the alpha is how much deep water hides. Seen from under the water, the view goes
     // out of it, into the air.
@@ -563,6 +654,7 @@ fn fragment(
     }
     let opacity = max(mix(murk, 0.95, glancing), whiteness);
     pbr_input.material.base_color = vec4(mix(color.rgb, vec3(0.95, 0.97, 1.0), whiteness), opacity);
+    pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, FOAM_ROUGHNESS, whiteness);
     // Only there to put the water in the transmissive pass (see `surface.rs`).
     pbr_input.material.specular_transmission = 0.0;
 
@@ -591,9 +683,15 @@ fn fragment(
     }
     out.color = vec4(mix(out.color.rgb, mirrored, mirror), 1.0);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
-    // What is under the water, through it, as a see-through material would show it.
-    let under = textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
-    out.color = vec4(mix(under, out.color.rgb, opacity), 1.0);
+    if mirroring.scenery == 1u {
+        // In the transmissive pass, drawn solid: what is under the water, through it, as a
+        // see-through material would show it.
+        let under = textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
+        out.color = vec4(mix(under, out.color.rgb, opacity), 1.0);
+    } else {
+        // In the transparent pass, blended over what is under it (see `surface.rs`).
+        out.color = vec4(out.color.rgb, opacity);
+    }
 #endif
 
     return out;

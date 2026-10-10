@@ -6,8 +6,12 @@
 //! - `surface`: the surface, drawn with `water.wgsl`, which moves it with waves: a swell
 //!   that rolls downwind, and a chop that the wind's gusts ruffle as they sweep over it.
 //! - `wind`: the wind that raises the waves and carries the spray, which gusts.
-//! - `ripples`: the rings that spread from where trucks disturb it, which the shader draws.
-//! - `wake`: where trucks' tires break the surface, and the ripples they leave.
+//! - `field`: the water round the camera as a field of heights that the trucks disturb,
+//!   stepped on the graphics card: the wakes, the rings and the foam they leave.
+//! - `ripples`: the rings the trucks start, as the CPU keeps count of them, for where
+//!   they come to the shore.
+//! - `wake`: where trucks' tires break the surface, what they do to the field, and the
+//!   ripples they leave.
 //! - `shore`: where the water meets the land: the foam and surf that `water.wgsl` draws
 //!   there, and where the swell and the trucks' ripples break on it.
 //!
@@ -30,6 +34,7 @@
 //! `weather` slice, if it is there, for whether the water is frozen.
 //! Its forces are added to the truck's own, after `TruckSystems::Drive` has written them.
 
+mod field;
 mod forces;
 mod ice;
 mod ripples;
@@ -62,7 +67,10 @@ impl Plugin for WaterPlugin {
         app.init_resource::<WaterSettings>()
             .add_systems(
                 OnEnter(GameState::Racing),
-                (surface::spawn_water, ice::spawn_ice).after(TrackSystems::Prepare),
+                // The surface draws from the field, so the field is made first.
+                (field::make_field, surface::spawn_water, ice::spawn_ice)
+                    .chain()
+                    .after(TrackSystems::Prepare),
             )
             .add_systems(
                 FixedUpdate,
@@ -89,6 +97,7 @@ impl Plugin for WaterPlugin {
                     Path::new(surface::SHADER_PATH.trim_start_matches("embedded://")),
                     include_bytes!("../shaders/water.wgsl").as_slice(),
                 );
+            field::add(app);
             app.add_plugins(MaterialPlugin::<surface::WaterMaterial>::default())
                 .init_resource::<ripples::Ripples>()
                 .init_resource::<Wind>()
@@ -106,8 +115,10 @@ impl Plugin for WaterPlugin {
                         (wake::wade, shore::find_surf)
                             .run_if(not(ice::frozen))
                             .in_set(WaterSystems::Waves),
-                        surface::show_waves,
+                        ripples::expire_ripples,
                         surface::mirror,
+                        surface::receive_shadows
+                            .run_if(resource_exists_and_changed::<WaterSettings>),
                         underwater::tint_under_water,
                     )
                         .chain()
@@ -205,8 +216,13 @@ pub struct WaterSettings {
     pub flat: bool,
     /// Whether the moving water mirrors the scenery round it, as well as the sky's colour.
     /// It is found in the picture already drawn, so what is off the picture is not
-    /// mirrored. It costs time for every pixel of water seen at a glancing angle.
+    /// mirrored. It costs time for every pixel of water seen at a glancing angle, and
+    /// needs the picture copied for it, which with MSAA costs a resolve of the whole
+    /// picture besides: off, the water is drawn as a plain see-through surface instead.
     pub reflections: bool,
+    /// Whether the trucks' shadows fall on the moving water. Finding the shadow costs
+    /// time for every pixel of water.
+    pub shadows: bool,
 }
 
 impl Default for WaterSettings {
@@ -215,6 +231,7 @@ impl Default for WaterSettings {
             splashes: true,
             flat: false,
             reflections: true,
+            shadows: true,
         }
     }
 }

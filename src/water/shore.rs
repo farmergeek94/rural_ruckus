@@ -28,8 +28,10 @@ use crate::track::{HeightGrid, Track};
 const SWELL_ANGLES: [f32; 3] = [0.0, 0.45, -0.6];
 const SWELL_LENGTHS: [f32; 3] = [16.0, 10.5, 6.5];
 const SWELL_HEIGHTS: [f32; 3] = [0.26, 0.15, 0.08];
-/// The rings, as `water.wgsl` has them: how fast they spread (m/s), how long they take
-/// to fade to a third (seconds), and how much they thin for each metre they spread.
+/// The rings, as the field of heights spreads them (`field.wgsl`): how fast they go
+/// (m/s, which a test checks), and the game's own guess at how long they take to fade
+/// to a third (seconds) and how much they thin for each metre they spread. The field is
+/// never read back, so where a ring has got to is reckoned here.
 const RIPPLE_SPEED: f32 = 3.0;
 const RIPPLE_FADE: f32 = 1.2;
 const RIPPLE_THINNING: f32 = 0.25;
@@ -101,7 +103,7 @@ impl Depths {
 }
 
 /// Where the depth map lies, as `water.wgsl` reads it.
-#[derive(ShaderType, Clone, Copy, Debug, Default)]
+#[derive(ShaderType, Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct ShoreUniform {
     /// Where the first texel is, on the ground plane (world X and Z), in metres.
     origin: Vec2,
@@ -395,12 +397,12 @@ mod tests {
             format!("const SWELL_ANGLES: vec3<f32> = {}", vec3(SWELL_ANGLES)),
             format!("const SWELL_LENGTHS: vec3<f32> = {}", vec3(SWELL_LENGTHS)),
             format!("const SWELL_HEIGHTS: vec3<f32> = {}", vec3(SWELL_HEIGHTS)),
-            format!("const RIPPLE_SPEED: f32 = {RIPPLE_SPEED:?};"),
-            format!("const RIPPLE_FADE: f32 = {RIPPLE_FADE:?};"),
-            format!("const RIPPLE_THINNING: f32 = {RIPPLE_THINNING:?};"),
         ] {
             assert!(shader.contains(&line), "water.wgsl lacks `{line}`");
         }
+        let field = include_str!("../shaders/field.wgsl");
+        let line = format!("const RIPPLE_SPEED: f32 = {RIPPLE_SPEED:?};");
+        assert!(field.contains(&line), "field.wgsl lacks `{line}`");
     }
 
     #[test]

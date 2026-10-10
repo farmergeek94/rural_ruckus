@@ -351,21 +351,9 @@ impl Slot {
 }
 
 /// Writes of slots to a pool's buffer: in the main world, those of this frame, which the
-/// render world takes at extraction and writes to the graphics card. Sheets (`sheet`) send
-/// their rows the same way.
+/// render world takes at extraction and writes to the graphics card.
 #[derive(Resource, Default)]
 pub(super) struct Uploads(Vec<Upload>);
-
-impl Uploads {
-    /// Writes `bytes` into `buffer`, `offset` bytes in, at the end of this frame.
-    pub(super) fn send(&mut self, buffer: AssetId<ShaderBuffer>, offset: u64, bytes: Vec<u8>) {
-        self.0.push(Upload {
-            buffer,
-            offset,
-            bytes,
-        });
-    }
-}
 
 /// A run of neighbouring slots, written as one.
 struct Upload {

@@ -607,15 +607,18 @@ fn balanced_quality_is_integrated_graphics() {
         mipmaps: false,
         ..TrackSettings::default()
     };
+    let mut water = WaterSettings::default();
     monster_truck_rural_ruckus::front_end::integrated_graphics(
         &mut camera,
         &mut environment,
         &mut track,
+        &mut water,
     );
     let world = app.world();
     assert_eq!(*world.resource::<CameraSettings>(), camera);
     assert_eq!(*world.resource::<EnvironmentSettings>(), environment);
     assert_eq!(*world.resource::<TrackSettings>(), track);
+    assert_eq!(*world.resource::<WaterSettings>(), water);
 }
 
 /// F2 changes the graphics in a race, and the command line can set values that no line of

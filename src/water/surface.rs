@@ -24,7 +24,7 @@
 //! mixes what is under it into its colour itself, as a see-through material would.
 
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::light::NotShadowCaster;
+use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
     ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
@@ -33,11 +33,11 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
-use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use super::ripples::{Ripples, ShaderRipples};
-use super::shore::{ShoreUniform, depth_map};
+use super::field::Field;
+use super::ripples::Ripples;
+use super::shore::ShoreUniform;
 use super::wind::Wind;
 use super::{WaterSettings, WaterSurface};
 use crate::game_state::GameState;
@@ -60,6 +60,14 @@ const FLAT_WATER_ALPHA: f32 = 0.96;
 /// `water.wgsl`, which a test checks.
 const PATCH_SIZE: f32 = 240.0;
 const PATCH_SPACING: f32 = 1.5;
+/// The fine patch: how far it reaches, in metres along a side, and how far apart its
+/// vertices are. Its middle is `FINE_AHEAD` metres ahead of the camera (`water.wgsl`),
+/// where the truck the camera follows is. Vertices this close show a bow wave and a wake
+/// as a shape, not only in the light. It has (`FINE_SIZE` / `FINE_SPACING`)² squares. Its
+/// edge must lie on the patch's grid, so its size is a whole, even number of the patch's
+/// squares (a test checks). Both must match `water.wgsl`.
+const FINE_SIZE: f32 = 36.0;
+const FINE_SPACING: f32 = 0.5;
 /// How big the squares of the sheet round the patch are, in metres. Across one enormous
 /// triangle, where a pixel is on the water can only be worked out to a few tenths of a
 /// metre, and the edge the sheet leaves for the patch wandered by that much, a broken
@@ -74,9 +82,11 @@ pub(super) struct FlatWater;
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub(super) struct WaterWaves {
-    /// The ripples (`ShaderRipples`), in a buffer that both materials share.
-    #[storage(100, read_only)]
-    pub(super) ripples: Handle<ShaderBuffer>,
+    /// The field of heights round the camera that the trucks disturb (`Field::look`),
+    /// read between its texels, round and round.
+    #[texture(100)]
+    #[sampler(105)]
+    pub(super) field: Handle<Image>,
     #[uniform(101)]
     pub(super) mirroring: Mirroring,
     #[uniform(102)]
@@ -107,28 +117,22 @@ impl Mirroring {
     }
 }
 
-/// The buffer the water's materials read the ripples from, and what was last written to it.
-#[derive(Resource)]
-pub(super) struct RippleBuffer {
-    buffer: Handle<ShaderBuffer>,
-    sent: ShaderRipples,
-}
-
-/// The wind as `water.wgsl` reads it, and which of the two meshes this is. How hard it
+/// The wind as `water.wgsl` reads it, and which of the three meshes this is. How hard it
 /// blows the shader works out from its clock, as `wind` does (see there).
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub(super) struct WindUniform {
     /// Which way the wind blows, of length 1, on the ground plane (world X and Z).
     towards: Vec2,
-    /// 1 on the patch round the camera, 0 on the sheet everywhere else.
+    /// 0 on the sheet everywhere, 1 on the patch round the camera, 2 on the fine patch
+    /// ahead of it.
     round_camera: u32,
 }
 
 impl WindUniform {
-    fn new(wind: Wind, patch: bool) -> Self {
+    fn new(wind: Wind, mesh: u32) -> Self {
         Self {
             towards: wind.towards,
-            round_camera: patch as u32,
+            round_camera: mesh,
         }
     }
 }
@@ -188,19 +192,18 @@ pub(super) fn spawn_water(
     sky: Option<Res<ClearColor>>,
     settings: Res<WaterSettings>,
     wind: Option<Res<Wind>>,
-    // All absent in a headless app, which has no use for looks.
+    // All absent in a headless app, which has no use for looks. The field is made for
+    // this race just before, on a track with water.
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<WaterMaterial>>>,
     flat_materials: Option<ResMut<Assets<StandardMaterial>>>,
-    images: Option<ResMut<Assets<Image>>>,
-    buffers: Option<ResMut<Assets<ShaderBuffer>>>,
+    field: Option<Res<Field>>,
     ripples: Option<ResMut<Ripples>>,
 ) {
     // Nothing of the last race's water is left on this one.
     if let Some(mut ripples) = ripples {
         ripples.clear();
     }
-    commands.remove_resource::<RippleBuffer>();
     let Some(level) = track.water_level else {
         return;
     };
@@ -212,32 +215,18 @@ pub(super) fn spawn_water(
             DespawnOnExit(GameState::Racing),
         ))
         .id();
-    let (
-        Some(mut meshes),
-        Some(mut materials),
-        Some(mut flat_materials),
-        Some(mut images),
-        Some(mut buffers),
-    ) = (meshes, materials, flat_materials, images, buffers)
+    let (Some(mut meshes), Some(mut materials), Some(mut flat_materials), Some(field)) =
+        (meshes, materials, flat_materials, field)
     else {
         return;
     };
-    let sent = ShaderRipples::default();
-    let ripples = buffers.add(ShaderBuffer::from(sent.clone()));
-    commands.insert_resource(RippleBuffer {
-        buffer: ripples.clone(),
-        sent,
-    });
-    let (depth_map, shore) = depth_map(&track.heights, level);
-    let depths = images.add(depth_map);
     let wind = wind.map_or_else(Wind::default, |wind| *wind);
-    let mut material = |patch: bool| {
+    let mut material = |mesh: u32| {
         materials.add(WaterMaterial {
             base: StandardMaterial {
                 base_color: WATER_COLOR,
-                // Drawn solid: `water.wgsl` mixes in what is under the water itself.
-                alpha_mode: AlphaMode::Opaque,
-                specular_transmission: TRANSMISSIVE_PASS,
+                alpha_mode: alpha_mode(&settings),
+                specular_transmission: specular_transmission(&settings),
                 // Smooth, so that the sun glints off the waves that the shader makes. Little
                 // reflectance, since the sky it should mirror is not there to be: it would
                 // mirror a plain grey. `water.wgsl` mirrors the sky's colour instead.
@@ -249,15 +238,20 @@ pub(super) fn spawn_water(
                 ..default()
             },
             extension: WaterWaves {
-                ripples: ripples.clone(),
+                field: field.look.clone(),
                 mirroring: Mirroring::new(sky.as_deref(), &settings),
-                wind: WindUniform::new(wind, patch),
-                shore,
-                depths: depths.clone(),
+                wind: WindUniform::new(wind, mesh),
+                shore: field.shore,
+                depths: field.depths.clone(),
             },
         })
     };
-    let (sheet_material, patch_material) = (material(false), material(true));
+    let (sheet_material, patch_material, fine_material) = (material(0), material(1), material(2));
+    let shadows = |mut entity: bevy::ecs::system::EntityCommands| {
+        if !settings.shadows {
+            entity.insert(NotShadowReceiver);
+        }
+    };
 
     let size = super::water_width(&track);
     let sheet_squares = (size / SHEET_SPACING).ceil() as u32;
@@ -273,6 +267,7 @@ pub(super) fn spawn_water(
         // A see-through sheet over the whole track would darken everything under it.
         NotShadowCaster,
     ));
+    shadows(commands.entity(sheet));
 
     // With a square to spare all round: see the module's notes.
     let reach = PATCH_SIZE + 2.0 * PATCH_SPACING;
@@ -299,7 +294,7 @@ pub(super) fn spawn_water(
         DespawnOnExit(GameState::Racing),
     ));
 
-    commands.spawn((
+    let patch = commands.spawn((
         Name::new("Water round the camera"),
         Transform::from_xyz(0.0, level, 0.0),
         Mesh3d(
@@ -315,36 +310,54 @@ pub(super) fn spawn_water(
         NoFrustumCulling,
         DespawnOnExit(GameState::Racing),
     ));
+    shadows(patch);
+
+    let reach = FINE_SIZE + 2.0 * FINE_SPACING;
+    let squares = (reach / FINE_SPACING).round() as u32;
+    let fine = commands.spawn((
+        Name::new("Water round the truck"),
+        Transform::from_xyz(0.0, level, 0.0),
+        Mesh3d(
+            meshes.add(
+                Plane3d::new(Vec3::Y, Vec2::splat(reach / 2.0))
+                    .mesh()
+                    .subdivisions(squares - 1),
+            ),
+        ),
+        MeshMaterial3d(fine_material),
+        NotShadowCaster,
+        NoFrustumCulling,
+        DespawnOnExit(GameState::Racing),
+    ));
+    shadows(fine);
 }
 
-/// Gives the shader the ripples, when they have changed. Only then, and only the list: the
-/// buffer is written in place, and the materials, which only point at it, stay as they are.
-pub(super) fn show_waves(
-    time: Res<Time>,
-    mut ripples: ResMut<Ripples>,
-    buffer: Option<ResMut<RippleBuffer>>,
-    mut buffers: ResMut<Assets<ShaderBuffer>>,
-) {
-    ripples.expire(time.elapsed_secs());
-    let Some(mut buffer) = buffer else {
-        return;
-    };
-    let sent = ripples.for_shader(
-        time.elapsed_secs_wrapped(),
-        time.wrap_period().as_secs_f32(),
-    );
-    if sent != buffer.sent
-        && let Some(mut data) = buffers.get_mut(&buffer.buffer)
-    {
-        data.set_data(sent.clone());
-        buffer.sent = sent;
+/// How the moving water is drawn, for whether it mirrors the scenery. Mirroring reads the
+/// picture drawn so far, which only the transmissive pass copies for it: then the water
+/// is drawn solid there, and mixes in what is under it itself. Without, it is a plain
+/// see-through surface in the transparent pass, which is cheaper, the more so with MSAA,
+/// for which the copy is a resolve of the whole picture.
+fn alpha_mode(settings: &WaterSettings) -> AlphaMode {
+    if settings.reflections {
+        AlphaMode::Opaque
+    } else {
+        AlphaMode::Blend
+    }
+}
+
+fn specular_transmission(settings: &WaterSettings) -> f32 {
+    if settings.reflections {
+        TRANSMISSIVE_PASS
+    } else {
+        0.0
     }
 }
 
 /// Gives the water what it mirrors as it is now, when it has changed: the sky's colour,
-/// and whether it mirrors the scenery. The water is spawned before whoever lights the sky
-/// has set it for the race, and the sky changes in the race too (lightning): a sky kept
-/// from the spawn left the water mirroring the day at night.
+/// and whether it mirrors the scenery, with the pass that goes with that. The water is
+/// spawned before whoever lights the sky has set it for the race, and the sky changes in
+/// the race too (lightning): a sky kept from the spawn left the water mirroring the day
+/// at night.
 pub(super) fn mirror(
     sky: Option<Res<ClearColor>>,
     settings: Res<WaterSettings>,
@@ -360,6 +373,23 @@ pub(super) fn mirror(
             && let Some(mut material) = materials.get_mut(&surface.0)
         {
             material.extension.mirroring = mirroring;
+            material.base.alpha_mode = alpha_mode(&settings);
+            material.base.specular_transmission = specular_transmission(&settings);
+        }
+    }
+}
+
+/// Has the trucks' shadows fall on the moving water, or not, as the settings say.
+pub(super) fn receive_shadows(
+    mut commands: Commands,
+    settings: Res<WaterSettings>,
+    surfaces: Query<Entity, With<MeshMaterial3d<WaterMaterial>>>,
+) {
+    for surface in &surfaces {
+        if settings.shadows {
+            commands.entity(surface).remove::<NotShadowReceiver>();
+        } else {
+            commands.entity(surface).insert(NotShadowReceiver);
         }
     }
 }
@@ -373,6 +403,30 @@ mod tests {
         let shader = include_str!("../shaders/water.wgsl");
         assert!(shader.contains(&format!("const PATCH_SIZE: f32 = {PATCH_SIZE:?};")));
         assert!(shader.contains(&format!("const PATCH_SPACING: f32 = {PATCH_SPACING:?};")));
+        assert!(shader.contains(&format!("const FINE_SIZE: f32 = {FINE_SIZE:?};")));
+        assert!(shader.contains(&format!("const FINE_SPACING: f32 = {FINE_SPACING:?};")));
+    }
+
+    /// The fine patch's edge must lie along the patch's rows of vertices, or the two would
+    /// not meet, and its own vertices must fall on the patch's.
+    #[test]
+    fn the_fine_patch_fits_the_patch() {
+        let squares = FINE_SIZE / PATCH_SPACING;
+        assert_eq!(squares, squares.round());
+        assert_eq!(
+            (squares as u32) % 2,
+            0,
+            "its middle must be a vertex of the patch"
+        );
+        let fine = PATCH_SPACING / FINE_SPACING;
+        assert_eq!(fine, fine.round());
+        // Well inside where the patch eases its waves flat.
+        let ahead = include_str!("../shaders/water.wgsl")
+            .lines()
+            .find_map(|line| line.strip_prefix("const FINE_AHEAD: f32 = "))
+            .and_then(|rest| rest.trim_end_matches(';').parse::<f32>().ok())
+            .expect("water.wgsl sets FINE_AHEAD");
+        assert!(FINE_SIZE / 2.0 + ahead < PATCH_SIZE / 2.0 * 0.7);
     }
 
     /// The patch's vertices must fall on the grid the shader moves it along, or its waves

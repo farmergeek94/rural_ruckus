@@ -135,6 +135,7 @@ fn main() {
                 &mut camera_settings,
                 &mut environment_settings,
                 &mut settings,
+                &mut water_settings,
             ),
             Some("--no-backdrop") => backdrop_settings.on = false,
             Some("--no-decorations") => settings.decorations = false,

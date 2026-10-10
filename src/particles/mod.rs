@@ -2,12 +2,9 @@
 //! moves.
 //!
 //! - `pool`: a pool of particles, moved on the graphics card. Knows nothing of the game.
-//! - `sheet`: sheets of water poured from a moving source, moved on the graphics card.
-//!   Knows nothing of the game.
 //! - `dirt`: the clods, splatter and dust that tires throw up off loose ground.
-//! - `spray`: the sheets of water that tires pour off as they go through the water, the
-//!   mist off them, the foam they leave on it, and the splash where a wheel comes down
-//!   into it.
+//! - `spray`: the fan of water that tires throw as they go through the water, the mist
+//!   with it, the froth they churn up, and the splash where a wheel comes down into it.
 //! - `surf`: the spray where the water breaks on the shore.
 //!
 //! Each throws into its own pools, which are spawned with each race. Where the water is
@@ -21,7 +18,6 @@
 
 mod dirt;
 mod pool;
-mod sheet;
 mod spray;
 mod surf;
 
@@ -46,7 +42,6 @@ impl Plugin for ParticlesPlugin {
             return;
         }
         pool::add(app);
-        sheet::add(app);
         // Also made by `water`, if it is there; without it, none are written.
         app.add_message::<TireInWater>()
             .add_message::<Surf>()
@@ -64,7 +59,7 @@ impl Plugin for ParticlesPlugin {
                     (
                         spray::make_droplet_looks
                             .run_if(not(resource_exists::<spray::DropletLooks>)),
-                        (spray::spawn_spray, spray::spawn_sheets),
+                        spray::spawn_spray,
                     )
                         .chain(),
                 )
@@ -87,15 +82,12 @@ impl Plugin for ParticlesPlugin {
     }
 }
 
-/// Makes every pool and sheet as bright as the weather says, or full bright without it.
+/// Makes every pool as bright as the weather says, or full bright without it.
 fn light_particles(
     light: Option<Res<ParticleLight>>,
     pools: Query<&pool::Particles>,
-    sheets: Query<&sheet::Sheets>,
     mut materials: ResMut<Assets<pool::ParticleMaterial>>,
-    mut sheet_materials: ResMut<Assets<sheet::SheetMaterial>>,
 ) {
     let level = light.map_or(1.0, |light| light.0);
     pool::light(level, &pools, &mut materials);
-    sheet::light(level, &sheets, &mut sheet_materials);
 }

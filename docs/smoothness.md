@@ -143,6 +143,32 @@ debug build), parked at Alpine's start: about 9.5 ms, of which the sun's shadows
 `--integrated-graphics`) turns down what costs most on such a GPU. Its values are chosen,
 not measured: measure the same way before you change them.
 
+## The water on an integrated GPU
+
+Measured 2026-10-10 on the development machine's Intel Graphics (ARL), headless at
+1920 x 1200, one truck wading at Baja Beach, dev build, GPU time of the pass that draws
+the moving water (`render/main_transmissive_pass_3d` or, blended, the transparent pass):
+
+| | MSAA 4x | FXAA |
+| --- | --- | --- |
+| Reflections and water shadows (the defaults) | 5.6 ms | 2.9 ms |
+| Reflections, no water shadows | 4.6 ms | 2.0 ms |
+| No reflections (blended), water shadows | 2.4 ms | 2.1 ms |
+| No reflections, no water shadows | 1.6 ms | not measured |
+| Flat water (`WaterSettings::flat`) | 1.3 ms | |
+
+The field of heights (`water/field.rs`) is 0.07 ms a step, and the particles 0.3 to
+0.9 ms. With MSAA the transmissive pass costs about 3 ms over FXAA: the picture is
+resolved and copied for the water to read. Turning reflections off takes the water out of
+that pass. The water's own arithmetic is not where the time goes: skipping the foam noise
+on pixels without foam changed nothing measurable. Halving the fine patch's vertices
+(`FINE_SPACING` 0.25 to 0.5 m, the field's own texel size) saved about 1 ms. The
+Balanced quality level (`front_end::integrated_graphics`) turns water shadows off and
+uses FXAA.
+
+Frame time in the headless probe is held at about 16.7 ms by the event loop with no
+window, so judge by the passes' GPU times there, and by `--log-fps --no-vsync` on screen.
+
 ## Culling is per entity, and automatic
 
 Bevy skips any mesh entity whose bounding box is outside the view (and the sun's shadow

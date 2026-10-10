@@ -1,120 +1,59 @@
-//! The water that trucks throw up: the spray their tires throw, the foam they churn up, and
-//! the splash as a wheel comes down into it.
+//! The froth that trucks churn up as they go through the water, and the splash as a wheel
+//! comes down into it.
 //!
 //! Where a tire breaks the surface, and whether it came down into it fast, the `water`
-//! slice says (`water::TireInWater`). A tire that goes through the water pushes it aside, as
-//! the bow of a boat does: the water piles up in front of the tread, and peels off round
-//! its shoulders in a wing either side, which opens out in a V from the front of the tire,
-//! arcs over and pours back down beside it. More, higher and further the faster the tire
-//! goes over the ground. Most where the water is a quarter of the way up the tire: little
-//! where it only wets the bottom, and less where it is over the hub. The wing on the inside,
-//! under the truck, is fainter. A tire that spins in the water without going anywhere only
-//! churns it into foam. A tire that comes down into the water fast throws a ring of it up
-//! all round, and leaves a ring of foam that spreads on the water.
+//! slice says (`water::TireInWater`). The water a tire pushes aside is in the water's
+//! surface itself (`water::field`): the bow wave, the wake and the foam it leaves. What
+//! stands up out of the water round the tire is froth: white lumps of broken water, piled
+//! up at the front of the tire and round its sides where they meet the water, which go
+//! along with the tire, rise a little, and fall behind into its wake. More the faster the
+//! tire goes, or its tread spins. Most where the water is a quarter of the way up the tire:
+//! little where it only wets the bottom, and less where it is over the hub. A tire that
+//! comes down into the water fast throws a crown of froth out from all round its footprint,
+//! low and wide rather than up like a fountain, and leaves a ring of foam that spreads on
+//! the water. Over it all hangs mist: fine water off the tires' pushing fronts, more the
+//! faster they go, that the wind carries off. Drops thrown off the tires were tried and
+//! taken out: foam on the water, froth and mist read as water; a scatter of drops read as
+//! beads.
 //!
-//! The wings are sheets of water (`sheet`), not drops: a tire pours a lip of water every
-//! `SHEET_EVERY` seconds, from the front of its tread (its root) round to its shoulder (its
-//! crest), and the lips one after the other make one surface. The root is shoved on ahead
-//! at about the tire's speed, and the crest is thrown out and up and falls behind
-//! (`wing_lip`). It tears into strands as it goes, and a little mist comes off it.
-//!
-//! The rest of the spray is in three layers, each a pool of particles (`pool`) that the
-//! graphics card moves: drops, mist, and foam. Here they are only thrown, and given the
-//! wind (`water::Wind`) and the swell (`water::Wind::swell`).
-//!
-//! Spray is droplets of two kinds. Drops are small and heavy: thrown, pulled down by
-//! gravity, and drawn longer the faster they go, as the eye sees a fast drop. Mist is fine
-//! water that hangs in the air: big, faint puffs, thrown with the drops, that the air soon
-//! slows and the wind carries off, and that spread and fade as they go. Mist is what makes
-//! spray look like a body of water rather than a scatter of beads. Both are gone when they
-//! come down into the water or onto the ground, and both fade out where a truck or the
-//! ground cuts through them (`Motion::soft`). They are drawn only, and touch nothing.
+//! The froth, the mist and the foam are each a pool of particles (`pool`) that the
+//! graphics card moves. Here they are only thrown, and given the wind (`water::Wind`) and
+//! the swell (`water::Wind::swell`). One more pool, of drops, is the shore's (`surf`), made
+//! here with the picture for it: drops are small and heavy, thrown, pulled down by
+//! gravity, and drawn longer the faster they go, as the eye sees a fast drop; mist is fine
+//! water that hangs in the air, big, faint puffs that the air soon slows and the wind
+//! carries off. Both are gone when they come down into the water or onto the ground. Mist
+//! fades out a little where a truck or the ground cuts through it (`Motion::soft`); drops
+//! and froth hardly do, since a puff that faded wherever a tire was behind it was gone
+//! from round the tires, where it is churned up. They are drawn only, and touch nothing.
 //!
 //! Each is a flat square turned to the camera, with a soft round picture on it. Balls, as
 //! they once were, showed their facets, and their hard edges looked like confetti.
 //!
-//! Foam is the broken water a tire leaves behind it: flat, ragged patches of bubbles that
-//! lie on the water, rise and fall with its swell, spread, drift a little downwind, and
-//! fade. A tire leaves one every metre or so, and more while it spins. Past the patch of
-//! water round the camera that the swell moves (see `water::surface`), the water is drawn
-//! flat and the foam still rises and falls: too far off to see.
+//! Foam is the broken water a splash leaves round where the wheel came down: flat, ragged
+//! patches of bubbles that lie on the water, rise and fall with its swell, spread, drift a
+//! little downwind, and fade. Past the patch of water round the camera that the swell
+//! moves (see `water::surface`), the water is drawn flat and the foam still rises and
+//! falls: too far off to see.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::entity::EntityHashMap;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::pool::{self, Air, Motion, Particle, Particles, Waves};
-use super::sheet::{self, Flow, Lip, Sheets};
 use crate::game_state::GameState;
 use crate::track::Track;
 use crate::truck::TruckVisual;
 use crate::water::{SPLASH_SPEED, TireInWater, WATER_COLOR, WaterSettings, Wind};
 
-/// How fast a tire must be going over the ground to throw spray, in m/s, and how much
-/// faster its sheets are as solid as they get.
-const SPRAY_SPEED: f32 = 1.5;
-const FULL_SHEET_SPEED: f32 = 4.0;
-/// How many drops a tire's wings tear into each second for each m/s it goes faster than
-/// `SPRAY_SPEED`, and the most, however fast it goes. More is a thicker spray, and costs
-/// more.
-const SPRAY_PER_SPEED: f32 = 10.0;
-const MOST_SPRAY: f32 = 120.0;
-/// How often a tire pours a lip of each of its sheets, in seconds. Less is a smoother sheet
-/// where it turns, and more sent to the graphics card.
-const SHEET_EVERY: f32 = 1.0 / 30.0;
-/// How long a lip lasts, in seconds, and how long of that it stays as it was poured. It
-/// fades out over the rest, as it tears into drops. Water holds together as a sheet only
-/// for a moment: a long-lived sheet looks like a sheet of plastic.
-const SHEET_LIFE: f32 = 0.7;
-const SHEET_HOLD: f32 = 0.35;
-/// How far over the still water a sheet starts to fade out, and how far under it it is
-/// gone, in metres: it fades out as it pours in. It is gone before it comes down onto the
-/// water, which is drawn in flat triangles on the swell and would cut it along their edges.
-const SHEET_FLOAT: f32 = 0.15;
-const SHEET_SINK: f32 = 0.2;
-/// How much of a sheet's thin water has torn away by the end of a lip's life, from 0 to 1.
-/// More breaks it into strands sooner.
-const SHEET_TEAR: f32 = 0.6;
-/// How old the water of a lip is when it tears into drops, in seconds: the least and the
-/// most. The drops are thrown where the water is then, so that they go on from the sheet.
-const SHEET_TEARS: [f32; 2] = [0.3, 0.6];
-/// How far across a lip, from its root (0) to its crest (1), the drops tear from: all of
-/// it, the plume in front as well as the wing.
-const TEARS_FROM: f32 = 0.0;
-/// How fast the drops are scattered from where the sheet went, in m/s at most.
-const TEAR_SCATTER: f32 = 0.7;
-/// How big a torn drop is, in metres: the smallest and the largest radius. Clumps, not
-/// beads.
-const TORN_SIZE: [f32; 2] = [0.05, 0.1];
-/// How near a truck or the ground behind it a sheet starts to fade out, in metres, and how
-/// near the camera.
-const SHEET_SOFT: f32 = 0.3;
-const SHEET_NEAR_CAMERA: f32 = 3.0;
-/// How many times the sheets' picture goes by for each second a tire pours. More is
-/// shorter strands.
-const SHEET_PICTURE_RATE: f32 = 4.0;
-/// How many sheets there may be at once: a wing either side of each wheel of eight
-/// trucks. Past it, no more are poured until one is gone.
-const SHEET_STRIPS: usize = 8 * 4 * 2;
-/// How many points across each lip is: more is a smoother curve from root to crest.
-const SHEET_COLUMNS: usize = 8;
-/// How solid a tire's wing of water is, from 0 to 1, at its thickest.
-const WING_OPACITY: f32 = 1.0;
-/// How many drops a splash throws: the least, when the wheel only just comes down fast
-/// enough to splash (`water::SPLASH_SPEED`), how many more for each m/s faster, and the most.
-const LEAST_SPLASH: usize = 30;
-const SPLASH_PER_SPEED: f32 = 5.0;
-const MOST_SPLASH: usize = 50;
-/// How far a splash's drops lean out from straight up, in radians: the least and the most.
-/// They go up in a cone, not a flat ring.
-const SPLASH_CONE: [f32; 2] = [0.15, 0.7];
-/// How many puffs of mist a splash throws, the least and the most, and how big they are,
-/// in metres of radius. Wide and slow: the foam of the broken water, hanging over it.
-const SPLASH_MIST: [usize; 2] = [3, 5];
-const SPLASH_MIST_SIZE: [f32; 2] = [0.6, 1.0];
+/// How far ahead of and behind the hub the crown of a splash leaves the water, as a share
+/// of the wheel's radius, and how many lumps of froth go out with it, at the least, and
+/// how many more for each m/s the wheel came down at faster than `water::SPLASH_SPEED`.
+const CROWN_ALONG: f32 = 0.8;
+const SPLASH_FROTH: usize = 14;
+const SPLASH_FROTH_PER_SPEED: f32 = 3.0;
 /// How long a splash's ring lasts on the water, in seconds, how fast it spreads, in m/s, and
 /// how far round the wheel it starts, as a share of the wheel's radius. It spreads over the
 /// place where the tire went in, and hides the hard line where the tire meets the water.
@@ -123,23 +62,25 @@ const RING_SPREAD: f32 = 2.5;
 const RING_START: f32 = 1.2;
 /// How many steps a splash's ring fades out in.
 const RING_SHADES: usize = 8;
-/// The most drops, and the most puffs of mist, in the air at once, over all the trucks and
-/// the shore. Past it, no more are thrown until some have fallen. Each is a square in a
-/// mesh, drawn whether it is in the air or not.
-const DROP_SLOTS: usize = 5000;
-const MIST_SLOTS: usize = 800;
+/// The most drops in the air at once, over the shore, and the most puffs of mist, over the
+/// trucks and the shore. Past it, no more are thrown until some have fallen. Each is a
+/// square in a mesh, drawn whether it is in the air or not.
+const DROP_SLOTS: usize = 2000;
+const MIST_SLOTS: usize = 1500;
 /// How many patches of foam may lie on the water at once, over all the trucks.
-const FOAM_SLOTS: usize = 4000;
-/// How big a drop of a splash is, in metres: the smallest and the largest radius. Its edge
-/// is soft, so it looks a little smaller than this. A splash throws water up in lumps.
-const SPLASH_SIZE: [f32; 2] = [0.08, 0.22];
-/// How many puffs of mist come with each drop a tire's wings tear into, from 0 to 1. More
-/// is a thicker, whiter spray.
-const MIST_PER_SPRAY: f32 = 0.1;
-/// How big a puff of mist is when it is thrown, in metres of radius, and how fast it
-/// spreads, in metres of radius each second.
-const MIST_SIZE: [f32; 2] = [0.25, 0.5];
+const FOAM_SLOTS: usize = 1000;
+/// How many puffs of mist a tire throws each second for each m/s it goes over the ground,
+/// and the most; how big a puff is when it is thrown, in metres of radius, the smallest
+/// and the largest; how fast it goes up, in m/s, the least and the most, in deep water;
+/// how much of the tire's own speed it keeps; and how fast it spreads, in metres of
+/// radius each second. How many puffs a wheel coming down throws, the least and the most.
+const MIST_PER_SPEED: f32 = 5.0;
+const MOST_MIST: f32 = 40.0;
+const MIST_SIZE: [f32; 2] = [0.3, 0.6];
+const MIST_UP: [f32; 2] = [0.8, 2.5];
+const MIST_KEEP: f32 = 0.6;
 const MIST_SPREAD: f32 = 0.9;
+const SPLASH_MIST: [usize; 2] = [4, 7];
 /// How long a puff of mist lasts, in seconds, and how long of that it stays as it was
 /// thrown. It fades out over the rest.
 const MIST_LIFE: f32 = 1.1;
@@ -149,13 +90,13 @@ const MIST_HOLD: f32 = 0.5;
 const MIST_DRAG: f32 = 2.5;
 const MIST_GRAVITY: f32 = 2.0;
 /// How see-through mist is, from 0 (not there) to 1 (solid), when it is thrown, and a drop.
-const MIST_OPACITY: f32 = 0.45;
+const MIST_OPACITY: f32 = 0.32;
 const DROP_OPACITY: f32 = 0.7;
-/// How near a truck or the ground behind it mist, and a drop, start to fade out, in
-/// metres, so that one cut through by them has no hard edge. Wider for mist, whose puffs
-/// are big.
-const MIST_SOFT: f32 = 0.5;
-const DROP_SOFT: f32 = 0.1;
+/// How near a truck or the ground behind it mist starts to fade out, in metres, so that a
+/// puff cut through by them has no hard edge, and a drop, which is cut off: it is small,
+/// and faded out wherever a tire was just behind it, it was gone from round the tires.
+const MIST_SOFT: f32 = 0.2;
+const DROP_SOFT: f32 = 0.0;
 
 /// The churn round a tire that goes through the water: white froth, piled up at the front
 /// of the tire and round its sides where they meet the water, which goes along with the
@@ -171,7 +112,7 @@ const MOST_FROTH: f32 = 160.0;
 const FROTH_SLOTS: usize = 3000;
 /// How big a puff of froth is when it is churned up, in metres of radius, how fast it
 /// spreads, in metres of radius each second, and how long it lasts, in seconds, and holds.
-const FROTH_SIZE: [f32; 2] = [0.25, 0.45];
+const FROTH_SIZE: [f32; 2] = [0.3, 0.55];
 const FROTH_SPREAD: f32 = 0.6;
 const FROTH_LIFE: f32 = 0.5;
 const FROTH_HOLD: f32 = 0.25;
@@ -189,20 +130,15 @@ const FROTH_OUT: [f32; 2] = [0.3, 1.2];
 const FROTH_KEEP: [f32; 2] = [0.85, 1.0];
 /// How far round from the front of the tire, either way, froth is churned up, in radians:
 /// the front and the sides, where the tire pushes the water.
-const FROTH_ROUND: f32 = 1.9;
+const FROTH_ROUND: f32 = 1.4;
 /// How far out from the tire's round at the water froth starts, in metres.
 const FROTH_GAP: f32 = 0.1;
 /// How see-through froth is, from 0 (not there) to 1 (solid), and how near what is behind
-/// it it starts to fade out, in metres.
+/// it it starts to fade out, in metres: little, since froth is churned up right against
+/// the tires, and faded out there it was gone.
 const FROTH_OPACITY: f32 = 0.95;
-const FROTH_SOFT: f32 = 0.3;
+const FROTH_SOFT: f32 = 0.08;
 
-/// How far a tire goes for each patch of foam it leaves, in metres, how many more it leaves
-/// each second for each m/s its tread goes faster than it rolls, and the most each second.
-/// Fewer, bigger patches cost less than many small ones, and overlap less.
-const FOAM_SPACING: f32 = 0.35;
-const FOAM_PER_SPIN: f32 = 2.0;
-const MOST_FOAM: f32 = 50.0;
 /// How many patches of foam a splash leaves round where the wheel came down.
 const SPLASH_FOAM: usize = 6;
 /// How big a patch of foam is when it is left, in metres of radius, and how fast it
@@ -332,13 +268,12 @@ const FOAM_MOTION: Motion = Motion {
     lies_on: Some(Waves::FLAT),
 };
 
-/// What the spray is drawn with: the pictures of a drop, of mist, of foam and of a sheet,
-/// and for a splash's ring, one square and a material for each step of it fading out, most
-/// solid first.
+/// What the spray is drawn with: the pictures of a drop, of mist and of foam, and for a
+/// splash's ring, one square and a material for each step of it fading out, most solid
+/// first.
 #[derive(Resource)]
 pub(super) struct DropletLooks {
     drop: Handle<Image>,
-    sheet: Handle<Image>,
     mist: Handle<Image>,
     foam: Handle<Image>,
     square: Handle<Mesh>,
@@ -377,12 +312,11 @@ pub(super) struct Foam;
 pub(super) struct Froth;
 
 /// What `throw_spray` remembers about a truck from one frame to the next: per wheel, the
-/// drops and the patches of foam it owes, carried over as a fraction.
+/// puffs of froth it owes, carried over as a fraction.
 #[derive(Default)]
 pub(super) struct Owed {
-    spray: [f32; 4],
     froth: [f32; 4],
-    foam: [f32; 4],
+    mist: [f32; 4],
 }
 
 pub(super) fn make_droplet_looks(
@@ -423,7 +357,6 @@ pub(super) fn make_droplet_looks(
             spray_edge(),
         )),
         foam: images.add(super::dirt::picture(FOAM_SHAPES, foam_opacity)),
-        sheet: images.add(sheet_picture()),
         // Two metres across, so that its scale is its radius.
         square: meshes.add(Rectangle::new(2.0, 2.0)),
         ring,
@@ -484,42 +417,6 @@ pub(super) fn spawn_spray(
         looks.foam.clone(),
     );
     commands.spawn((froth, Froth, DespawnOnExit(GameState::Racing)));
-}
-
-/// Makes the race's sheets, on a track with water. Its own system: its assets are the
-/// pools' too.
-pub(super) fn spawn_sheets(
-    mut commands: Commands,
-    track: Res<Track>,
-    looks: Res<DropletLooks>,
-    wind: Option<Res<Wind>>,
-    mut assets: sheet::SheetAssets,
-) {
-    let Some(level) = track.water_level else {
-        return;
-    };
-    let flow = Flow {
-        gravity: GRAVITY,
-        drag: AIR_DRAG,
-        air: wind.as_deref().map_or(Vec3::ZERO, Wind::steady),
-        life: SHEET_LIFE,
-        fade_from: SHEET_HOLD,
-        every: SHEET_EVERY,
-        floor: level + SHEET_FLOAT,
-        sink: SHEET_SINK,
-        tear: SHEET_TEAR,
-        soft: SHEET_SOFT,
-        near_camera: SHEET_NEAR_CAMERA,
-        picture_rate: SHEET_PICTURE_RATE,
-    };
-    let sheets = sheet::sheets(
-        &mut assets,
-        SHEET_STRIPS,
-        SHEET_COLUMNS,
-        flow,
-        looks.sheet.clone(),
-    );
-    commands.spawn((sheets, DespawnOnExit(GameState::Racing)));
 }
 
 /// The waves the water's surface is drawn with, for the foam to lie on: none where it is
@@ -599,61 +496,6 @@ fn picture_texels(size: u32, opacity: fn(Vec2) -> f32, solid: Color, thin: Color
     texels
 }
 
-/// How many texels the sheets' picture has across, from root to crest, and along.
-const SHEET_PICTURE_SIZE: [u32; 2] = [64, 128];
-/// How much of the spray's blue (`spray_color`) the sheets take where they are thick, from
-/// 0 (white) to 1. Water torn up by a tire is full of air, and white.
-const SHEET_BLUE: f32 = 0.1;
-
-/// The sheets' picture: as solid as `sheet_opacity` says, blue where it is thick and white
-/// where it thins out. It repeats along the sheet.
-fn sheet_picture() -> Image {
-    let [across, along] = SHEET_PICTURE_SIZE;
-    let mut texels = Vec::with_capacity((across * along * 4) as usize);
-    for row in 0..along {
-        for col in 0..across {
-            let point = Vec2::new(
-                (col as f32 + 0.5) / across as f32,
-                (row as f32 + 0.5) / along as f32,
-            );
-            let opacity = sheet_opacity(point).clamp(0.0, 1.0);
-            let [red, green, blue, _] = spray_edge()
-                .mix(&spray_color(1.0), opacity * SHEET_BLUE)
-                .to_srgba()
-                .to_u8_array();
-            texels.extend_from_slice(&[red, green, blue, (opacity * 255.0).round() as u8]);
-        }
-    }
-    let mut image = Image::new(
-        Extent3d {
-            width: across,
-            height: along,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        texels,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_v: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
-
-/// The water of a sheet at `point`: across (X) from its root, at 0, to its crest, at 1, and
-/// along (Y), from 0 to 1, round which it repeats. Froth: mostly solid, in lumps and
-/// bubbles, which tear apart as it ages, and a ragged crest where it thins out.
-fn sheet_opacity(point: Vec2) -> f32 {
-    let lumps = noise(Vec2::new(point.x * 10.0, point.y * 8.0), Some(8.0));
-    let bubbles = noise(Vec2::new(point.x * 36.0 + 5.0, point.y * 28.0), Some(28.0));
-    let ragged = noise(Vec2::new(3.0, point.y * 20.0), Some(20.0));
-    let crest = 1.0 - smoothstep(0.55 + 0.35 * ragged, 1.0, point.x);
-    let root = smoothstep(0.0, 0.04, point.x);
-    root * crest * (0.5 + 0.3 * lumps + 0.2 * bubbles)
-}
-
 /// A drop, going up the picture: a thin, soft streak, thickest a little ahead of its
 /// middle and fading out to nothing at both ends. Stretched along the way it goes, the
 /// streaks of a rooster tail run into each other as one sheet of spray. A round head, as
@@ -708,21 +550,6 @@ fn foam_opacity(point: Vec2, shape: u32) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// Smooth noise from 0 to 1, the same at the same point: a number at each whole point,
-/// blended between them, and if `period` says, the same again every `period` along Y.
-fn noise(point: Vec2, period: Option<f32>) -> f32 {
-    let cell = point.floor();
-    let t = point - cell;
-    let t = t * t * (Vec2::splat(3.0) - 2.0 * t);
-    let at = |x: f32, y: f32| {
-        let corner = cell + Vec2::new(x, y);
-        hash(period.map_or(corner, |period| corner.with_y(corner.y.rem_euclid(period))))
-    };
-    let bottom = at(0.0, 0.0) + (at(1.0, 0.0) - at(0.0, 0.0)) * t.x;
-    let top = at(0.0, 1.0) + (at(1.0, 1.0) - at(0.0, 1.0)) * t.x;
-    bottom + (top - bottom) * t.y
-}
-
 /// A number from 0 to 1 that only has to look random, the same for the same whole point.
 fn hash(point: Vec2) -> f32 {
     let mut n = (point.x as i32 as u32).wrapping_mul(73_856_093)
@@ -757,8 +584,8 @@ type FrothPool<'w, 's> = Query<
     (With<Froth>, Without<Drops>, Without<Mist>, Without<Foam>),
 >;
 
-/// Pours sheets of water off each tire that breaks the water's surface, with mist off them,
-/// leaves foam behind it, and splashes where one came down into it.
+/// Churns froth up round each tire that breaks the water's surface, and splashes where one
+/// came down into it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn throw_spray(
     mut commands: Commands,
@@ -767,57 +594,23 @@ pub(super) fn throw_spray(
     looks: Option<Res<DropletLooks>>,
     trucks: Query<(), With<TruckVisual>>,
     mut tires: MessageReader<TireInWater>,
-    mut drops: PoolOf<Drops, Mist, Foam>,
     mut mist: PoolOf<Mist, Drops, Foam>,
     mut foam: PoolOf<Foam, Drops, Mist>,
     mut froth: FrothPool,
-    mut sheets: Query<&mut Sheets>,
     mut owed: Local<EntityHashMap<Owed>>,
     mut random: Local<Random>,
 ) {
     let (Some(level), Some(looks)) = (track.water_level, looks) else {
         return;
     };
-    let (Ok(mut drops), Ok(mut mists), Ok(mut foam), Ok(mut froth), Ok(mut sheets)) = (
-        drops.single_mut(),
-        mist.single_mut(),
-        foam.single_mut(),
-        froth.single_mut(),
-        sheets.single_mut(),
-    ) else {
+    let (Ok(mut mists), Ok(mut foam), Ok(mut froth)) =
+        (mist.single_mut(), foam.single_mut(), froth.single_mut())
+    else {
         return;
     };
     let dt = time.delta_secs();
     let clock = pool::clock(&time);
     let floor = |at: Vec2| level.max(track.heights.height_at(at.x, at.y));
-    // A droplet of `kind`, and now and then as `mist` says, a puff of mist with it.
-    let mut throw = |kind: Kind,
-                     at: Vec3,
-                     velocity: Vec3,
-                     [smallest, largest]: [f32; 2],
-                     mist: f32,
-                     random: &mut Random| {
-        let size = random.between(smallest, largest);
-        let pool = match kind {
-            Kind::Drop => &mut *drops,
-            Kind::Mist => &mut *mists,
-        };
-        if !throw_droplet(pool, kind, clock, floor, at, velocity, size) {
-            return;
-        }
-        if random.next() < mist {
-            let size = random.between(MIST_SIZE[0], MIST_SIZE[1]);
-            throw_droplet(
-                &mut mists,
-                Kind::Mist,
-                clock,
-                floor,
-                at,
-                velocity * 0.6,
-                size,
-            );
-        }
-    };
     // A patch of foam at `at`, on the water, going at `velocity` across it.
     let mut leave_foam = |at: Vec2, velocity: Vec2, random: &mut Random| {
         let patch = Particle {
@@ -840,31 +633,48 @@ pub(super) fn throw_spray(
     for tire in tires.read() {
         let owed = owed.entry(tire.truck).or_default();
         if tire.entered {
-            owed.spray[tire.wheel] = 0.0;
             owed.froth[tire.wheel] = 0.0;
-            owed.foam[tire.wheel] = 0.0;
+            owed.mist[tire.wheel] = 0.0;
         }
         let (moving, outwards) = (tire.moving, tire.outwards);
+
+        let tread = Tread::of(tire, level);
+        let ahead = tread.ahead;
+        let ground_speed = moving.xz().length();
+        let share = spray_share(tire.wet);
+        let reach = reach(tire.wet);
 
         if let Some(plunge) = tire.plunge {
             let down = plunge.speed;
             let along = moving.with_y(0.0) * 0.3;
-            for _ in 0..splash_droplets(down) {
-                let velocity = crown_velocity(&mut random, down, outwards) + along;
-                throw(Kind::Drop, tire.at, velocity, SPLASH_SIZE, 0.0, &mut random);
+            let foot = Vec3::new(tire.hub.x, level, tire.hub.z);
+            // Where the crown leaves the water: on the rim of the tire's footprint, `round`
+            // radians round from its outside, and the way away from the tire there.
+            let rim = |random: &mut Random| {
+                let round = random.between(-SPLASH_SPREAD, SPLASH_SPREAD);
+                let away = outwards * round.cos() + ahead * round.sin();
+                let at = foot
+                    + outwards * round.cos() * (0.5 * tire.wheel_width + FROTH_GAP)
+                    + ahead * round.sin() * tire.wheel_radius * CROWN_ALONG;
+                (at, away)
+            };
+            // Lumps of the broken water, thrown out low all round.
+            for _ in 0..splash_lumps(down) {
+                let (at, away) = rim(&mut random);
+                let velocity =
+                    (away * random.between(0.2, 0.5) + Vec3::Y * random.between(0.2, 0.5)) * down
+                        + along;
+                let size = random.between(FROTH_SIZE[0], FROTH_SIZE[1]) * 1.3;
+                froth.throw(clock, froth_puff(at, velocity, size, &mut random), floor);
             }
+            // Mist over it, slow, and only a little up and out.
             let puffs = random.between(SPLASH_MIST[0] as f32, SPLASH_MIST[1] as f32 + 1.0);
             for _ in 0..puffs as usize {
-                // Slow, and only a little up and out.
-                let velocity = crown_velocity(&mut random, down, outwards) * 0.2 + along;
-                throw(
-                    Kind::Mist,
-                    tire.at,
-                    velocity,
-                    SPLASH_MIST_SIZE,
-                    0.0,
-                    &mut random,
-                );
+                let (at, away) = rim(&mut random);
+                let velocity =
+                    (away * 0.3 + Vec3::Y * 0.4) * down * random.between(0.5, 1.0) + along;
+                let size = random.between(MIST_SIZE[0], MIST_SIZE[1]) * 1.5;
+                throw_droplet(&mut mists, Kind::Mist, clock, floor, at, velocity, size);
             }
             // The water it broke, pushed out all round.
             for _ in 0..SPLASH_FOAM {
@@ -885,50 +695,19 @@ pub(super) fn throw_spray(
             ));
         }
 
-        let tread = Tread::of(tire, level);
-        let share = spray_share(tire.wet);
-        let ground_speed = moving.xz().length();
-        let strength = WING_OPACITY * share * sheet_share(ground_speed);
-        let outer = wing_lip(tire, &tread, 1.0, strength);
-        let inner = wing_lip(tire, &tread, -1.0, strength * INNER_SHARE);
-        // Each sheet is its own: the truck, its wheel, and which side.
-        let source = (tire.truck.to_bits() << 3) | (tire.wheel as u64) << 1;
-        for (lip, which) in [(outer, 0), (inner, 1)] {
-            // A sheet too thin to see is not poured, and starts again when it is not.
-            if lip.strength > 0.01 {
-                sheets.pour(source | which, clock, lip);
-            }
-        }
-        // The wings tear into drops, which go on as the water went: each where a lip's
-        // water is as it tears, going as it goes there, a little scattered, with mist.
-        owed.spray[tire.wheel] += spray_rate(ground_speed) * share * dt;
-        while owed.spray[tire.wheel] >= 1.0 {
-            owed.spray[tire.wheel] -= 1.0;
-            let lip = if random.next() < 1.0 / (1.0 + INNER_SHARE) {
-                outer
-            } else {
-                inner
-            };
-            let across = random.between(TEARS_FROM, 1.0);
-            let (at, velocity) = DROP_MOTION.at(
-                lip.root.lerp(lip.crest, across),
-                lip.root_velocity.lerp(lip.crest_velocity, across),
-                Vec3::ZERO,
-                random.between(SHEET_TEARS[0], SHEET_TEARS[1]),
-            );
-            let scatter = Vec3::new(
-                random.between(-1.0, 1.0),
-                random.between(-0.5, 1.0),
-                random.between(-1.0, 1.0),
-            ) * TEAR_SCATTER;
-            throw(
-                Kind::Drop,
-                at,
-                velocity + scatter,
-                TORN_SIZE,
-                MIST_PER_SPRAY,
-                &mut random,
-            );
+        // Mist off the front of the tire, where it pushes the water, across its width.
+        owed.mist[tire.wheel] += mist_rate(ground_speed) * share * dt;
+        while owed.mist[tire.wheel] >= 1.0 {
+            owed.mist[tire.wheel] -= 1.0;
+            let side = random.between(-1.0, 1.0);
+            let at = tread.middle
+                + ahead * tread.half_chord * random.between(0.5, 1.2)
+                + outwards * side * 0.5 * tire.wheel_width;
+            let velocity = moving.with_y(0.0) * MIST_KEEP
+                + outwards * side * random.between(0.0, 1.0)
+                + Vec3::Y * random.between(MIST_UP[0], MIST_UP[1]) * reach;
+            let size = random.between(MIST_SIZE[0], MIST_SIZE[1]);
+            throw_droplet(&mut mists, Kind::Mist, clock, floor, at, velocity, size);
         }
 
         // Froth churned up round the front and sides of the tire, where it meets the water.
@@ -941,32 +720,8 @@ pub(super) fn throw_spray(
             let velocity = moving.with_y(0.0) * random.between(FROTH_KEEP[0], FROTH_KEEP[1])
                 + away * random.between(FROTH_OUT[0], FROTH_OUT[1])
                 + Vec3::Y * froth_up(churn, tire.wet) * random.between(0.5, 1.0);
-            let puff = Particle {
-                at,
-                velocity,
-                size: random.between(FROTH_SIZE[0], FROTH_SIZE[1]) * reach(tire.wet),
-                turned: random.between(0.0, std::f32::consts::TAU),
-                turning: random.between(-1.5, 1.5),
-                color: spray_edge().to_linear().with_alpha(FROTH_OPACITY),
-                trail: Vec3::ZERO,
-                shape: (random.next() * (FOAM_SHAPES * FOAM_SHAPES) as f32) as u32,
-            };
-            froth.throw(clock, puff, floor);
-        }
-
-        owed.foam[tire.wheel] +=
-            foam_rate(moving.xz().length(), tread.spin) * foam_share(tire.wet) * dt;
-        while owed.foam[tire.wheel] >= 1.0 {
-            owed.foam[tire.wheel] -= 1.0;
-            // Anywhere in the tire's footprint on the water and just beside it, pushed out
-            // to its own side: the two arms of a wake.
-            let side = random.between(-0.8, 0.8);
-            let across = outwards * side * tire.wheel_width;
-            let at = tire.hub + tread.back * random.between(-0.5, 1.0) * tread.half_chord + across;
-            let velocity = moving.with_y(0.0) * random.between(0.0, 0.2)
-                + outwards * side.signum() * random.between(0.5, 2.0)
-                + tread.back * tread.spin * random.between(0.1, 0.3);
-            leave_foam(at.xz(), velocity.xz(), &mut random);
+            let size = random.between(FROTH_SIZE[0], FROTH_SIZE[1]) * reach;
+            froth.throw(clock, froth_puff(at, velocity, size, &mut random), floor);
         }
     }
 }
@@ -977,8 +732,9 @@ struct Tread {
     middle: Vec3,
     /// Half the way from where it goes into the water to where it comes out, in metres.
     half_chord: f32,
-    /// Behind the way the tread turns, on the ground plane, of length 1.
-    back: Vec3,
+    /// The way the tire goes over the ground, of length 1, or the way the truck faces when
+    /// it stands still.
+    ahead: Vec3,
     /// How much faster than the tire goes over the ground the tread goes, in m/s, up to
     /// `MOST_SPIN`.
     spin: f32,
@@ -988,13 +744,7 @@ impl Tread {
     fn of(tire: &TireInWater, level: f32) -> Self {
         let forward = tire.forward.with_y(0.0).normalize_or(Vec3::NEG_Z);
         let ground_speed = tire.moving.xz().length();
-        // The way the tread turns: from the truck's way over the ground when the tread is
-        // too slow to tell, as when it stops in the water.
-        let back = if tire.tread.abs() > 0.5 {
-            -forward * tire.tread.signum()
-        } else {
-            -tire.moving.with_y(0.0).normalize_or(forward)
-        };
+        let ahead = tire.moving.with_y(0.0).normalize_or(forward);
         // Where the tire's round meets the level, either side of the hub.
         let above = tire.hub.y - level;
         let half_chord = (tire.wheel_radius.powi(2) - above.powi(2)).max(0.0).sqrt();
@@ -1002,7 +752,7 @@ impl Tread {
         Self {
             middle: tire.hub.with_y(level),
             half_chord,
-            back,
+            ahead,
             spin,
         }
     }
@@ -1043,6 +793,21 @@ pub(super) fn throw_droplet(
     pool.throw(now, droplet, floor)
 }
 
+/// A puff of froth at `at`, going at `velocity`, `size` metres in radius: one of the foam's
+/// pictures, turned any way and turning.
+fn froth_puff(at: Vec3, velocity: Vec3, size: f32, random: &mut Random) -> Particle {
+    Particle {
+        at,
+        velocity,
+        size,
+        turned: random.between(0.0, std::f32::consts::TAU),
+        turning: random.between(-1.5, 1.5),
+        color: spray_edge().to_linear().with_alpha(FROTH_OPACITY),
+        trail: Vec3::ZERO,
+        shape: (random.next() * (FOAM_SHAPES * FOAM_SHAPES) as f32) as u32,
+    }
+}
+
 /// Which of `shades` steps something that fades out over `life` seconds is at, `age`
 /// seconds in.
 fn shade(age: f32, life: f32, shades: usize) -> usize {
@@ -1075,71 +840,19 @@ pub(super) fn spread_rings(
     }
 }
 
-/// How many droplets a tire throws each second, going over the ground at `speed` m/s.
-fn spray_rate(speed: f32) -> f32 {
-    ((speed - SPRAY_SPEED).max(0.0) * SPRAY_PER_SPEED).min(MOST_SPRAY)
+/// How many puffs of mist a tire throws each second, going over the ground at `speed` m/s.
+fn mist_rate(speed: f32) -> f32 {
+    (speed * MIST_PER_SPEED).min(MOST_MIST)
 }
 
-/// How many droplets a wheel throws coming down into the water at `speed` m/s.
-fn splash_droplets(speed: f32) -> usize {
-    let more = ((speed - SPLASH_SPEED).max(0.0) * SPLASH_PER_SPEED) as usize;
-    (LEAST_SPLASH + more).min(MOST_SPLASH)
+/// How many lumps of froth a wheel throws coming down into the water at `speed` m/s.
+fn splash_lumps(speed: f32) -> usize {
+    SPLASH_FROTH + ((speed - SPLASH_SPEED).max(0.0) * SPLASH_FROTH_PER_SPEED) as usize
 }
 
-/// How fast the water a tire pushes through goes, as shares of how fast the tire goes over
-/// the ground (up to `MOST_PUSH`): at the front of the tread, where it piles up (a lip's
-/// root), and at the tire's shoulder, where it peels off the side (its crest). The tire
-/// is blunt: it shoves the water in front of it on a little faster than it goes itself,
-/// and turns the water at its shoulder out to the side. So the water at the front is a
-/// low wall of white water pushed on just in front of the tire, and that at the shoulder
-/// fans out low to the side and falls a little behind: wings of froth from the front
-/// corners, as a vehicle driven through deep water throws. Along the way the tire goes, out
-/// from its side, and up.
-const WING_ALONG: [f32; 2] = [1.15, 0.85];
-const WING_OUT: [f32; 2] = [0.1, 0.45];
-const WING_UP: [f32; 2] = [0.25, 0.4];
-/// How fast the wing goes up however slow the tire, in m/s: at its root and its crest.
-const WING_BASE: [f32; 2] = [0.3, 0.3];
-/// The most a tire's speed over the ground counts for, in m/s. Past it, the wing is no
-/// bigger. At 8 m/s, the front rises about 0.25 m, a little in front of the tire, and the
-/// crest about 0.5 m, and comes down about 2 m out from the tire, 0.7 s later. The crest
-/// goes up about as fast as out: a curtain, which seen from behind and above is not a
-/// sheet laid over the water.
+/// The most a tire's speed over the ground counts for, in m/s. Past it, the froth goes no
+/// higher.
 const MOST_PUSH: f32 = 8.0;
-/// How far round from the front of the tread to its side the crest starts, as a share of
-/// half the tire's width out, and of half the way the tread is in the water back.
-const SHOULDER_OUT: f32 = 1.0;
-const SHOULDER_BACK: f32 = 0.35;
-/// How solid the wing on the inside of a tire is, under the truck, as a share of the one
-/// on the outside. The truck's body is over it, and it runs into the other tires.
-const INNER_SHARE: f32 = 0.5;
-
-/// The wing of water off `tire`'s `side` (1 for the outside, away from the truck, and -1
-/// for the inside), where its tread meets the water as `tread` says, as solid as
-/// `strength`: from the front of the tread, the way the tire goes over the ground, round
-/// to its shoulder on that side.
-fn wing_lip(tire: &TireInWater, tread: &Tread, side: f32, strength: f32) -> Lip {
-    let along = tire.moving.with_y(0.0);
-    let ahead = along.normalize_or(tire.forward.with_y(0.0).normalize_or(Vec3::NEG_Z));
-    let speed = along.length().min(MOST_PUSH);
-    let out = tire.outwards * side;
-    let root = tread.middle + ahead * tread.half_chord;
-    let crest = root + out * 0.5 * tire.wheel_width * SHOULDER_OUT
-        - ahead * tread.half_chord * SHOULDER_BACK;
-    let reach = reach(tire.wet);
-    let velocity = |end: usize| {
-        ahead * speed * WING_ALONG[end]
-            + (out * speed * WING_OUT[end] + Vec3::Y * (WING_BASE[end] + speed * WING_UP[end]))
-                * reach
-    };
-    Lip {
-        root,
-        crest,
-        root_velocity: velocity(0),
-        crest_velocity: velocity(1),
-        strength,
-    }
-}
 
 /// How far out and up the water a tire pushes goes, as a share of how far it goes in deep
 /// water, for how far up the tire the water comes (`water::TireInWater::wet`): a tire
@@ -1176,12 +889,6 @@ fn round_the_tire(tire: &TireInWater, tread: &Tread, round: f32) -> (Vec3, Vec3)
     (at, away)
 }
 
-/// How solid a sheet is that is poured at `speed` m/s, from 0 to 1: none until
-/// `SPRAY_SPEED`, and all of it `FULL_SHEET_SPEED` faster.
-fn sheet_share(speed: f32) -> f32 {
-    smoothstep(SPRAY_SPEED, SPRAY_SPEED + FULL_SHEET_SPEED, speed)
-}
-
 /// How much of the spray it would throw a tire throws, for how far up it the water comes
 /// (`water::TireInWater::wet`), from 0 to 1: little where the water only wets its bottom,
 /// all of it from a quarter of the way up, and less once the water is over its hub, where
@@ -1190,31 +897,9 @@ fn spray_share(wet: f32) -> f32 {
     smoothstep(0.0, 0.25, wet) * (1.0 - 0.5 * smoothstep(0.5, 1.0, wet))
 }
 
-/// How many patches of foam a tire leaves each second, going `speed` m/s over the ground
-/// with its tread going `spin` m/s faster than that.
-fn foam_rate(speed: f32, spin: f32) -> f32 {
-    (speed / FOAM_SPACING + spin * FOAM_PER_SPIN).min(MOST_FOAM)
-}
-
-/// How much of the foam it would leave a tire leaves, for how far up it the water comes,
-/// from 0 to 1: more the deeper it churns.
-fn foam_share(wet: f32) -> f32 {
-    smoothstep(0.05, 0.5, wet)
-}
-
-/// How far round from straight out a splash's droplets may go, in radians either way. The
-/// water that would go the other way is under the truck.
+/// How far round the tire's footprint from its outside a splash's crown goes, in radians
+/// either way. The rest of the way round is under the truck.
 const SPLASH_SPREAD: f32 = 1.8;
-
-/// How fast a drop of a splash leaves the water, round a wheel that came down at `speed`
-/// m/s, with `outwards` pointing away from the truck's side: up, in a cone that leans out
-/// away from the truck, and about as fast as the wheel came down.
-fn crown_velocity(random: &mut Random, speed: f32, outwards: Vec3) -> Vec3 {
-    let turn = Quat::from_rotation_y(random.between(-SPLASH_SPREAD, SPLASH_SPREAD));
-    let across = (turn * outwards.with_y(0.0)).normalize_or_zero();
-    let lean = random.between(SPLASH_CONE[0], SPLASH_CONE[1]);
-    (across * lean.sin() + Vec3::Y * lean.cos()) * speed * random.between(0.6, 1.1)
-}
 
 /// A small, quick source of numbers that only have to look random (xorshift).
 pub(super) struct Random(u64);
@@ -1253,18 +938,16 @@ mod tests {
     }
 
     #[test]
-    fn faster_throws_more_spray_up_to_a_limit() {
-        assert_eq!(spray_rate(0.0), 0.0);
-        assert_eq!(spray_rate(SPRAY_SPEED), 0.0);
-        assert!(spray_rate(10.0) > spray_rate(5.0));
-        assert_eq!(spray_rate(1000.0), MOST_SPRAY);
+    fn faster_throws_more_mist_up_to_a_limit() {
+        assert_eq!(mist_rate(0.0), 0.0);
+        assert!(mist_rate(6.0) > mist_rate(3.0));
+        assert_eq!(mist_rate(1000.0), MOST_MIST);
     }
 
     #[test]
-    fn a_harder_landing_splashes_more_up_to_a_limit() {
-        assert_eq!(splash_droplets(SPLASH_SPEED), LEAST_SPLASH);
-        assert!(splash_droplets(6.0) > splash_droplets(3.0));
-        assert_eq!(splash_droplets(1000.0), MOST_SPLASH);
+    fn a_harder_landing_throws_more_froth() {
+        assert_eq!(splash_lumps(SPLASH_SPEED), SPLASH_FROTH);
+        assert!(splash_lumps(6.0) > splash_lumps(3.0));
     }
 
     /// A tire on a truck facing -Z, its hub 1 m over still water at 0, going `speed` m/s
@@ -1294,10 +977,7 @@ mod tests {
         assert!((tread.half_chord - 0.8).abs() < 1e-5);
         assert!(tread.middle.distance(Vec3::ZERO) < 1e-5);
         assert_eq!(tread.spin, 0.0);
-        // Back is +Z, behind a truck facing -Z, and in front, spinning backwards.
-        assert!(tread.back.z > 0.0);
         let reversing = Tread::of(&tire(0.0, -4.0), 0.0);
-        assert!(reversing.back.z < 0.0);
         assert_eq!(reversing.spin, 4.0);
         // A tire floating free, spinning at a truck's top speed, counts for no more than
         // `MOST_SPIN`.
@@ -1305,80 +985,19 @@ mod tests {
         assert_eq!(floating.spin, MOST_SPIN);
     }
 
-    /// The outer and the inner wing off `tire`.
-    fn wings(tire: &TireInWater) -> (Lip, Lip) {
-        let tread = Tread::of(tire, 0.0);
-        (
-            wing_lip(tire, &tread, 1.0, 1.0),
-            wing_lip(tire, &tread, -1.0, 1.0),
-        )
-    }
-
     #[test]
-    fn a_wing_starts_at_the_front_of_the_tire_and_goes_round_to_its_side() {
-        // Facing -Z, with the outside at +X.
-        let (outer, inner) = wings(&tire(10.0, 10.0));
-        for wing in [outer, inner] {
-            // At the front of the tread, where it goes into the water.
-            assert!(wing.root.distance(Vec3::new(0.0, 0.0, -0.8)) < 1e-5);
-            // The shoulder: out to the side, and a little back from the front.
-            assert!(wing.crest.z > wing.root.z && wing.crest.z < 0.0);
-            assert!(wing.root.y == 0.0 && wing.crest.y == 0.0);
-        }
-        assert!(outer.crest.x > 0.0 && inner.crest.x < 0.0);
-        // Nothing goes out the back.
-        for velocity in [outer.root_velocity, outer.crest_velocity] {
-            assert!(velocity.z < 0.0, "{velocity}");
-        }
-        // Out to its own side.
-        assert!(outer.crest_velocity.x > 0.0 && inner.crest_velocity.x < 0.0);
-    }
-
-    #[test]
-    fn the_front_is_thrown_up_ahead_and_the_shoulder_flies_out_and_falls_behind() {
-        let speed = 6.0;
-        let (wing, _) = wings(&tire(speed, speed));
-        // Shoved on ahead, faster than the tire, and up, and hardly out to the side.
-        let front = wing.root_velocity;
-        assert!(front.z < -1.05 * speed, "{front}");
-        assert!(front.y > 0.2 * speed, "{front}");
-        assert!(front.x.abs() < 0.2 * speed, "{front}");
-        // Slower on than the tire, so that it falls behind, and out and up faster than
-        // the root, so that the wing opens out.
-        assert!(wing.crest_velocity.z > -speed);
-        assert!(wing.crest_velocity.x > wing.root_velocity.x);
-        assert!(wing.crest_velocity.y > wing.root_velocity.y);
-        // Up about as fast as out: a curtain, not a sheet laid over the water.
-        let (out, up) = (wing.crest_velocity.x, wing.crest_velocity.y);
-        assert!(up > 0.7 * out && up < 1.5 * out, "{}", wing.crest_velocity);
-    }
-
-    #[test]
-    fn a_faster_tire_throws_its_wings_higher_up_to_a_limit() {
-        let highest = |speed: f32| wings(&tire(speed, speed)).0.crest_velocity.y;
-        assert!(highest(10.0) > highest(3.0) * 2.0);
-        assert_eq!(highest(MOST_PUSH), highest(MOST_PUSH * 3.0));
-    }
-
-    #[test]
-    fn a_tire_going_backwards_pushes_its_wings_out_behind_the_truck() {
-        let mut backwards = tire(0.0, -6.0);
-        backwards.moving = Vec3::Z * 6.0;
-        let (wing, _) = wings(&backwards);
-        assert!(wing.root.z > 0.0 && wing.root_velocity.z > 0.0);
-    }
-
-    #[test]
-    fn a_tire_in_shallow_water_throws_its_wings_lower_and_less_far() {
-        let deep = tire(6.0, 6.0);
-        let shallow = TireInWater { wet: 0.05, ..deep };
-        let (deep, _) = wings(&deep);
-        let (shallow, _) = wings(&shallow);
-        assert!(shallow.crest_velocity.y < 0.5 * deep.crest_velocity.y);
-        assert!(shallow.crest_velocity.x < 0.5 * deep.crest_velocity.x);
-        // On just as fast: the tire still goes through it.
-        assert_eq!(shallow.root_velocity.z, deep.root_velocity.z);
+    fn a_tire_in_shallow_water_throws_lower() {
+        assert!(reach(0.05) < 0.5 * reach(0.4));
         assert!(froth_up(6.0, 0.05) < froth_up(6.0, 0.4));
+    }
+
+    #[test]
+    fn the_tread_knows_which_way_it_goes() {
+        let tread = Tread::of(&tire(10.0, 10.0), 0.0);
+        assert!(tread.ahead.distance(Vec3::NEG_Z) < 1e-5);
+        // Standing still with the tread still, the way the truck faces.
+        let still = Tread::of(&tire(0.0, 0.0), 0.0);
+        assert!(still.ahead.distance(Vec3::NEG_Z) < 1e-5);
     }
 
     #[test]
@@ -1399,24 +1018,18 @@ mod tests {
     }
 
     #[test]
-    fn a_tire_spinning_where_it_is_throws_no_wings_but_churns_foam() {
+    fn a_tire_spinning_where_it_is_churns_froth() {
         let tire = tire(0.0, 10.0);
         let tread = Tread::of(&tire, 0.0);
-        assert_eq!(sheet_share(tire.moving.length()), 0.0);
-        assert!(foam_rate(0.0, tread.spin) > foam_rate(0.0, 0.0));
+        assert!(froth_rate(tread.spin) > 0.0);
     }
 
     #[test]
-    fn a_tire_throws_most_spray_part_way_in_and_more_foam_deeper() {
+    fn a_tire_churns_most_part_way_in() {
         assert_eq!(spray_share(0.0), 0.0);
         assert!(spray_share(0.05) < spray_share(0.3));
         assert_eq!(spray_share(0.3), 1.0);
         assert!(spray_share(1.0) < spray_share(0.3) && spray_share(1.0) > 0.0);
-        assert_eq!(foam_share(0.0), 0.0);
-        assert!(foam_share(0.8) > foam_share(0.2));
-        // A patch of foam every `FOAM_SPACING` metres, up to a limit.
-        assert!((foam_rate(FOAM_SPACING, 0.0) - 1.0).abs() < 1e-5);
-        assert_eq!(foam_rate(1000.0, 0.0), MOST_FOAM);
     }
 
     #[test]
@@ -1466,23 +1079,6 @@ mod tests {
         // The four are not the same.
         let point = Vec2::new(0.2, -0.1);
         assert_ne!(foam_opacity(point, 0), foam_opacity(point, 3));
-    }
-
-    #[test]
-    fn a_splash_goes_up_and_away_from_the_truck() {
-        let mut random = Random::default();
-        for _ in 0..100 {
-            let velocity = crown_velocity(&mut random, 5.0, Vec3::X);
-            assert!(velocity.y > 0.0);
-            // Nowhere near straight back in under the truck.
-            assert!(velocity.with_y(0.0).normalize().x > SPLASH_SPREAD.cos() - 1e-4);
-            // Up, in a cone.
-            let lean = velocity.angle_between(Vec3::Y);
-            assert!(
-                (SPLASH_CONE[0] - 1e-4..=SPLASH_CONE[1] + 1e-4).contains(&lean),
-                "{lean}"
-            );
-        }
     }
 
     #[test]

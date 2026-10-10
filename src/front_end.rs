@@ -1190,10 +1190,19 @@ const OPTIONS: &[OptionLine] = &[
         key: "option.water_reflections",
         section: GRAPHICS,
         label: "Water reflections",
-        detail: "The moving water mirrors the scenery round it. Off, it mirrors only the sky's colour, which costs less on every pixel of water.",
+        detail: "The moving water mirrors the scenery round it. Off, it mirrors only the sky's colour, which costs less on every pixel of water, and much less with MSAA.",
         values: &["Off", "On"],
         get: |options| options.water.reflections as usize,
         set: |options, value| options.water.reflections = value == 1,
+    },
+    OptionLine {
+        key: "option.water_shadows",
+        section: GRAPHICS,
+        label: "Water shadows",
+        detail: "The trucks' shadows fall on the moving water. Off costs less on every pixel of water.",
+        values: &["Off", "On"],
+        get: |options| options.water.shadows as usize,
+        set: |options, value| options.water.shadows = value == 1,
     },
     OptionLine {
         key: "option.splashes",
@@ -1352,7 +1361,9 @@ pub fn integrated_graphics(
     camera: &mut CameraSettings,
     environment: &mut EnvironmentSettings,
     track: &mut TrackSettings,
+    water: &mut WaterSettings,
 ) {
+    water.shadows = false;
     camera.antialiasing = Antialiasing::Fxaa;
     camera.bloom = false;
     environment.shadow_cascades = 2;
@@ -1369,7 +1380,7 @@ const QUALITY: &str = "option.quality";
 /// The lines each level of Quality sets: those that cost time on every frame. The rest of
 /// the graphics (mipmaps, which save time, and the trucks' shine, which is a look) and the
 /// physics are left as the player has them.
-const QUALITY_LINES: [&str; 14] = [
+const QUALITY_LINES: [&str; 15] = [
     "option.antialiasing",
     "option.bloom",
     "option.shadows",
@@ -1381,6 +1392,7 @@ const QUALITY_LINES: [&str; 14] = [
     "option.splashes",
     "option.water_surface",
     "option.water_reflections",
+    "option.water_shadows",
     "option.dirt",
     "option.backdrop",
     "option.blend_ground",
@@ -1393,6 +1405,7 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
     |options| {
         options.water.flat = true;
         options.water.reflections = false;
+        options.water.shadows = false;
         options.environment.lighting = Lighting::Off;
         options.camera.antialiasing = Antialiasing::Off;
         options.camera.bloom = false;
@@ -1409,6 +1422,7 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
     // mirroring only the sky, and the dirt and the hills back.
     |options| {
         options.water.reflections = false;
+        options.water.shadows = false;
         options.environment.lighting = Lighting::Simple;
         options.camera.antialiasing = Antialiasing::Fxaa;
         options.camera.bloom = false;
@@ -1424,6 +1438,7 @@ const QUALITY_LEVELS: [fn(&mut Options); 5] = [
             &mut options.camera,
             &mut options.environment,
             &mut options.track,
+            &mut options.water,
         );
     },
     // High: the defaults, with the shadows reaching 150 m, the scenery drawn to 600 m, less
@@ -2301,6 +2316,7 @@ mod tests {
             &mut integrated.camera,
             &mut integrated.environment,
             &mut integrated.track,
+            &mut integrated.water,
         );
         assert_eq!(quality_of(&integrated), 2);
         // A line changed by hand is no level.
