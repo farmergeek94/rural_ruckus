@@ -8,6 +8,7 @@
 
 use std::f32::consts::FRAC_PI_2;
 
+use avian3d::parry::shape::SharedShape;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
@@ -49,14 +50,20 @@ impl Wheel {
 }
 
 /// How much of the speed a tire meets something at it comes back off with, from 0 (a dead
-/// stop) to 1 (all of it). Higher and trucks ricochet off each other.
-const TIRE_BOUNCE: f32 = 0.8;
+/// stop) to 1 (all of it). None: a truck that hits a wall or another truck stops, and what
+/// rocks it back is its own suspension and the give of the contacts, not a bounce. At 0.8
+/// trucks ricocheted off each other and off rails.
+const TIRE_BOUNCE: f32 = 0.0;
+/// How far round the rim of a tire is rounded, as a share of half its width: a monster
+/// truck's tire has soft, round shoulders, and a rounded rim rolls onto an edge that a
+/// sharp one catches on. Higher is rounder and leaves less flat tread.
+const RIM_ROUNDING: f32 = 0.3;
 /// How big a wheel's core is, as a share of the tire's radius: a tire sinks into the
 /// ground by the rest of its radius at most before the core stands on the surface. Larger
 /// lets it sink less, and meets the ground sooner, where the suspension would have coped.
 pub(super) const CORE_SHARE: f32 = 0.75;
-/// The same for the body: less than a tire, being steel over a frame.
-const BODY_BOUNCE: f32 = 0.2;
+/// The same for the body: none either. A truck that lands on its roof stays down.
+const BODY_BOUNCE: f32 = 0.0;
 /// How far ahead of touching something the physics makes a contact with it, in metres.
 /// The physics makes one as far ahead as the truck will go in a step unless told
 /// otherwise, which keeps a fast body from passing through a thin one. But a truck is
@@ -67,6 +74,24 @@ const BODY_BOUNCE: f32 = 0.2;
 /// stopped Bigfoot at 14 m/s, where it had gone over. The truck's tires and body are
 /// large and its ground is swept, so it has little to pass through.
 const SPECULATION: f32 = 0.0;
+
+/// How far round a tire's rim is rounded, in metres (`RIM_ROUNDING`).
+fn rim_rounding(config: &TruckConfig) -> f32 {
+    RIM_ROUNDING * config.wheel_width / 2.0
+}
+
+/// The shape of a tire: a cylinder `wheel_width` long with its axis along Y, as Parry has
+/// a cylinder, of radius `wheel_radius`, with its rim rounded by `rim_rounding`. `drive`
+/// turns it onto the axle (`drive::AXLE_ALONG_X`).
+pub(super) fn tire_shape(config: &TruckConfig) -> Collider {
+    let half_width = config.wheel_width / 2.0;
+    let border = rim_rounding(config);
+    Collider::from(SharedShape::round_cylinder(
+        half_width - border,
+        config.wheel_radius - border,
+        border,
+    ))
+}
 
 const SPAWN_POSITION: Vec3 = Vec3::new(0.0, 3.0, 0.0);
 /// How far apart trucks are spawned, in metres: two bodies in one place would be thrown
@@ -163,13 +188,10 @@ fn spawn_truck(
                 NoAutoCenterOfMass,
             ),
             Friction::new(0.4),
-            // Bodywork that springs back off whatever it hits, the ground included: a
-            // truck that lands on its roof bounces rather than sticking. `Min`, as the
-            // tires have: scenery names a bounce of 1 so as to leave the tires theirs (see
-            // `scenery::bouncy`), and `Max` wins over every other rule, so under it the
-            // body bounced off scenery with all of its speed. Measured with a truck at 20
-            // m/s whose body struck a car-sized mesh as it climbed over it: thrown up by
-            // 2.2 m/s in one step at 1, and by 1.3 m/s at this.
+            // Bodywork that does not spring back off what it hits. `Min`, as the tires
+            // have: scenery names a bounce of 1 (see `scenery::bouncy`), and `Max` wins
+            // over every other rule, so under it the body bounced off scenery with all of
+            // its speed.
             Restitution::new(BODY_BOUNCE).with_combine_rule(CoefficientCombine::Min),
             GroundGrip::default(),
             LinearDamping(0.02),
@@ -194,11 +216,13 @@ fn spawn_truck(
         .id();
     // A tire-shaped collider at each wheel, as a child of the body so that the physics
     // makes it part of it, which `drive` keeps at the hub as the suspension moves. It is what
-    // walls, rails, scenery and other trucks meet at wheel height, and what another
-    // truck's tire can climb onto. It touches the ground too, but only where the
-    // suspension doesn't: a contact under the tread would fight the cast, so `contacts`
-    // drops it, and what is left holds up a tire the ground meets anywhere else.
-    let tire = Collider::cylinder(config.wheel_radius, config.wheel_width);
+    // walls, rails, scenery and other trucks meet at wheel height, which the tire grips
+    // and climbs (see `contacts`), and what another truck's tire can climb onto. It touches
+    // the ground too, but only where the suspension doesn't: a contact under the tread
+    // would fight the cast, so `contacts` drops it, and what is left holds up a tire the
+    // ground meets anywhere else. `drive` sweeps the same shape, so that what the sweep
+    // finds and what the collider meets agree.
+    let tire = tire_shape(&config);
     let wheel_colliders = config
         .wheel_rest
         .iter()
@@ -208,7 +232,10 @@ fn spawn_truck(
                     Name::new("Wheel collider"),
                     WheelCollider {
                         bottomed: false,
-                        rolling_over: None,
+                        stands_on: None,
+                        throttle: 0.0,
+                        engine_force: 0.0,
+                        brakes_on: false,
                     },
                     ChildOf(truck),
                     Transform::from_translation(rest)
@@ -219,14 +246,10 @@ fn spawn_truck(
                     ActiveCollisionHooks::MODIFY_CONTACTS,
                     // The body's mass is given whole on the chassis.
                     ColliderDensity(0.0),
-                    Friction::new(0.4),
-                    // Rubber: a tire that meets a tire, a rail or a body springs back
-                    // off it. `Min` so that a surface may be softer than the tire and say
-                    // so -- the ground does, because dirt is not rubber (see `track`) --
-                    // while anything that does not name a bounce of its own, or names a
-                    // livelier one, leaves the tire's. A collider carries one restitution
-                    // for everything it touches, and this is the only way to tell the
-                    // ground apart from a rail.
+                    // A tire grips whatever it touches with its own grip, whatever that is
+                    // made of: `Max` wins over every other rule.
+                    Friction::new(config.grip).with_combine_rule(CoefficientCombine::Max),
+                    // No bounce: `Min` so that nothing it touches can give it one.
                     Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
                 ))
                 .id();
@@ -241,10 +264,11 @@ fn spawn_truck(
                 // where the rim of a cylinder could catch on them.
                 Collider::sphere(config.wheel_radius * CORE_SHARE),
                 crate::collision_groups::wheel_core(),
-                // So that `contacts` lets it roll rather than scrub.
+                // So that `contacts` decides its contacts with the ground as the tire's.
                 ActiveCollisionHooks::MODIFY_CONTACTS,
                 ColliderDensity(0.0),
-                // The ground's own bounce, which is the softer (see `track`).
+                // It rolls, and never scrubs: the tire's grip is the tread's (see `contacts`).
+                Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
                 Restitution::new(TIRE_BOUNCE).with_combine_rule(CoefficientCombine::Min),
             ));
             collider

@@ -419,8 +419,8 @@ fn shows_a_hole(model: &SceneryModel, cycles: &[TextureCycle], holes: &[bool]) -
 }
 
 /// A tire takes the softer of itself and what it hits (see `truck/spawn.rs`), so scenery
-/// says it is at least as lively as the tire to be left alone: a truck springs off a post
-/// or a rail as it always did, and only the ground, which names a duller one, damps it.
+/// says it is at least as lively as the tire to be left alone: the tire's own bounce, which
+/// is none, is what a truck gets off a post or a rail.
 fn bouncy() -> Restitution {
     Restitution::new(1.0).with_combine_rule(CoefficientCombine::Min)
 }

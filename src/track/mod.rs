@@ -243,11 +243,10 @@ fn spawn_terrain(
             layers,
             Friction::new(1.0),
             // Dirt, not rubber. Once a truck's springs are shut its tires are what meets
-            // the ground (see `truck/contacts.rs`), and a tire's own bounce is a lively
-            // 0.8: at that a truck dropped flat from 30 m came off the ground at 70% of
-            // the speed it hit at and flew 13 m back up. The tire takes the softer of the
-            // two (see `truck/spawn.rs`), so this is what it gets here, and its own is
-            // what it keeps against a rail or another truck.
+            // the ground (see `truck/contacts.rs`), and when a tire's own bounce was a
+            // lively 0.8 a truck dropped flat from 30 m came off the ground at 70% of the
+            // speed it hit at and flew 13 m back up. The tire takes the softer of the two
+            // (see `truck/spawn.rs`); its own is now none.
             Restitution::new(GROUND_BOUNCE).with_combine_rule(CoefficientCombine::Min),
         )
     };

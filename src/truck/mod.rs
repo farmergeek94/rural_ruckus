@@ -3,9 +3,10 @@
 //! spring/damper force (suspension) plus grip and drive forces (tire) to the chassis.
 //!
 //! Wheels are not bodies of their own, which is what keeps this model stable and cheap.
-//! Each is also a collider on the chassis, moved to its hub every step, that touches
-//! everything but the ground: walls, rails, scenery and other trucks meet a tire, and a
-//! tire can be stood on, so trucks climb over each other.
+//! Each is also a collider on the chassis, moved to its hub every step, with the tire's
+//! grip, driven by its tread (`contacts`): walls, rails, scenery and other trucks meet a
+//! tire, which stops against them and climbs them under throttle, and a tire can be stood
+//! on, so trucks climb over each other.
 //!
 //! A race has one truck that the player drives (`PlayerTruck`, from `ChosenTruck`) and any
 //! number that someone else drives (from `ComputerTrucks`). They are built alike, and
@@ -246,21 +247,29 @@ pub(crate) struct TruckWheelColliders {
     pub(crate) tire: Collider,
 }
 
-/// On a wheel's collider.
+/// On a wheel's collider: what `drive` tells `contacts` of the tire each step. Written by
+/// `drive` in `FixedUpdate`, read by `contacts` in the step that follows.
 #[derive(Component)]
 pub(crate) struct WheelCollider {
     /// Whether the tire is pressed past the top of its travel this step, and squashed as
-    /// far as it goes (`drive::GROUND_SQUASH` on the terrain, `drive::EDGE_SQUASH` into an
-    /// edge). There the springs have nothing left to give and the tire is simply solid:
-    /// `drive` stops pushing and `contacts` keeps the ground contact, which is what holds
-    /// the truck up and bounces it. Written by `drive` every step, read by `contacts`.
+    /// far as it goes (`drive::GROUND_SQUASH`). There the springs have nothing left to give
+    /// and the tire is simply solid: `drive` stops pushing and `contacts` keeps the ground
+    /// contact, which is what holds the truck up.
     pub(super) bottomed: bool,
-    /// What the suspension rolls the tire over the top of this step, if it is not the
-    /// terrain: scenery, or the ground boxes. A tire met fast with an edge as high as its
-    /// hub goes into the edge's face for a few steps as the springs lift it, and `contacts`
-    /// lets it, and its core, further into that than into another face. Written by `drive`
-    /// every step, read by `contacts` in the same step.
-    pub(super) rolling_over: Option<Entity>,
+    /// The collider the suspension stands the tire on this step, if any: what the sweep
+    /// found under the tread and took. `contacts` leaves that collider's push under the
+    /// tread to the suspension, and keeps every other's, so that an edge the sweep refused
+    /// (see `drive::EDGE_RAMP`) is the collider's and not nobody's.
+    pub(super) stands_on: Option<Entity>,
+    /// What the driver asks of the tread, which `contacts` drives the tire's kept contacts
+    /// with, so that a tire pressed against a wall or another truck climbs it under
+    /// throttle, and a truck on its roof drives on its tires' tops (see `contacts`): the
+    /// throttle, -1 to 1; the force the engine pushes each wheel with through the gear, in
+    /// newtons, forwards positive (`Engine::wheel_force`); and whether the brakes are held
+    /// on whatever the throttle, as by `Held` or the handbrake.
+    pub(super) throttle: f32,
+    pub(super) engine_force: f32,
+    pub(super) brakes_on: bool,
 }
 
 /// A solid ball inside a wheel, at its hub, that touches the ground and the bodies of

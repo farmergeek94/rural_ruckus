@@ -45,10 +45,9 @@ pub fn wheel() -> CollisionLayers {
 }
 
 /// For a wheel's core: the ground, and the bodies of trucks. Walls, scenery and other
-/// trucks' tires are the tire's. The tire's contacts with another truck are shaped for it
-/// to ride up and over (see `truck/contacts.rs`), and without the core nothing held it out
-/// of the other truck's body. The physics never lets two colliders of one body touch, so
-/// a core never meets its own truck's body.
+/// trucks' tires are the tire's. A tire that climbs another truck goes into its body no
+/// further than the core is inside the tire (see `truck/contacts.rs`). The physics never
+/// lets two colliders of one body touch, so a core never meets its own truck's body.
 pub fn wheel_core() -> CollisionLayers {
     CollisionLayers::new(WHEEL_CORES, LayerMask(GROUND.0 | TRUCK_BODIES.0))
 }

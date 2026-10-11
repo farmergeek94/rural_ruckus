@@ -118,7 +118,7 @@ matrix was, so the heights go in as before. `tests/track.rs` checks the collider
 | `contact.tangent_velocity`, for each point | `manifold.tangent_velocity`, for the manifold | measured: see 3.3 |
 | `point.local_p1`, `local_p2`: on each collider's surface, in its frame | `anchor1`, `anchor2`: the point halfway between the two surfaces, from each body's centre of mass, in the world | read: see 3.4 |
 
-The hook reads the world only, as in Rapier. `suspension_takes` and `riding_up` need each
+The hook reads the world only, as in Rapier. `suspension_takes` needs each
 point in the wheel's frame (the cylinder's axis is Y). The hook moves it there with this
 step's `Position`, `Rotation` and `ComputedCenterOfMass` of the truck, and the wheel
 collider's `Transform`. A (wheel, heightfield ground) pair holds one manifold for each
@@ -180,14 +180,14 @@ unit test in `collision_groups.rs` keeps them off bit 0.
 
 Avian's document says "velocity 2 minus velocity 1". Measured (`tests/physics.rs`,
 `a_belt_carries_a_box`), the solver lets the **first** collider's surface slide along the
-second's at this velocity without friction. `let_it_roll` sets it by which collider is
-the wheel.
+second's at this velocity without friction. `drive_contact` sets it by which collider is
+the wheel: the velocity the first is to have, less the second's.
 
 ### 3.4 Contact points are halfway between the surfaces
 
 Rapier gave each point on each collider's surface; Avian gives the halfway point. A tire
 pressed 0.2 m into another truck's tire was touched 0.1 m inside its tread, below
-`SIDEWALL`, so the ride-up rule let go and the tire stopped as at a wall. Parry makes the
+the tread, so a rule that asked for the tread let go. Parry makes the
 halfway point from the surface points and the depth, so the hook takes each surface point
 back exactly (half the depth along the normal). A truck driven into another's rear tire
 then rose 1.21 m, against 1.18 m on Rapier.
