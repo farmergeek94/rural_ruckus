@@ -52,7 +52,13 @@ pub struct TrackData {
     /// to the middle of the road. Empty for a track that has no others.
     pub other_courses: Vec<Option<Course>>,
     /// Checkpoints in the order they must be crossed. Gate 0 is the start/finish line.
+    /// Empty for a rumble, whose boxes are its `rumble` zones.
     pub gates: Vec<Gate>,
+    /// What kind of event the track is built for.
+    pub race_type: RaceType,
+    /// The zones of a Summit Rumble: `Some` only when `race_type` is `RaceType::Rumble`
+    /// and the track has them.
+    pub rumble: Option<RumbleZones>,
     /// Pole position: where the first truck waits for the race to begin.
     pub start: StartPosition,
     /// The other places on the starting grid, in the track's own order. A Monster Truck
@@ -383,6 +389,68 @@ pub enum SceneryMotion {
     Moving { velocity: Vec3 },
 }
 
+/// What kind of event a track is built for, as its file says. A Monster Truck Madness 2
+/// track file writes one of five (`docs/formats/situation.md`, "Summit Rumbles"). The game
+/// races every type but the rumble as a circuit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RaceType {
+    #[default]
+    Circuit,
+    Rally,
+    Drag,
+    HillClimb,
+    /// A Summit Rumble: "King of the Hill" in an arena, scored by the time spent on the
+    /// summit, with no laps and no checkpoints.
+    Rumble,
+}
+
+/// A box in the world, turned about Y: the summit and the scoring zone of a rumble.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Zone {
+    /// Its middle on the ground plane (world X and Z), in metres.
+    pub center: Vec2,
+    /// Which way it faces, as a rotation about Y in radians. 0 faces -Z.
+    pub yaw: f32,
+    /// Half its size, in metres: `x` across the way it faces, `y` along it.
+    pub half_extents: Vec2,
+    /// The heights of its bottom and its top, in metres.
+    pub bottom: f32,
+    pub top: f32,
+}
+
+impl Zone {
+    /// Whether `point` (world X, Y and Z, in metres) is inside the box.
+    pub fn contains(&self, point: Vec3) -> bool {
+        point.y >= self.bottom && point.y <= self.top && self.near(point.xz(), 0.0)
+    }
+
+    /// Whether a point on the ground plane (world X and Z, in metres) is under or over
+    /// the box, whatever its height.
+    pub fn covers(&self, point: Vec2) -> bool {
+        self.near(point, 0.0)
+    }
+
+    /// Whether a point on the ground plane is under or over the box grown by `margin`
+    /// metres on every side.
+    pub fn near(&self, point: Vec2, margin: f32) -> bool {
+        let along = yaw_direction(self.yaw);
+        let offset = point - self.center;
+        offset.dot(along.perp()).abs() <= self.half_extents.x + margin
+            && offset.dot(along).abs() <= self.half_extents.y + margin
+    }
+}
+
+/// The two zones of a Summit Rumble (`docs/formats/situation.md`, "Summit Rumbles"): a
+/// truck on the summit and in the scoring zone earns points, one on the summit outside it
+/// earns none, and one off the summit loses them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RumbleZones {
+    /// Where points are earned: on the summit, within its outer perimeter if it has one.
+    pub scoring: Zone,
+    /// The summit itself, never smaller than the scoring zone. Leaving it is a fall.
+    pub summit: Zone,
+}
+
 /// A checkpoint: a line across the course that must be crossed in one direction.
 #[derive(Clone, Debug)]
 pub struct Gate {
@@ -448,12 +516,42 @@ mod tests {
             course: None,
             other_courses: Vec::new(),
             gates: Vec::new(),
+            race_type: RaceType::Circuit,
+            rumble: None,
             start: StartPosition {
                 position: Vec2::ZERO,
                 yaw: 0.0,
             },
             grid: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_zone_holds_what_is_inside_its_turned_box() {
+        // Facing +X (a yaw of -90 degrees), 10 m across and 40 m along, from 5 to 15 m up.
+        let zone = Zone {
+            center: Vec2::new(100.0, 50.0),
+            yaw: -FRAC_PI_2,
+            half_extents: Vec2::new(5.0, 20.0),
+            bottom: 5.0,
+            top: 15.0,
+        };
+        assert!(zone.contains(Vec3::new(118.0, 10.0, 50.0)));
+        assert!(zone.contains(Vec3::new(82.0, 14.9, 54.0)));
+        assert!(!zone.contains(Vec3::new(122.0, 10.0, 50.0)), "past its end");
+        assert!(
+            !zone.contains(Vec3::new(100.0, 10.0, 56.0)),
+            "past its side"
+        );
+        assert!(!zone.contains(Vec3::new(100.0, 4.0, 50.0)), "under it");
+        assert!(!zone.contains(Vec3::new(100.0, 16.0, 50.0)), "over it");
+        assert!(zone.covers(Vec2::new(118.0, 54.0)));
+        assert!(!zone.covers(Vec2::new(100.0, 56.0)));
+        assert!(
+            zone.near(Vec2::new(100.0, 56.0), 1.5),
+            "grown past its side"
+        );
+        assert!(!zone.near(Vec2::new(100.0, 57.0), 1.5));
     }
 
     #[test]

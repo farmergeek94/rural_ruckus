@@ -63,9 +63,14 @@
 //! On a world that repeats, a driver measures the way to anything the short way, which may
 //! be across an edge of the map (`track::Course::offset`).
 //!
+//! In a Summit Rumble (`TrackData::rumble`) there is no course and no checkpoint, and the
+//! drivers climb the summit and push each other off it instead (`rumble`).
+//!
 //! Uses the `track` slice for the course, the `truck` slice for the trucks and the `race`
 //! slice for the checkpoints. Needs `RacePlugin`, and the physics, which says where the ground
 //! is under a truck.
+
+mod rumble;
 
 use std::collections::HashSet;
 
@@ -316,7 +321,13 @@ impl Plugin for OpponentsPlugin {
                     .run_if(in_state(GameState::Racing)),
             )
             // With the forces, so that a driver does the same at any frame rate.
-            .add_systems(FixedUpdate, drive.run_if(in_state(GameState::Racing)));
+            .add_systems(
+                FixedUpdate,
+                drive
+                    .run_if(in_state(GameState::Racing))
+                    .run_if(not(crate::race::is_rumble)),
+            )
+            .add_plugins(rumble::plugin);
     }
 }
 
@@ -407,6 +418,8 @@ pub struct ComputerDriver {
     /// Its truck's own engine, before `CHASING_POWER` is added: its pull in newtons and the
     /// speed where that runs out in m/s. Taken the first time the driver drives.
     engine: Option<(f32, f32)>,
+    /// What it keeps in a Summit Rumble.
+    rumble: rumble::RumbleDriver,
 }
 
 impl ComputerDriver {
@@ -425,6 +438,7 @@ impl ComputerDriver {
             recovery: Recovery::default(),
             careful_until: None,
             engine: None,
+            rumble: rumble::RumbleDriver::default(),
         }
     }
 }
@@ -1521,26 +1535,29 @@ fn ask_to_be_put_back(
     mut back: MessageWriter<BackToCheckpoint>,
     mut gates_along: Local<Vec<f32>>,
 ) {
-    let Some(course) = course_for(&track, settings.difficulty) else {
-        return;
-    };
-    if track.is_changed() || settings.is_changed() || gates_along.len() != track.gates.len() {
+    // A rumble has no course to follow, and nothing to have missed on it.
+    let course = course_for(&track, settings.difficulty).filter(|_| track.rumble.is_none());
+    if let Some(course) = course
+        && (track.is_changed() || settings.is_changed() || gates_along.len() != track.gates.len())
+    {
         *gates_along = along_the_course(&track, course);
     }
-    let lap = course.length();
     for (truck, mut driver, racer, name) in &mut drivers {
-        let Some(along) = driver.along else {
-            continue;
-        };
         // Gone past the checkpoint that it has to drive through next, without doing so.
         let gate_along = |index: usize| gates_along.get(index).copied();
-        let missed = racer.progress.finished.is_none()
-            && racer
-                .progress
-                .last_gate(track.gates.len())
-                .and_then(gate_along)
-                .zip(gate_along(racer.progress.next_gate))
-                .is_some_and(|(last, next)| has_missed(along, last, next, lap));
+        let missed = match (course, driver.along) {
+            (Some(course), Some(along)) => {
+                racer.progress.finished.is_none()
+                    && racer
+                        .progress
+                        .last_gate(track.gates.len())
+                        .and_then(gate_along)
+                        .zip(gate_along(racer.progress.next_gate))
+                        .is_some_and(|(last, next)| has_missed(along, last, next, course.length()))
+            }
+            _ => false,
+        };
+        let along = driver.along.unwrap_or(0.0);
         // Stopped again after backing up, or getting nowhere however it tries.
         let stuck = driver.recovery.gave_up || driver.getting_nowhere > PATIENCE;
         if missed || stuck {

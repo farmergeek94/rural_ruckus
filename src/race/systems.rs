@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use super::along::GatesAlong;
 use super::gate;
 use super::pause::running;
+use super::rumble::RumbleScore;
 use super::{RaceClock, RacePause, RaceSettings, Racer};
 use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
@@ -75,10 +76,15 @@ pub(super) fn enlist_trucks(
     let taken = racers.iter().count();
     for (index, &(_, truck)) in trucks.iter().enumerate() {
         let grid_place = taken + index;
-        commands.entity(truck).insert(Racer {
+        let mut racer = commands.entity(truck);
+        racer.insert(Racer {
             grid_place,
             ..default()
         });
+        // In a rumble, a score to go with it.
+        if track.rumble.is_some() {
+            racer.insert(RumbleScore::default());
+        }
         place.write(on_grid(truck, grid_place, &track));
     }
 }

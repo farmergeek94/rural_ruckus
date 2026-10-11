@@ -16,6 +16,9 @@ content = { package = "ruckus_content", path = "crates/content" }
 # The reader for Monster Truck Madness 2 archives (`crates/pod`). Only `main.rs`,
 # `front_end.rs` and `base_game.rs` may name it.
 pod = { path = "crates/pod" }
+# The rules of a Summit Rumble and the mind of a computer truck in one (`crates/rumble`),
+# plain data and pure functions over `content`. The `race` and `opponents` slices use it.
+rumble = { package = "ruckus_rumble", path = "crates/rumble" }
 # Writes the screenshots that the pause screen saves. Bevy already builds this version for
 # its own image loading, so it adds nothing to compile.
 png = "0.18"

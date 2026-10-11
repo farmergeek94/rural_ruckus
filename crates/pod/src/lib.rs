@@ -201,6 +201,18 @@ impl Track {
         Situation::parse_name(&text(bytes))
     }
 
+    /// The `Track Race Type` of the first track in the archive, without reading the rest
+    /// of it. `None` if the archive holds no track, or the track gives none.
+    pub fn race_type_in(archive: &PodArchive) -> Option<u32> {
+        let entry = situation_entry(archive)?;
+        Self::race_type_from(archive.data(entry))
+    }
+
+    /// The `Track Race Type` a track file gives, from the file's bytes.
+    pub fn race_type_from(bytes: &[u8]) -> Option<u32> {
+        Situation::parse_race_type(&text(bytes))
+    }
+
     /// Loads the track whose track file is `file_name` (such as `WORLD\JUNK.SIT`, or just
     /// `JUNK.SIT`), as [`from_archives`](Self::from_archives) loads the first.
     pub fn from_file(

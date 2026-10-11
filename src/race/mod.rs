@@ -1,7 +1,10 @@
 //! Racing laps around the track: a countdown on the grid, checkpoint gates crossed in
 //! order, lap counting and timing, and the results once the player has finished, plus the
 //! gate markers, the race readout, a compass to the next checkpoint and a map of the track
-//! with every truck on it on screen. Esc pauses the race (`pause`).
+//! with every truck on it on screen. Esc pauses the race (`pause`). On a track with
+//! `TrackData::rumble` zones the race is a Summit Rumble instead (`rumble`): scored by the
+//! time on the summit for a set number of minutes, with no laps and no gates, and every
+//! truck's score over it on the screen (`labels`).
 //!
 //! Uses the `track` slice for the gates and start position, and the `truck` slice for
 //! the trucks. Every truck becomes a `Racer` with a place on the starting grid: the
@@ -12,17 +15,20 @@ mod along;
 mod compass;
 mod gate;
 mod hud;
+mod labels;
 mod map;
 mod markers;
 mod pause;
 mod progress;
 mod results;
+mod rumble;
 mod start;
 mod systems;
 
 use avian3d::prelude::PhysicsSystems;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
+use bevy::ui::UiSystems;
 
 use crate::game_state::GameState;
 use crate::keys::{Control, just_pressed};
@@ -30,8 +36,10 @@ use crate::track::TrackSystems;
 use crate::truck::TruckSystems;
 
 pub use gate::crossed;
+pub use labels::ScoreLabel;
 pub use pause::{RaceCancelled, RacePause};
 pub use progress::{Milestone, RaceProgress, position, standings};
+pub use rumble::{RumbleScore, RumbleSession, is_rumble};
 pub use start::{BLUE, RaceStart};
 pub use systems::BackToCheckpoint;
 
@@ -82,6 +90,7 @@ impl Plugin for RacePlugin {
                 (
                     (systems::reset_clock, start::begin_countdown).chain(),
                     systems::find_gates_along.after(TrackSystems::Prepare),
+                    rumble::start_session.after(TrackSystems::Prepare),
                     systems::tell_trucks_of_the_world.after(TrackSystems::Prepare),
                     markers::spawn_gate_markers.after(TrackSystems::Prepare),
                     hud::spawn_race_hud,
@@ -119,15 +128,35 @@ impl Plugin for RacePlugin {
                     )
                         .chain()
                         .after(TruckSystems::PlaceVisuals),
+                    // In a rumble, a score over every truck.
+                    (
+                        labels::add_labels
+                            .after(systems::enlist_trucks)
+                            .run_if(rumble::is_rumble),
+                        labels::number_labels,
+                    )
+                        .chain(),
                 )
                     // Outside a race there are no gates, and before the first one no
                     // banner materials either.
                     .run_if(in_state(GameState::Racing)),
             )
+            // Once the camera has been placed for the frame, and before the UI is laid out.
+            .add_systems(
+                PostUpdate,
+                labels::place_labels
+                    .before(UiSystems::Layout)
+                    .run_if(in_state(GameState::Racing)),
+            )
             // After the physics step, so that a truck's position is this tick's.
+            .add_systems(OnExit(GameState::Racing), rumble::end_session)
             .add_systems(
                 FixedPostUpdate,
-                (systems::tick_clock, systems::track_progress)
+                (
+                    systems::tick_clock,
+                    systems::track_progress,
+                    rumble::score_rumble,
+                )
                     .chain()
                     .after(PhysicsSystems::Writeback)
                     .run_if(in_state(GameState::Racing)),
@@ -145,6 +174,8 @@ impl Plugin for RacePlugin {
 #[derive(Resource)]
 pub struct RaceSettings {
     pub laps: u32,
+    /// How long a Summit Rumble's session is, in minutes. What MTM2 offered is open.
+    pub rumble_minutes: u32,
     /// Whether a front end takes the player back when the race is cancelled from the pause
     /// dialog: it reads `RaceCancelled`, and sets this. Without one, cancelling quits the
     /// game.
@@ -155,6 +186,7 @@ impl Default for RaceSettings {
     fn default() -> Self {
         Self {
             laps: 3,
+            rumble_minutes: 3,
             front_end: false,
         }
     }

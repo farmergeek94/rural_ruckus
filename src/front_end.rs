@@ -434,28 +434,48 @@ impl Browsing {
 fn catalogue_for(settings: &FrontEndSettings, base: &BaseGame) -> Catalogue {
     let base_trucks = pod::truck::peek_base(base)
         .into_iter()
-        .map(|truck| base_entry(&truck.archive, &truck.file, truck.name))
+        .map(|truck| {
+            base_entry(
+                &truck.archive,
+                &truck.file,
+                truck.name.map(|name| (name, None)),
+            )
+        })
         .collect();
     let base_tracks = pod::track::peek_base(base)
         .into_iter()
-        .map(|track| base_entry(&track.archive, &track.file, track.name))
+        .map(|track| base_entry(&track.archive, &track.file, track.peek.map(track_peeked)))
         .collect();
     Catalogue {
         trucks: list_archives(
             &settings.trucks_folder,
             settings.builtin.then(|| TruckData::builtin().name),
-            pod::truck::peek_pod,
+            |path| Ok(pod::truck::peek_pod(path)?.map(|name| (name, None))),
             "no truck in this archive",
             base_trucks,
         ),
         tracks: list_archives(
             &settings.tracks_folder,
             settings.builtin.then(|| track::builtin_track().name),
-            pod::track::peek_pod,
+            |path| Ok(pod::track::peek_pod(path)?.map(track_peeked)),
             "no track in this archive",
             base_tracks,
         ),
     }
+}
+
+/// What a track's list entry shows of what its file says: its name, and what kind of
+/// event it is where that is not a circuit, as MTM2's own race screen said beside the
+/// name.
+fn track_peeked(peek: pod::track::TrackPeek) -> (String, Option<&'static str>) {
+    let kind = match peek.race_type {
+        track::RaceType::Rumble => Some("Summit Rumble"),
+        track::RaceType::Rally => Some("Rally"),
+        track::RaceType::Drag => Some("Drag"),
+        track::RaceType::HillClimb => Some("Hill climb"),
+        track::RaceType::Circuit => None,
+    };
+    (peek.name, kind)
 }
 
 /// The options screen's line that shows where one of the base game's folders is, and
@@ -621,7 +641,7 @@ impl Showing {
 fn list_archives(
     folder: &Path,
     builtin_name: Option<String>,
-    peek: fn(&Path) -> Result<Option<String>, String>,
+    peek: impl Fn(&Path) -> Result<Option<(String, Option<&'static str>)>, String>,
     holds_none: &str,
     from_base: Vec<Entry>,
 ) -> Vec<Entry> {
@@ -656,8 +676,12 @@ fn list_archives(
                 .unwrap_or_default();
             let (name, detail, available) = match peek(path) {
                 // Not every track gives itself a name.
-                Ok(Some(name)) if name.trim().is_empty() => (stem, file.clone(), true),
-                Ok(Some(name)) => (name.trim().to_string(), file.clone(), true),
+                Ok(Some((name, kind))) if name.trim().is_empty() => {
+                    (stem, with_kind(kind, file.clone()), true)
+                }
+                Ok(Some((name, kind))) => {
+                    (name.trim().to_string(), with_kind(kind, file.clone()), true)
+                }
                 Ok(None) => (stem, format!("{file}: {holds_none}"), false),
                 // The error names the file already.
                 Err(error) => (stem, error, false),
@@ -1785,15 +1809,21 @@ fn load_track(id: &str, base: &BaseGame) -> Result<TrackData, String> {
 /// archive and the file in it: `base:<archive path>#<file>`. A file in an archive has no
 /// `#` in its name, and the plain path of a truck or track in `trucks/` or `tracks/`
 /// never starts with `base:`.
-fn base_entry(archive: &Path, file: &str, name: Result<String, String>) -> Entry {
+fn base_entry(
+    archive: &Path,
+    file: &str,
+    peeked: Result<(String, Option<&'static str>), String>,
+) -> Entry {
     let archive_name = archive
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let detail = format!("base game: {archive_name}");
-    let (name, detail, available) = match name {
-        Ok(name) if name.trim().is_empty() => (file.to_string(), detail, true),
-        Ok(name) => (name.trim().to_string(), detail, true),
+    let (name, detail, available) = match peeked {
+        Ok((name, kind)) if name.trim().is_empty() => {
+            (file.to_string(), with_kind(kind, detail), true)
+        }
+        Ok((name, kind)) => (name.trim().to_string(), with_kind(kind, detail), true),
         Err(error) => (file.to_string(), error, false),
     };
     Entry {
@@ -1801,6 +1831,14 @@ fn base_entry(archive: &Path, file: &str, name: Result<String, String>) -> Entry
         name,
         detail,
         available,
+    }
+}
+
+/// An entry's detail line with the kind of event before it, where it has one.
+fn with_kind(kind: Option<&str>, detail: String) -> String {
+    match kind {
+        Some(kind) => format!("{kind}  -  {detail}"),
+        None => detail,
     }
 }
 
@@ -1921,19 +1959,23 @@ fn show_the_map(
     if showing.map_of == showing.wanted_track {
         return;
     }
-    let map = match &showing.wanted_track {
-        None => None,
+    let (map, timed) = match &showing.wanted_track {
+        None => (None, false),
         Some(id) => match showing.track(id) {
-            Some(track) => Some(track::map_image(track, MAP_SIZE)),
+            Some(track) => (
+                Some(track::map_image(track, MAP_SIZE)),
+                track.rumble.is_some(),
+            ),
             // On its way. The last map stays until then.
             None => return,
         },
     };
     showing.map_of = showing.wanted_track.clone();
+    preview.timed = timed;
     let Some(mut images) = images else {
         return;
     };
-    preview.0 = map.map(|rgba| {
+    preview.image = map.map(|rgba| {
         images.add(Image::new(
             Extent3d {
                 width: MAP_SIZE as u32,
@@ -1999,6 +2041,7 @@ fn go(
     mut pressed: MessageReader<GoPressed>,
     choices: Res<Choices>,
     catalogue: Res<Catalogue>,
+    preview: Res<TrackPreview>,
     mut getting_ready: ResMut<GettingReady>,
     mut screen: ResMut<LoadingScreen>,
     mut open: ResMut<NextState<FrontEndOpen>>,
@@ -2012,10 +2055,7 @@ fn go(
     ) else {
         return;
     };
-    let laps = match choices.laps {
-        1 => "1 lap".to_string(),
-        laps => format!("{laps} laps"),
-    };
+    let laps = crate::ui::laps_text(choices.laps, preview.timed);
     let against = match choices.opponents {
         0 => "alone".to_string(),
         1 => "against 1 truck".to_string(),
@@ -2123,6 +2163,8 @@ fn get_ready(
     commands.insert_resource(ChosenTruck(truck));
     commands.insert_resource(ChosenTrack(track));
     race.laps = choices.laps;
+    // The same line counts minutes on a rumble track.
+    race.rumble_minutes = choices.laps;
     // `ui::DIFFICULTIES` names them in the same order.
     commands.insert_resource(OpponentsSettings {
         difficulty: Difficulty::ALL[choices.difficulty.min(Difficulty::ALL.len() - 1)],
@@ -2282,7 +2324,7 @@ mod tests {
         let entry = base_entry(
             Path::new("base/Shared/JUNK.POD"),
             "WORLD\\GRAVEY.SIT",
-            Ok("The Graveyard".into()),
+            Ok(("The Graveyard".into(), None)),
         );
         assert_eq!(entry.name, "The Graveyard");
         assert_eq!(entry.detail, "base game: JUNK.POD");

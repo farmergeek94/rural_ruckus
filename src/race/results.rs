@@ -3,20 +3,26 @@
 //! with the lap they are on, and the table keeps up with them as they finish. Enter races
 //! again; Esc pauses, as it does in the race, and the pause dialog can leave it.
 //!
-//! What MTM2's results screen showed is not measured. This one is the game's own.
+//! What MTM2's results screen showed is not measured. This one is the game's own. In a
+//! rumble the table is every truck's points and how often it was knocked off, in the
+//! order of the scores, once the time is up.
 
 use bevy::prelude::*;
 
 use super::hud::format_time;
 use super::progress::standings;
+use super::rumble::{RumbleScore, RumbleSession, points_text};
 use super::{RaceSettings, Racer};
 use crate::game_state::GameState;
 use crate::track::Track;
 use crate::truck::{PlayerTruck, TruckName};
 
 /// The table's columns, left to right: the place, the truck, the race time, and the best
-/// lap. How wide each is, in pixels.
+/// lap. The least wide each is, in pixels: a column grows to its widest line, and no
+/// line wraps, so that a long truck name stays on its row.
 const COLUMNS: [f32; 4] = [70.0, 320.0, 140.0, 140.0];
+/// The space between columns, in pixels.
+const COLUMN_GAP: f32 = 24.0;
 
 #[derive(Component)]
 pub(super) struct ResultsPanel;
@@ -57,6 +63,7 @@ pub(super) fn spawn_results(mut commands: Commands) {
                         .spawn(Node {
                             flex_direction: FlexDirection::Row,
                             margin: UiRect::vertical(px(12)),
+                            column_gap: px(COLUMN_GAP),
                             ..default()
                         })
                         .with_children(|table| {
@@ -65,8 +72,9 @@ pub(super) fn spawn_results(mut commands: Commands) {
                                     ResultsColumn(column),
                                     Text::default(),
                                     TextFont::from_font_size(22.0),
+                                    TextLayout::linebreak(LineBreak::NoWrap),
                                     Node {
-                                        width: px(width),
+                                        min_width: px(width),
                                         ..default()
                                     },
                                 ));
@@ -79,6 +87,15 @@ pub(super) fn spawn_results(mut commands: Commands) {
                 });
         });
 }
+
+/// What a racer is listed by: its progress, its name, whether it is the player's, and
+/// its score in a rumble.
+type Listed<'a> = (
+    &'a Racer,
+    Option<&'a TruckName>,
+    Has<PlayerTruck>,
+    Option<&'a RumbleScore>,
+);
 
 /// One line of the table.
 struct Row {
@@ -93,13 +110,14 @@ pub(super) fn show_results(
     settings: Res<RaceSettings>,
     track: Res<Track>,
     time: Res<Time<Fixed>>,
-    racers: Query<(&Racer, Option<&TruckName>, Has<PlayerTruck>)>,
+    session: Option<Res<RumbleSession>>,
+    racers: Query<Listed>,
     mut panel: Single<&mut Visibility, With<ResultsPanel>>,
     mut columns: Query<(&ResultsColumn, &mut Text)>,
 ) {
     let player_finished = racers
         .iter()
-        .any(|(racer, _, player)| player && racer.progress.finished.is_some());
+        .any(|(racer, _, player, _)| player && racer.progress.finished.is_some());
     panel.set_if_neq(if player_finished {
         Visibility::Inherited
     } else {
@@ -115,37 +133,61 @@ pub(super) fn show_results(
         None => "-:--.--".into(),
     };
     let racers: Vec<_> = racers.iter().collect();
-    let places: Vec<_> = racers
+    let shown_name = |player: bool, name: Option<&TruckName>| match (player, name) {
+        (true, Some(name)) => format!("{} (you)", name.0),
+        (true, None) => "You".into(),
+        (false, Some(name)) => name.0.clone(),
+        (false, None) => "Truck".into(),
+    };
+    let scores: Vec<&rumble::Score> = racers
         .iter()
-        .map(|(racer, _, _)| (&racer.progress, racer.to_next_gate))
+        .filter_map(|(_, _, _, score)| score.map(|score| &score.0))
         .collect();
-    let rows: Vec<Row> = standings(&places, track.gates.len())
-        .into_iter()
-        .enumerate()
-        .map(|(at, index)| {
-            let (racer, name, player) = racers[index];
-            let progress = &racer.progress;
-            let name = match (player, name) {
-                (true, Some(name)) => format!("{} (you)", name.0),
-                (true, None) => "You".into(),
-                (false, Some(name)) => name.0.clone(),
-                (false, None) => "Truck".into(),
-            };
-            let result = match (progress.finished, progress.lap) {
-                (Some(total), _) => show(Some(total)),
-                (None, 0) => "Not started".into(),
-                (None, lap) => format!("Lap {lap}/{}", settings.laps),
-            };
-            Row {
-                place: at + 1,
-                name,
-                result,
-                best: show(progress.best_lap),
-            }
-        })
-        .collect();
+    let (rows, headings): (Vec<Row>, [&str; 4]) =
+        if session.is_some() && scores.len() == racers.len() {
+            let rows = rumble::standings(&scores)
+                .into_iter()
+                .enumerate()
+                .map(|(at, index)| {
+                    let (_, name, player, score) = racers[index];
+                    let score = score.expect("every racer of a rumble has a score");
+                    Row {
+                        place: at + 1,
+                        name: shown_name(player, name),
+                        result: points_text(score),
+                        best: score.0.falls.to_string(),
+                    }
+                })
+                .collect();
+            (rows, ["", "Truck", "Points", "Knocked off"])
+        } else {
+            let places: Vec<_> = racers
+                .iter()
+                .map(|(racer, _, _, _)| (&racer.progress, racer.to_next_gate))
+                .collect();
+            let rows = standings(&places, track.gates.len())
+                .into_iter()
+                .enumerate()
+                .map(|(at, index)| {
+                    let (racer, name, player, _) = racers[index];
+                    let progress = &racer.progress;
+                    let result = match (progress.finished, progress.lap) {
+                        (Some(total), _) => show(Some(total)),
+                        (None, 0) => "Not started".into(),
+                        (None, lap) => format!("Lap {lap}/{}", settings.laps),
+                    };
+                    Row {
+                        place: at + 1,
+                        name: shown_name(player, name),
+                        result,
+                        best: show(progress.best_lap),
+                    }
+                })
+                .collect();
+            (rows, ["", "Truck", "Time", "Best lap"])
+        };
 
-    let shown = table(&rows);
+    let shown = table(&rows, headings);
     for (column, mut text) in &mut columns {
         if text.0 != shown[column.0] {
             text.0 = shown[column.0].clone();
@@ -154,8 +196,8 @@ pub(super) fn show_results(
 }
 
 /// The table as the text of each column, under its heading, a row a line.
-fn table(rows: &[Row]) -> [String; 4] {
-    let mut columns = ["", "Truck", "Time", "Best lap"].map(String::from);
+fn table(rows: &[Row], headings: [&str; 4]) -> [String; 4] {
+    let mut columns = headings.map(String::from);
     for row in rows {
         let cells = [
             ordinal(row.place),
@@ -214,7 +256,7 @@ mod tests {
                 best: "1:01.20".into(),
             },
         ];
-        let [places, names, results, best] = table(&rows);
+        let [places, names, results, best] = table(&rows, ["", "Truck", "Time", "Best lap"]);
         assert_eq!(places, "\n1st\n2nd");
         assert_eq!(names, "Truck\nBigfoot\nBuilt-in truck (you)");
         assert_eq!(results, "Time\n3:01.00\nLap 3/3");

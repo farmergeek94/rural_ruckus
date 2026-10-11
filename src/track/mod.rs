@@ -36,9 +36,9 @@ use crate::game_state::GameState;
 pub use collider::build_collider;
 pub use content::track::{
     Backdrop, BoxFaces, Course, Diagonals, Footing, Gate, GroundBox, GroundCell, GroundTextures,
-    HeightGrid, KeyframedFace, Keyframes, Nearest, Scenery, SceneryModel, SceneryMotion,
-    SceneryObject, Skies, SkyPicture, StartPosition, TextureCycle, TrackData, direction_yaw,
-    yaw_direction,
+    HeightGrid, KeyframedFace, Keyframes, Nearest, RaceType, RumbleZones, Scenery, SceneryModel,
+    SceneryMotion, SceneryObject, Skies, SkyPicture, StartPosition, TextureCycle, TrackData, Zone,
+    direction_yaw, yaw_direction,
 };
 pub use generator::builtin_track;
 pub use map::{MAP_COURSE, MAP_GATE, MAP_START, MapFrame, map_frame, map_image};

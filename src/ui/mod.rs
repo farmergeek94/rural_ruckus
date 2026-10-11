@@ -9,7 +9,7 @@
 //! | `Dials` | in and out | The garage's dials. The module draws and moves them, and doesn't know what they do. |
 //! | `Choices` | in and out | Which truck and track, how many laps, how many trucks the computer drives, and how hard they are to beat. |
 //! | `Settings` | in and out | The options and advanced screens' settings, each a few named values. The module draws and changes them, and doesn't know what they do. |
-//! | `TrackPreview` | in | A picture of the highlighted track. |
+//! | `TrackPreview` | in | A picture of the highlighted track, and whether it is raced against the clock. |
 //! | `Turntable` | in | On the entity the module spawns and turns. Parent to it whatever is to be shown. |
 //! | `FolderBrowser` | in and out | A folder the player is browsing, shown in place of the screens. The module writes which subfolder is highlighted. |
 //! | `TruckHighlighted`, `TrackHighlighted`, `GoPressed`, `ExitPressed` | out | What the player just did. |
@@ -44,6 +44,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
 pub use model::{Action, DIFFICULTIES, MOST_LAPS, MOST_OPPONENTS, NORMAL_DIFFICULTY, Screen};
+pub use screens::laps_text;
 pub use showroom::Turntable;
 pub use theme::Theme;
 
@@ -288,9 +289,15 @@ impl Default for Choices {
     }
 }
 
-/// A picture of the highlighted track, for the race screen. `None` shows none.
+/// A picture of the highlighted track, for the race screen, and what its race is.
 #[derive(Resource, Default)]
-pub struct TrackPreview(pub Option<Handle<Image>>);
+pub struct TrackPreview {
+    /// `None` shows none.
+    pub image: Option<Handle<Image>>,
+    /// Whether a race on it runs for a set time rather than laps: then the LAPS line
+    /// counts minutes.
+    pub timed: bool,
+}
 
 /// Something being got ready, for the loading screen.
 #[derive(Clone, Debug, Default, PartialEq)]

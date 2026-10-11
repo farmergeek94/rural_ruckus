@@ -387,6 +387,96 @@ difficulty setting (`opponents::Difficulty`) chooses the course the computer tru
 follow: the main course on easy, `[Course 1]` on normal and `[Course 2]` on hard, and the
 main course where the one chosen is empty.
 
+## Summit Rumbles
+
+`Track Race Type` 4 is a Summit Rumble, MTM2's "King of the Hill" event. The rules are
+**reference**, from the game's own help file (`MONSTER.HLP` on the CD: the topics
+"Summit Rumble Tips", "Scoring: Summit Rumbles" and "Multiplayer Racing Overview") and
+from the Traxx guide's page "Setting the zone" (`mtm2.com/~mtmg/traxx/zone.php`):
+
+- A rumble is a multiplayer-only event. The host sets a session duration instead of a
+  number of laps. MTM2 has no computer trucks in a rumble.
+- A driver earns 10 points for each second on the Summit and within a Summit Scoring
+  Zone, loses 1 point for each second off the Summit, and loses 50 points each time the
+  truck is booted, or falls, off the Summit. On some arenas the whole Summit scores; on
+  others it has an outer perimeter that does not. The pit board (key O) shows the time
+  remaining and every driver's score. The Hall of Fame keeps the top 20.
+- The zones are two checkpoint boxes (type 6) at the centre of the summit. The first in
+  the file (Traxx's sequence 0) is the scoring zone. The second (sequence 1) is the
+  Summit, "slightly larger than the scoring area, never smaller"; it decides when the
+  "buzz" plays as a truck is knocked off. The courses, set near the summit, drive the
+  race cam and the blimp cam. The helicopter does not work in a rumble.
+
+**Measured** on the base game's three arenas (`SUMMIT1.POD`, `SUMMIT2.POD`,
+`SUMMIT3.POD`): no ramps, a 12-piece course round the summit, and the zones below, in
+feet (`length,width,height` and the centre's height). The grid is a ring of eight
+trucks round the summit, each at its own heading.
+
+| Arena | Scoring zone (box 1) | Summit (box 2) | Grid |
+| --- | --- | --- | --- |
+| Arena Rumble | 64,64,92 at 165 | 128,128,42 at 140 | at 106, 193 to 271 ft out |
+| Pyramid Rumble | 64,64,32 at 256 | 128,128,32 at 256 | at 146 to 186, 580 to 640 ft out |
+| Hypercube Rumble | 192,190,38 at 170 | the same box again | at 116, about 300 ft out |
+
+So in Arena and Pyramid the Summit has a perimeter that does not score, and in Hypercube
+the whole Summit scores, as the help file says. Arena Rumble has a third box, type 0,
+`512,512,20` with no mass, 250 ft up over the summit; its purpose is **open**. Arena
+Rumble is the only base track with `stadiumFlag` 1 (`arena.bin`). The file holds no
+duration.
+
+The summit is built of ground boxes (ground_boxes.md) and terrain, not of models.
+**Measured** on Hypercube Rumble through the game's loader, in metres: a flat floor at
+34 m in a bowl about 170 by 180 m whose sides rise to 50 to 90 m; in its middle a block
+of 6 by 6 cells (58.5 m square, 28 boxes) with its top at 46.3 m, 12.3 m above the floor,
+with vertical sides; two ramps of terrain 2 cells wide, from the floor up to the top,
+rising 12 m over 39 m (31 %), one into the west side south of its middle and one out of
+the east side north of its middle; and two pits of 2 by 2 cells in the top, 4 to 8 m
+deep, each open on one side under a 0.6 m slab (box bottom 45.7 m) that leads down to
+the floor. The zones' boxes stand on that top (46.1 to 57.7 m). The seven grid places
+and the player's are on the floor, 90 to 100 m from the centre. The course loops the
+whole arena, 1926 m, as the Traxx guide says it drives the cameras only. Each pit is a
+trench: its floor slopes up to the top at one end (hole A to the north, hole B to the
+south), so a truck drives out of it; and its other end runs under the slab out to the
+floor. A truck that dips into a trench has its middle under the zone's bottom, and so
+leaves the summit by the game's rule.
+
+**Measured** on Arena Rumble the same way: a stadium floor at 30.5 m, 136 by 136 m
+inside walls of boxes 73 m high; in its middle a platform of 4 by 4 cells (39 m square,
+16 boxes) with its top at 42.1 m and its bottom at 39.6 m, so that a truck drives under
+it (9 m of headroom), on two solid cells at opposite corners; and on each of its four
+sides a hump of terrain, 20 m wide, whose crest is 38.6 to 40 m high and 10 to 12 m short
+of the platform's edge, with a dip to 32 m between. The only way onto the platform is to
+fly off a hump: the zones' boxes stand on the platform (36.3 to 49 m), 6 m under its
+top at the bottom. The grid places are in the stadium's corners and the middles of its
+sides, 26 to 38 m from the nearest crest.
+
+**Measured** on Pyramid Rumble: a stepped pyramid of boxes and terrain whose top is a
+terrain plateau 39 m square at 73.2 m; up to it a ramp of terrain from the north and one
+from the south at a 0.9 grade, one from the east at 0.31, and from the west a ramp at
+0.47 that ends on a ledge at 60 m under a bank at 1.3; and round the base, ramps' side
+walls of boxes, among them kerbs 0.6 to 1.4 m high. The grid is far out, 215 to 333 m
+from the summit.
+
+**Measured** headless with the built-in truck at full throttle (a scratch probe, not
+kept): over terrain it climbs a grade of 1.5 from a standing start 6 m from the foot,
+and not 2.0; it rolls over a 0.5 m kerb at speed, climbs a 1.5 m box edge from a crawl
+head on, and no 2 m one; and on Arena Rumble it lands on the platform off the west hump
+from 12.9 m/s at the crest and comfortably from 16, having had 27 and 32 m of run from
+rest.
+
+The game's choices (`crates/rumble`, `src/race/rumble.rs`): a truck is on the summit by
+the surface it stands on, the ground or the top of a ground box under its middle, which
+must be under the summit's box and no more than `rumble::UNDER_SUMMIT` (1.2 m, about
+the height its middle rides at) under the box's bottom; it is in the scoring zone by its
+middle on the ground plane. So the summit's outer perimeter counts as on the summit; a
+truck thrown up off the top, or hanging at a rim with its front wheels over it, is still
+on it; one on the slope out of one of Hypercube's trenches is on it just where the box
+would have its middle; and one in the dip beside Arena's platform, or under it, is not,
+although the box holds its middle. Points are counted continuously, not by whole
+seconds; the session's length is the race screen's LAPS line, in minutes, 3 by default;
+when the time is up every truck is finished at once. **Open**: which point of a truck
+MTM2 took, whether it counted whole seconds, and the session lengths it offered.
+
 ## Backdrop
 
 The last section names the models drawn round the horizon. **Measured** on 12 tracks:
@@ -420,9 +510,9 @@ CROKDROP.BIN
 - What MTM2 does with a moving box at the edge of the map (see "Moving boxes").
 - `Track Race Type` (2 in our file): 0 on the hill climb practice, 1 on the five drag
   arenas, 2 on 20 circuits, 3 on 11 tracks that include Highlands Rally, and 4 on the
-  three Summit Rumble arenas. **Measured** on 40 track files, the user tracks and the
-  base game's. So 3 is very likely a rally. How a rally differs from a circuit is
-  **open**: 10 of the 11 have their grid just behind their last checkpoint, as circuits
-  do.
+  three Summit Rumble arenas (see "Summit Rumbles"). **Measured** on 40 track files, the
+  user tracks and the base game's. So 3 is very likely a rally. How a rally differs from
+  a circuit is **open**: 10 of the 11 have their grid just behind their last checkpoint,
+  as circuits do.
 - What MTM2 does with the extra courses where `[Course 2]` is empty (see "Extra
   courses").

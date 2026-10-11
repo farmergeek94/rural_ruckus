@@ -25,7 +25,7 @@ cargo run -- --fifo                # strict vsync (PresentMode::Fifo): never sho
 cargo run -- tracks/AlpineMtns.pod --log-fps --autopilot   # measure while it drives itself
 cargo test                         # all tests (headless, no window needed)
 cargo test --test track            # one integration test file
-cargo test -p pod                 # one crate's unit tests (the MTM2 loader; `-p ruckus_content` the content model)
+cargo test -p pod                 # one crate's unit tests (the MTM2 loader; `-p ruckus_content` the content model, `-p ruckus_rumble` the rumble)
 cargo test --test camera_smoothness -- --nocapture   # the camera's rules, printing every smoothness figure
 cargo test -- --ignored            # slow tests too, and ones that print figures
 cargo clippy --all-targets         # lint
@@ -72,7 +72,7 @@ tracks and trucks borrow is missing: built-in shapes and grey in its place.
 
 ## Build profile
 
-The dev profile compiles the workspace's own crates (the game, `content` and `pod`)
+The dev profile compiles the workspace's own crates (the game, `content`, `pod` and `rumble`)
 unoptimised (for the debugger) and their dependencies at `opt-level = 3`, so dev builds
 are playable. Do not change that, and do not use
 `--release` to test or run the game, unless the user asks. The reference figures in

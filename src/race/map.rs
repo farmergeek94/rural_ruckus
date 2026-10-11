@@ -13,6 +13,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
+use super::rumble::{RumbleScore, rumble_position};
 use super::{BLUE, Racer, position};
 use crate::game_state::GameState;
 use crate::track::{MapFrame, Track, map_frame, map_image};
@@ -189,25 +190,27 @@ pub(super) fn place_dots(
 pub(super) fn number_dots(
     track: Res<Track>,
     map: Single<&Visibility, With<RaceMap>>,
-    racers: Query<(Entity, &Racer)>,
+    racers: Query<(Entity, &Racer, Option<&RumbleScore>)>,
     mut numbers: Query<(&mut DotNumber, &mut Text)>,
 ) {
     if **map == Visibility::Hidden {
         return;
     }
     for (mut number, mut text) in &mut numbers {
-        let Ok((_, racer)) = racers.get(number.truck) else {
+        let Ok((_, racer, score)) = racers.get(number.truck) else {
             continue;
         };
         // A handful of trucks at most, so each is compared with every other.
-        let place = position(
-            (&racer.progress, racer.to_next_gate),
-            racers
-                .iter()
-                .filter(|(other, _)| *other != number.truck)
-                .map(|(_, other)| (&other.progress, other.to_next_gate)),
-            track.gates.len(),
-        );
+        let others = racers.iter().filter(|(other, _, _)| *other != number.truck);
+        let place = match score {
+            // In a rumble, by the scores.
+            Some(score) => rumble_position(score, others.filter_map(|(_, _, other)| other)),
+            None => position(
+                (&racer.progress, racer.to_next_gate),
+                others.map(|(_, other, _)| (&other.progress, other.to_next_gate)),
+                track.gates.len(),
+            ),
+        };
         if number.shown != place {
             number.shown = place;
             text.0 = place.to_string();

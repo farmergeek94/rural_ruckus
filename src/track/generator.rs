@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 
 use super::direction_yaw;
-use super::{Course, Footing, Gate, HeightGrid, Scenery, StartPosition, TrackData};
+use super::{Course, Footing, Gate, HeightGrid, RaceType, Scenery, StartPosition, TrackData};
 
 /// Side length of the (square) terrain, in metres.
 const SIZE: f32 = 512.0;
@@ -113,6 +113,8 @@ pub fn builtin_track() -> TrackData {
         course: Some(course),
         other_courses: Vec::new(),
         gates,
+        race_type: RaceType::Circuit,
+        rumble: None,
         start: StartPosition {
             position: start,
             yaw: direction_yaw(start_direction),

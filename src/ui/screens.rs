@@ -91,7 +91,8 @@ pub(super) fn redraw(
         presets: &presets.0,
         // Only while the model has it too: the two change a frame apart.
         folder: browser.0.as_ref().filter(|_| model.0.browsing.is_some()),
-        preview: preview.0.as_ref(),
+        preview: preview.image.as_ref(),
+        timed: preview.timed,
         theme: &theme,
         scrolled: scrolled.0,
     };
@@ -120,10 +121,13 @@ pub(super) fn redraw(
         });
 }
 
-fn laps_text(laps: u32) -> String {
-    match laps {
-        1 => "1 lap".into(),
-        laps => format!("{laps} laps"),
+/// `3 laps`, or `3 minutes` on a track that is raced against the clock (`timed`).
+pub fn laps_text(laps: u32, timed: bool) -> String {
+    match (laps, timed) {
+        (1, false) => "1 lap".into(),
+        (laps, false) => format!("{laps} laps"),
+        (1, true) => "1 minute".into(),
+        (laps, true) => format!("{laps} minutes"),
     }
 }
 
@@ -152,6 +156,8 @@ struct Drawing<'a> {
     presets: &'a [Preset],
     folder: Option<&'a Folder>,
     preview: Option<&'a Handle<Image>>,
+    /// Whether the LAPS line counts minutes: see `TrackPreview::timed`.
+    timed: bool,
     theme: &'a Theme,
     scrolled: f32,
 }
@@ -619,8 +625,8 @@ impl Drawing<'_> {
 
                 self.stepper(
                     panel,
-                    "LAPS",
-                    laps_text(self.model.laps),
+                    if self.timed { "MINUTES" } else { "LAPS" },
+                    laps_text(self.model.laps, self.timed),
                     Action::FewerLaps,
                     Action::MoreLaps,
                 );
@@ -1381,7 +1387,7 @@ impl Drawing<'_> {
             "{}  |  {}  |  {}  |  {}, {}  |  {}",
             name(&self.catalogue.trucks, self.model.trucks.highlighted),
             name(&self.catalogue.tracks, self.model.tracks.highlighted),
-            laps_text(self.model.laps),
+            laps_text(self.model.laps, self.timed),
             opponents_text(self.model.opponents).to_lowercase(),
             difficulty_text(self.model.difficulty).to_lowercase(),
             if leaning.is_empty() {

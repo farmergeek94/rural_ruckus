@@ -26,7 +26,7 @@ use crate::{FEET_PER_CELL, FEET_PER_HEIGHT_STEP, PodArchive};
 
 use content::track::{
     BoxFaces, Course, Diagonals, Footing, Gate, GroundBox, GroundCell, GroundTextures, HeightGrid,
-    StartPosition, TrackData, direction_yaw, yaw_direction,
+    RaceType, RumbleZones, StartPosition, TrackData, Zone, direction_yaw, yaw_direction,
 };
 
 const METRES_PER_FOOT: f32 = 0.3048;
@@ -56,11 +56,22 @@ const PLACE_CLEARANCE: f32 = 4.0;
 /// directory and its track file, and none of its ground, models or textures. `Ok(None)`
 /// for an archive with no track in it, and an error for one that can't be read. A track
 /// that gives itself no name comes back as an empty one.
-pub fn peek_pod(path: &Path) -> Result<Option<String>, String> {
+pub fn peek_pod(path: &Path) -> Result<Option<TrackPeek>, String> {
     let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
     let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
     let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    Ok(crate::Track::name_in(&archive))
+    Ok(crate::Track::name_in(&archive).map(|name| TrackPeek {
+        name,
+        race_type: race_type_of(crate::Track::race_type_in(&archive)),
+    }))
+}
+
+/// What a list of tracks shows of one, read from its track file alone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrackPeek {
+    /// The name it gives itself. Empty for a track that gives none.
+    pub name: String,
+    pub race_type: RaceType,
 }
 
 /// A track in one of the base game's archives.
@@ -69,8 +80,21 @@ pub struct BaseTrack {
     pub archive: PathBuf,
     /// Its track file in that archive, such as `WORLD\\JUNK.SIT`.
     pub file: String,
-    /// The name it gives itself, or why its track file can't be read.
-    pub name: Result<String, String>,
+    /// What it says of itself, or why its track file can't be read.
+    pub peek: Result<TrackPeek, String>,
+}
+
+/// What `Track Race Type` says (situation.md, "Open" and "Summit Rumbles"): 0 on the hill
+/// climb practice, 1 on the drag arenas, 2 on the circuits, 3 on the rallies and 4 on the
+/// Summit Rumbles. Anything else, or none, is raced as a circuit.
+fn race_type_of(code: Option<u32>) -> RaceType {
+    match code {
+        Some(0) => RaceType::HillClimb,
+        Some(1) => RaceType::Drag,
+        Some(3) => RaceType::Rally,
+        Some(4) => RaceType::Rumble,
+        _ => RaceType::Circuit,
+    }
 }
 
 /// Every track in the base game's archives, for a list of tracks: each track file is
@@ -79,14 +103,17 @@ pub fn peek_base(base: &BaseGame) -> Vec<BaseTrack> {
     let mut found = Vec::new();
     for (archive, entries) in base.directories() {
         for entry in crate::Track::files_in(entries) {
-            let name = base
+            let peek = base
                 .read_one(archive, entry)
-                .map(|bytes| crate::Track::name_from(&bytes))
+                .map(|bytes| TrackPeek {
+                    name: crate::Track::name_from(&bytes),
+                    race_type: race_type_of(crate::Track::race_type_from(&bytes)),
+                })
                 .map_err(|error| format!("{}: {error}", entry.name));
             found.push(BaseTrack {
                 archive: archive.to_path_buf(),
                 file: entry.name.clone(),
-                name,
+                peek,
             });
         }
     }
@@ -207,6 +234,24 @@ pub fn track_from_pod(track: &crate::Track) -> Result<TrackData, String> {
     if !gates.is_empty() {
         gates.rotate_right(1);
     }
+    // A rumble's two checkpoint boxes are its zones, not gates: the scoring zone first in
+    // the file, then the summit (situation.md, "Summit Rumbles").
+    let race_type = race_type_of(track.situation.race_type);
+    let rumble = (race_type == RaceType::Rumble)
+        .then(|| {
+            let mut zones = track
+                .situation
+                .checkpoints()
+                .map(|checkpoint| zone_from(track, checkpoint, to_ground));
+            Some(RumbleZones {
+                scoring: zones.next()?,
+                summit: zones.next()?,
+            })
+        })
+        .flatten();
+    if rumble.is_some() {
+        gates.clear();
+    }
 
     let (ground, ground_boxes) = match ground_textures(track) {
         Some((mut tiles, cells)) => {
@@ -250,6 +295,8 @@ pub fn track_from_pod(track: &crate::Track) -> Result<TrackData, String> {
         course,
         other_courses,
         gates,
+        race_type,
+        rumble,
         start: grid_place(pole_position),
         grid: clear_places(
             grid_place(pole_position),
@@ -274,6 +321,35 @@ fn clear_places(
         }
     }
     kept.split_off(1)
+}
+
+/// A rumble zone from its checkpoint box: `width` across the way it faces, `length` along
+/// it and `height` up, about `ipos` as its middle (**measured** on the three arenas: the
+/// summit's box stands on the summit's top, situation.md). A zone with a model instead,
+/// which no arena has, is as wide as the model each way and 20 ft high: the game's own
+/// guess, so that such a track still loads.
+fn zone_from(
+    track: &crate::Track,
+    checkpoint: &crate::SituationBox,
+    to_ground: impl Fn([f32; 3]) -> Vec2,
+) -> Zone {
+    let (half_across, half_along, half_height) = match checkpoint.shape {
+        crate::BoxShape::Dimensions([length, width, height]) => {
+            (width / 2.0, length / 2.0, height / 2.0)
+        }
+        crate::BoxShape::Model(_) => {
+            let half = checkpoint_half_width_feet(track, checkpoint);
+            (half, half, 10.0)
+        }
+    };
+    let middle = checkpoint.position[1] * METRES_PER_FOOT;
+    Zone {
+        center: to_ground(checkpoint.position),
+        yaw: -checkpoint.angles[2],
+        half_extents: Vec2::new(half_across, half_along) * METRES_PER_FOOT,
+        bottom: middle - half_height * METRES_PER_FOOT,
+        top: middle + half_height * METRES_PER_FOOT,
+    }
 }
 
 /// A checkpoint is as wide as its model, which is long along its X axis: a trigger box,

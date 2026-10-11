@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use super::rumble::{RumbleScore, RumbleSession, points_text, rumble_position};
+use super::start::RaceStart;
 use super::{RaceClock, RaceSettings, Racer, position};
 use crate::game_state::GameState;
 use crate::track::Track;
@@ -27,22 +29,50 @@ pub(super) fn spawn_race_hud(mut commands: Commands) {
 }
 
 /// Shows the player's race, and where the player stands in it when it is against others.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the race, and the rumble it may be"
+)]
 pub(super) fn update_race_hud(
     clock: Res<RaceClock>,
     settings: Res<RaceSettings>,
     track: Res<Track>,
     time: Res<Time<Fixed>>,
-    racer: Single<&Racer, With<PlayerTruck>>,
-    others: Query<&Racer, Without<PlayerTruck>>,
+    start: Res<RaceStart>,
+    session: Option<Res<RumbleSession>>,
+    racer: Single<(&Racer, Option<&RumbleScore>), With<PlayerTruck>>,
+    others: Query<(&Racer, Option<&RumbleScore>), Without<PlayerTruck>>,
     mut text: Single<&mut Text, With<RaceText>>,
 ) {
-    let racer = *racer;
+    let (racer, score) = *racer;
     let progress = &racer.progress;
     let tick_seconds = time.timestep().as_secs_f64();
     let show = |ticks: Option<u64>| match ticks {
         Some(ticks) => format_time(ticks as f64 * tick_seconds),
         None => "-:--.--".into(),
     };
+
+    // A rumble: the score, the time left, and the place among the others' scores.
+    if let (Some(session), Some(score)) = (session, score) {
+        let place = if others.is_empty() {
+            String::new()
+        } else {
+            let place = rumble_position(score, others.iter().filter_map(|(_, other)| other));
+            format!("Position {place}/{}\n", others.iter().count() + 1)
+        };
+        let left = session.remaining(clock.tick, start.go);
+        let headline = if session.over {
+            "Time's up".to_string()
+        } else {
+            format!("Time left  {}", show(Some(left)))
+        };
+        text.0 = format!(
+            "{place}{headline}\nScore  {}\nKnocked off  {}",
+            points_text(score),
+            score.0.falls
+        );
+        return;
+    }
 
     let headline = match (progress.finished, progress.lap) {
         (Some(total), _) => format!("Finished  {}", show(Some(total))),
@@ -62,7 +92,7 @@ pub(super) fn update_race_hud(
             (progress, racer.to_next_gate),
             others
                 .iter()
-                .map(|other| (&other.progress, other.to_next_gate)),
+                .map(|(other, _)| (&other.progress, other.to_next_gate)),
             track.gates.len(),
         );
         format!("Position {place}/{}\n", others.iter().count() + 1)

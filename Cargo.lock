@@ -3755,6 +3755,7 @@ dependencies = [
  "pod",
  "redb",
  "ruckus_content",
+ "ruckus_rumble",
 ]
 
 [[package]]
@@ -5039,6 +5040,14 @@ name = "ruckus_content"
 version = "0.1.0"
 dependencies = [
  "bevy",
+]
+
+[[package]]
+name = "ruckus_rumble"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ruckus_content",
 ]
 
 [[package]]

@@ -39,6 +39,9 @@ pub struct Situation {
     /// File names of the models drawn round the horizon (.BIN), from the Backdrop section,
     /// in the file's order. Empty for a track that has none.
     pub backdrops: Vec<String>,
+    /// The value after `Track Race Type`: 4 is a Summit Rumble (situation.md, "Summit
+    /// Rumbles"). `None` for a track that doesn't give one.
+    pub race_type: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,6 +96,13 @@ impl Situation {
             .after("Race Track Name", 0, lines.len())
             .map(|index| lines.text(index).to_string())
             .unwrap_or_default()
+    }
+
+    /// The value after `Track Race Type` and nothing else, for a list of tracks that says
+    /// which are rumbles. `None` for a track that doesn't give one.
+    pub fn parse_race_type(text: &str) -> Option<u32> {
+        let lines = Lines::new(text);
+        race_type(&lines)
     }
 
     pub fn parse(text: &str) -> Result<Self, PodError> {
@@ -159,6 +169,7 @@ impl Situation {
             course,
             extra_courses,
             backdrops,
+            race_type: race_type(&lines),
         })
     }
 
@@ -218,6 +229,13 @@ fn read_boxes(
         });
     }
     Ok(())
+}
+
+/// The value after `Track Race Type`, which is in the header before the first section.
+fn race_type(lines: &Lines) -> Option<u32> {
+    let end = lines.section(SECTIONS[0]).unwrap_or(lines.len());
+    let index = lines.after("Track Race Type", 0, end).ok()?;
+    lines.text(index).trim().parse().ok()
 }
 
 /// The Backdrop section, which opens at line `start`: a count after
@@ -372,6 +390,7 @@ mod tests {
     /// Cut down from a real track, keeping its layout: marker characters, CRLF line
     /// endings, a decoy truck before the vehicles section, and a second course.
     const TRACK: &str = "hills.lvl\r\n!Race Track Name\r\nTest Hills\r\nRace Track Locale\r\nNowhere\r\n\
+Track Race Type\r\n2\r\n\
 *** Your Truck (Not used anymore) ***\r\n*********************************************\r\n\
 truckFile\r\nbigfoot.trk\r\nipos\r\n1.0,2.0,3.0\r\ntheta,phi,psi\r\n0.0,0.0,9.0\r\n\
 *** Vehicles ***\r\n2\r\n*********************************************\r\n\
@@ -404,6 +423,20 @@ cs4drop1.bin\r\ncs4drop2.bin\r\n";
         assert_eq!(
             Situation::parse_name("x.lvl\r\nRace Track Name\r\nHalf a Track\r\nipos\r\n"),
             "Half a Track"
+        );
+    }
+
+    #[test]
+    fn reads_the_race_type() {
+        assert_eq!(Situation::parse(TRACK).unwrap().race_type, Some(2));
+        assert_eq!(Situation::parse_race_type(TRACK), Some(2));
+        let rumble = TRACK.replace("Track Race Type\r\n2", "Track Race Type\r\n4");
+        assert_eq!(Situation::parse_race_type(&rumble), Some(4));
+        // A track needn't give one, and one past the header is not it.
+        assert_eq!(Situation::parse_race_type("hills.lvl\r\n"), None);
+        assert_eq!(
+            Situation::parse_race_type("x.lvl\r\n*** Vehicles ***\r\nTrack Race Type\r\n4\r\n"),
+            None
         );
     }
 
