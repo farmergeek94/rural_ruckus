@@ -12,9 +12,9 @@
 //! wind that carries the spray, and the swell that the foam rides. Everything is as bright as the `weather` slice says
 //! (`weather::ParticleLight`).
 //!
-//! Uses the `track` slice for the ground, the `truck` slice for the trucks, and the
-//! `water` and `weather` slices, if they are there. Only a look: does nothing in an app
-//! that cannot draw.
+//! Uses the `track` slice for the ground, the `truck` slice for the trucks, `scene_depth`
+//! for the depth that particles fade against, and the `water` and `weather` slices, if they
+//! are there. Only a look: does nothing in an app that cannot draw.
 
 mod dirt;
 mod pool;
@@ -25,6 +25,7 @@ use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 
 use crate::game_state::GameState;
+use crate::scene_depth::SceneDepth;
 use crate::track::TrackSystems;
 use crate::truck::TruckSystems;
 use crate::water::{Surf, TireInWater, WaterSettings, WaterSystems};
@@ -45,7 +46,7 @@ impl Plugin for ParticlesPlugin {
         // Also made by `water`, if it is there; without it, none are written.
         app.add_message::<TireInWater>()
             .add_message::<Surf>()
-            .add_systems(Update, light_particles)
+            .add_systems(Update, (light_particles, rebind_scene_depth))
             // Made on entering the first race, not at `Startup`: a race begun from the
             // command line enters `Racing` before `Startup` runs.
             .add_systems(
@@ -90,4 +91,15 @@ fn light_particles(
 ) {
     let level = light.map_or(1.0, |light| light.0);
     pool::light(level, &pools, &mut materials);
+}
+
+/// A new scene depth image (the window changed size) is bound only when a material is
+/// touched (see `scene_depth::SceneDepth`).
+fn rebind_scene_depth(
+    scene_depth: Res<SceneDepth>,
+    mut materials: ResMut<Assets<pool::ParticleMaterial>>,
+) {
+    if scene_depth.is_changed() {
+        for _ in materials.iter_mut() {}
+    }
 }

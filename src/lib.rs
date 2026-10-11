@@ -36,6 +36,7 @@ pub mod particles;
 pub mod physics;
 pub mod physics_debug;
 pub mod race;
+pub mod scene_depth;
 pub mod scenery;
 pub mod sky;
 pub mod sound;

@@ -44,6 +44,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::pool::{self, Air, Motion, Particle, Particles, Waves};
 use crate::game_state::GameState;
+use crate::scene_depth::SceneDepth;
 use crate::track::Track;
 use crate::truck::TruckVisual;
 use crate::water::{SPLASH_SPEED, TireInWater, WATER_COLOR, WaterSettings, Wind};
@@ -370,6 +371,7 @@ pub(super) fn spawn_spray(
     looks: Res<DropletLooks>,
     wind: Option<Res<Wind>>,
     settings: Option<Res<WaterSettings>>,
+    scene_depth: Res<SceneDepth>,
     mut assets: pool::PoolAssets,
 ) {
     if track.water_level.is_none() {
@@ -383,6 +385,7 @@ pub(super) fn spawn_spray(
         DROP_MOTION,
         air,
         looks.drop.clone(),
+        scene_depth.image.clone(),
     );
     commands.spawn((drops, Drops, DespawnOnExit(GameState::Racing)));
     let mist = pool::pool(
@@ -391,6 +394,7 @@ pub(super) fn spawn_spray(
         MIST_MOTION,
         air,
         looks.mist.clone(),
+        scene_depth.image.clone(),
     );
     commands.spawn((mist, Mist, DespawnOnExit(GameState::Racing)));
     let foam = pool::pool(
@@ -406,6 +410,7 @@ pub(super) fn spawn_spray(
             ..air
         },
         looks.foam.clone(),
+        scene_depth.image.clone(),
     );
     commands.spawn((foam, Foam, DespawnOnExit(GameState::Racing)));
     // The same pictures as the foam: ragged lumps of bubbles.
@@ -415,6 +420,7 @@ pub(super) fn spawn_spray(
         FROTH_MOTION,
         air,
         looks.foam.clone(),
+        scene_depth.image.clone(),
     );
     commands.spawn((froth, Froth, DespawnOnExit(GameState::Racing)));
 }

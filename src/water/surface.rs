@@ -41,6 +41,7 @@ use super::shore::ShoreUniform;
 use super::wind::Wind;
 use super::{WaterSettings, WaterSurface};
 use crate::game_state::GameState;
+use crate::scene_depth::SceneDepth;
 use crate::track::Track;
 
 /// What the water's surface looks like. Monster Truck Madness 2's tracks do not say, so
@@ -96,6 +97,10 @@ pub(super) struct WaterWaves {
     pub(super) shore: ShoreUniform,
     #[texture(104, filterable = false)]
     pub(super) depths: Handle<Image>,
+    /// The depth of the picture drawn before the water (`scene_depth::SceneDepth`), which
+    /// the reflections are found in.
+    #[texture(106, filterable = false)]
+    pub(super) scene_depth: Handle<Image>,
 }
 
 /// What the water mirrors at a glancing angle, as `water.wgsl` reads it.
@@ -198,6 +203,7 @@ pub(super) fn spawn_water(
     materials: Option<ResMut<Assets<WaterMaterial>>>,
     flat_materials: Option<ResMut<Assets<StandardMaterial>>>,
     field: Option<Res<Field>>,
+    scene_depth: Option<Res<SceneDepth>>,
     ripples: Option<ResMut<Ripples>>,
 ) {
     // Nothing of the last race's water is left on this one.
@@ -215,8 +221,13 @@ pub(super) fn spawn_water(
             DespawnOnExit(GameState::Racing),
         ))
         .id();
-    let (Some(mut meshes), Some(mut materials), Some(mut flat_materials), Some(field)) =
-        (meshes, materials, flat_materials, field)
+    let (
+        Some(mut meshes),
+        Some(mut materials),
+        Some(mut flat_materials),
+        Some(field),
+        Some(scene_depth),
+    ) = (meshes, materials, flat_materials, field, scene_depth)
     else {
         return;
     };
@@ -243,6 +254,7 @@ pub(super) fn spawn_water(
                 wind: WindUniform::new(wind, mesh),
                 shore: field.shore,
                 depths: field.depths.clone(),
+                scene_depth: scene_depth.image.clone(),
             },
         })
     };
@@ -391,6 +403,17 @@ pub(super) fn receive_shadows(
         } else {
             commands.entity(surface).insert(NotShadowReceiver);
         }
+    }
+}
+
+/// A new scene depth image (the window changed size) is bound only when a material is
+/// touched (see `scene_depth::SceneDepth`).
+pub(super) fn rebind_scene_depth(
+    scene_depth: Res<SceneDepth>,
+    mut materials: ResMut<Assets<WaterMaterial>>,
+) {
+    if scene_depth.is_changed() {
+        for _ in materials.iter_mut() {}
     }
 }
 

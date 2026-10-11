@@ -218,6 +218,18 @@
             "env": { "RUST_BACKTRACE": "1" }
         },
         {
+            "name": "Debug scene depth tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--test=scene_depth"],
+                "filter": { "name": "scene_depth", "kind": "test" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" }
+        },
+        {
             "name": "Debug weather tests",
             "type": "lldb",
             "request": "launch",

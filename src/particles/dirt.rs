@@ -38,6 +38,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::pool::{self, Air, Motion, Particle, Particles};
 use crate::game_state::GameState;
+use crate::scene_depth::SceneDepth;
 use crate::track::Track;
 use crate::truck::{TruckConfig, TruckInput, TruckVisual};
 use crate::weather::WeatherSettings;
@@ -249,10 +250,18 @@ pub(super) fn spawn_dirt(
     mut commands: Commands,
     track: Res<Track>,
     looks: Res<DirtLooks>,
+    scene_depth: Res<SceneDepth>,
     mut assets: pool::PoolAssets,
 ) {
     let mut spawn = |slots, motion, picture: &Handle<Image>| {
-        let pool = pool::pool(&mut assets, slots, motion, Air::STILL, picture.clone());
+        let pool = pool::pool(
+            &mut assets,
+            slots,
+            motion,
+            Air::STILL,
+            picture.clone(),
+            scene_depth.image.clone(),
+        );
         commands
             .spawn((pool, Dirt, DespawnOnExit(GameState::Racing)))
             .id()

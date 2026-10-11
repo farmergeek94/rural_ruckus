@@ -30,7 +30,7 @@
 //!
 //! A pool's particles can fade out where they come near what is behind them
 //! (`Motion::soft`), so that one cut through by the ground or a truck has no hard edge.
-//! That needs the camera's depth prepass; without it they are cut off as before.
+//! That reads the depth of the picture drawn before them, an image the pool is given.
 //!
 //! A pool's particles can lie flat on a surface (`Motion::lies_on`) instead of turning to the
 //! camera: foam on water. The surface rises and falls with up to three waves (`Waves`),
@@ -316,6 +316,10 @@ pub struct ParticleMotion {
     /// One `Slot` for each square of the pool's mesh.
     #[storage(101, read_only)]
     slots: Handle<ShaderBuffer>,
+    /// The depth of the picture drawn before the particles, an `R32Float` the size of the
+    /// view, which the fade near what is behind reads at the pixel.
+    #[texture(102, filterable = false)]
+    scene_depth: Handle<Image>,
 }
 
 /// One particle as the shader reads it, as `Slot` in `particles.wgsl`: 80 bytes, in the
@@ -516,14 +520,16 @@ pub struct PoolAssets<'w> {
 }
 
 /// A pool of `slots` particles that move as `motion` says, carried by `air`, drawn with
-/// `picture`: a picture in white, with its top at the front of a streak. Spawn it with what
-/// else the slice needs on it.
+/// `picture`: a picture in white, with its top at the front of a streak. `scene_depth` is
+/// the depth of the picture drawn before the particles (see `ParticleMotion`). Spawn it
+/// with what else the slice needs on it.
 pub fn pool(
     assets: &mut PoolAssets,
     slots: usize,
     motion: Motion,
     air: Air,
     picture: Handle<Image>,
+    scene_depth: Handle<Image>,
 ) -> impl Bundle {
     let mesh = assets.meshes.add(squares(slots));
     // Made on the graphics card, where it starts as zeros: every slot empty. Nothing is
@@ -551,6 +557,7 @@ pub fn pool(
         extension: ParticleMotion {
             motion: MotionUniform::new(motion, air),
             slots: buffer.clone(),
+            scene_depth,
         },
     });
     (

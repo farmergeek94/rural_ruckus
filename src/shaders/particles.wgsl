@@ -9,7 +9,8 @@
 // and down, which each corner is lifted onto.
 //
 // The fragment is the standard material's, unlit: the picture, the colour, and the fog.
-// With the camera's depth prepass, it fades out near what is behind it.
+// It fades out near what is behind it, read from the depth of the picture drawn before
+// the particles (`scene_depth`).
 
 #import bevy_pbr::{
     mesh_view_bindings::{globals, view},
@@ -17,10 +18,6 @@
     pbr_functions::{alpha_discard, main_pass_post_lighting_processing},
     view_transformations::{depth_ndc_to_view_z, position_world_to_clip},
 }
-
-#ifdef DEPTH_PREPASS
-#import bevy_pbr::prepass_utils::prepass_depth
-#endif
 
 // Only the main pass: see-through things are not drawn in the prepass.
 #import bevy_pbr::forward_io::{FragmentOutput, Vertex, VertexOutput}
@@ -84,6 +81,9 @@ struct Slot {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> motion: Motion;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> slots: array<Slot>;
+// The depth of the picture drawn before the particles, at each pixel. 32-bit, so not
+// filterable.
+@group(#{MATERIAL_BIND_GROUP}) @binding(102) var scene_depth: texture_2d<f32>;
 
 const TAU: f32 = 6.283185307179586;
 
@@ -221,14 +221,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var out: FragmentOutput;
     // Particles are not lit (see `mod.rs`).
     out.color = pbr_input.material.base_color;
-#ifdef DEPTH_PREPASS
     if motion.soft > 0.0 {
-        // How far behind this point the nearest solid thing is, in metres. The first
-        // sample only: reading each sample of a multisampled picture would shade each.
-        let behind = depth_ndc_to_view_z(in.position.z) - depth_ndc_to_view_z(prepass_depth(in.position, 0u));
+        // How far behind this point the nearest solid thing is, in metres.
+        let drawn = textureLoad(scene_depth, vec2<i32>(in.position.xy), 0).r;
+        let behind = depth_ndc_to_view_z(in.position.z) - depth_ndc_to_view_z(drawn);
         out.color.a *= clamp(behind / motion.soft, 0.0, 1.0);
     }
-#endif
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

@@ -169,6 +169,56 @@ uses FXAA.
 Frame time in the headless probe is held at about 16.7 ms by the event loop with no
 window, so judge by the passes' GPU times there, and by `--log-fps --no-vsync` on screen.
 
+## The depth prepass on an integrated GPU, and where a default frame goes
+
+Measured 2026-10-10 on the development machine's Intel Graphics (ARL), on screen at
+1920 x 1200, `--no-vsync --autopilot`, Alpine Mountains with seven computer trucks, dev
+build, the graphics at their defaults (4x MSAA, bloom, four shadow cascades to 300 m).
+Median frame time over about twenty seconds of driving; each figure is the range of two
+or more runs. The NVIDIA GPU in the same machine ran the same frame in 7.4 ms, and so did
+the Intel one with every setting at its cheapest: that is the CPU's share, and with the
+defaults the frame is the GPU's.
+
+| | Frame |
+| --- | --- |
+| The defaults, with the depth prepass (as the game was) | 19.4 to 20.4 ms |
+| The defaults, with `scene_depth` in its place (as the game is) | 16.1 to 16.6 ms |
+| The defaults, with no depth read at all (the particles cut off hard) | 14.1 to 14.9 ms |
+| The defaults with FXAA for MSAA | 14.6 ms |
+| The defaults without bloom (and so without the HDR picture) | 16.6 ms |
+| The defaults with two shadow cascades to 100 m | 19.9 ms |
+| The defaults without shadows | 18.2 ms |
+| The defaults with a 1024 shadow map (2048 is Bevy's default) | 17.9 ms |
+| The Balanced quality level | 10.5 ms |
+
+**The depth prepass cost 5 to 6 ms of that frame, and its own draws 0.2 ms.** The camera
+had Bevy's `DepthPrepass` only so that the particles could fade against what is behind
+them, and the water find its reflections. With MSAA, Bevy copies the whole multisampled
+depth texture after the prepass for the shaders to read (`bevy_core_pipeline::prepass`),
+and on this GPU that copy is what costs; the prepass's draws, read off the
+`render/early prepass` span, were 0.2 ms, the shaders' reads of the copy under 1 ms, and
+letting a shader read the depth buffer (a usage flag on it) nothing measurable. Without
+MSAA the whole prepass cost 0.6 ms. `scene_depth.rs` reads one sample of each pixel into
+an `R32Float` image after the opaque pass instead: a pass that costs about 2 ms here, as
+the depth buffer is decompressed to be read, but no second pass over the geometry and no
+copy. The picture is the same (compared frame by frame, headless, at Baja Beach).
+
+**What is left is bandwidth, not arithmetic.** MSAA costs 5 to 6 ms and the HDR picture
+that bloom needs 3 to 4 ms, and the two multiply: four 16-bit samples a pixel are 32
+bytes a pixel, written by every pass, resolved and copied. The simple lighting, less
+anisotropic filtering and the ground drawn unblended changed nothing measurable, and the
+per-pass GPU spans (`--log-fps`) add up to about 4.5 ms of the 20: each span ends before
+its pass's store and resolve, which is where this GPU's time goes, so judge a change by
+the frame time, not by the spans. The shadows' 3 ms is mostly the size of the maps: four
+2048-square depth maps a frame.
+
+**Measure with the window focused.** On this desktop a fullscreen window that has not got
+the focus is composited, and then every frame reads exactly 16.6 ms with one or two late
+a second, whatever the GPU is doing: a run that looks like that measured nothing. The
+probe script in the session's scratch directory activated the window with `xdotool` after
+launching it. Frames also vary by about 1 ms from run to run with where the autopilot
+drives, so alternate the builds under test and repeat.
+
 ## Culling is per entity, and automatic
 
 Bevy skips any mesh entity whose bounding box is outside the view (and the sun's shadow

@@ -45,9 +45,6 @@
     mesh_view_bindings::{view_transmission_texture, view_transmission_sampler},
     view_transformations::{depth_ndc_to_view_z, frag_coord_to_uv, ndc_to_uv},
 }
-#ifdef DEPTH_PREPASS
-#import bevy_pbr::prepass_utils::prepass_depth
-#endif
 #endif
 
 // The field of heights (`field.wgsl`): per texel the height, in metres, how much it
@@ -87,6 +84,9 @@ struct Shore {
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<uniform> shore: Shore;
 // How deep the still water is over the ground, in metres. 32-bit, so not filterable.
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var depth_map: texture_2d<f32>;
+// The depth of the picture drawn before the water, at each pixel (`scene_depth`). 32-bit,
+// so not filterable.
+@group(#{MATERIAL_BIND_GROUP}) @binding(106) var scene_depth: texture_2d<f32>;
 
 // As in `surface.rs`: how far the patch round the camera reaches, and how far apart its
 // vertices are, in metres; and the same for the fine patch ahead of the camera, round the
@@ -444,7 +444,6 @@ fn wind_speed(time: f32) -> f32 {
 }
 
 #ifndef PREPASS_PIPELINE
-#ifdef DEPTH_PREPASS
 // The reflected ray, as the picture sees it: where it starts in clip space and how that
 // changes for each metre along it, and the same for how far it is ahead of the camera,
 // along the view (view space's Z). Both change in a straight line along the ray, so are
@@ -476,7 +475,8 @@ fn probe(ray: Ray, along: f32) -> Probe {
     out.on_screen = out.ahead && all(abs(ndc) < vec2(1.0));
     out.behind = -1.0e9;
     if out.on_screen {
-        let drawn = prepass_depth(vec4(out.uv * view.viewport.zw + view.viewport.xy, 0.0, 0.0), 0u);
+        let pixel = vec2<i32>(out.uv * view.viewport.zw + view.viewport.xy);
+        let drawn = textureLoad(scene_depth, pixel, 0).r;
         // A depth of 0 is the sky, as far off as can be.
         if drawn > 0.0 {
             out.behind = depth_ndc_to_view_z(drawn) - (ray.view_start + ray.view_way * along);
@@ -489,12 +489,10 @@ fn probe(ray: Ray, along: f32) -> Probe {
 fn drawn_at(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
 }
-#endif
 
 // What the water at `start`, which is at `uv` in the picture, mirrors along `direction`,
 // in linear light.
 fn reflection(start: vec3<f32>, uv: vec2<f32>, direction: vec3<f32>) -> vec3<f32> {
-#ifdef DEPTH_PREPASS
     var ray: Ray;
     ray.clip_start = view.clip_from_world * vec4(start, 1.0);
     ray.clip_way = view.clip_from_world * vec4(direction, 0.0);
@@ -536,7 +534,6 @@ fn reflection(start: vec3<f32>, uv: vec2<f32>, direction: vec3<f32>) -> vec3<f32
         clear_uv = here.uv;
         step *= REFLECTION_GROWTH;
     }
-#endif
     return mirroring.sky.rgb;
 }
 #endif

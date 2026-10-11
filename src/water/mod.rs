@@ -99,6 +99,7 @@ impl Plugin for WaterPlugin {
                 );
             field::add(app);
             app.add_plugins(MaterialPlugin::<surface::WaterMaterial>::default())
+                .add_systems(Update, surface::rebind_scene_depth)
                 .init_resource::<ripples::Ripples>()
                 .init_resource::<Wind>()
                 .add_message::<TireInWater>()
