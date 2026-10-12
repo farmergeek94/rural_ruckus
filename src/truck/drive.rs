@@ -65,8 +65,8 @@ use bevy::tasks::{ComputeTaskPool, TaskPool};
 
 use super::interpolate::WheelPose;
 use super::{
-    Engine, GroundGrip, Held, Truck, TruckConfig, TruckInput, TruckWheelColliders, TruckWheels,
-    Wheel, WheelCollider, WheelCore,
+    Engine, GroundGrip, Held, Shoved, Truck, TruckConfig, TruckInput, TruckWheelColliders,
+    TruckWheels, Wheel, WheelCollider, WheelCore,
 };
 use crate::collision_groups::{GROUND, GROUND_BOXES};
 
@@ -218,6 +218,40 @@ const LOCK_GRIP: f32 = 4.0;
 /// notes and `contacts`). The cones on tightcorners.pod are 146 kg, its rocks 438 kg, and
 /// the parked cars on Critic.pod 907 kg. Higher knocks more aside, and climbs less.
 pub(super) const LIGHT_LOOSE: f32 = 250.0;
+
+/// How much of its sideways grip a tire keeps while another truck presses on the side of
+/// its truck (`Shoved`) and the truck is slow, as a share. The tires of a truck pushed on
+/// its side held with all of their grip, which is as much as the pusher's tires can drive
+/// with, so the pushed truck only crept (0.15 m/s at full throttle against a standing
+/// truck): a shove must make it skid. Lower lets a truck be pushed about more easily; 1 is
+/// a stalemate. The drive and the brakes keep their whole grip, so that the pusher pushes
+/// as hard as ever. At 0.4 a standing truck is shoved away at 3 m/s².
+const SHOVED_GRIP: f32 = 0.4;
+/// A shove has its whole effect on a truck going slower than this, in m/s, and none on one
+/// faster than the second: a pushing match is a slow thing, like first gear, and a truck at
+/// speed keeps its grip and its line when another touches it. The user asked for the push
+/// "only in the low end", with the turning and the speed left as they were.
+const SHOVE_FULL_BELOW: f32 = 3.0;
+const SHOVE_NONE_ABOVE: f32 = 8.0;
+
+/// How much of a shove a truck going at `speed` (over the ground, in m/s) feels, 0 to 1.
+fn shove_at(speed: f32) -> f32 {
+    1.0 - ((speed - SHOVE_FULL_BELOW) / (SHOVE_NONE_ABOVE - SHOVE_FULL_BELOW)).clamp(0.0, 1.0)
+}
+
+/// A tire's force `tire`, already within its grip, with its part along `side` cut to what
+/// the tire holds across its tread under a shove: `SHOVED_GRIP` of the whole under a full
+/// one (`shove` 1). Under none (0) the force is as it was, so that a truck no one touches
+/// drives exactly as before: cutting the sideways ask before the whole was fitted to the
+/// grip gave the drive a bigger share of it in every hard turn, and the user felt it.
+fn shoved_sideways(tire: Vec3, side: Vec3, grip: f32, load: f32, shove: f32) -> Vec3 {
+    if shove <= 0.0 {
+        return tire;
+    }
+    let limit = grip * load * (1.0 - shove * (1.0 - SHOVED_GRIP));
+    let sideways = tire.dot(side);
+    tire + side * (sideways.clamp(-limit, limit) - sideways)
+}
 
 /// For `holdable_lock`: what the tires' grip is measured against, in m/s².
 const GRAVITY: f32 = 9.81;
@@ -424,6 +458,7 @@ type DrivenTruck = (
     &'static TruckWheelColliders,
     Option<&'static mut TipGuard>,
     Option<&'static GroundGrip>,
+    Option<&'static Shoved>,
     Has<Held>,
     &'static Engine,
 );
@@ -604,12 +639,18 @@ pub(super) fn drive_truck(
             colliders,
             mut guard,
             ground_grip,
+            shoved,
             held,
             engine,
         ),
         planned,
     ) in trucks.iter_mut().zip(&planned)
     {
+        let shove = if shoved.is_some_and(|shoved| shoved.0) {
+            shove_at(forces.linear_velocity().length())
+        } else {
+            0.0
+        };
         let up = transform.up().as_vec3();
         let body_speed = forces.linear_velocity().dot(transform.forward().as_vec3());
 
@@ -1003,6 +1044,7 @@ pub(super) fn drive_truck(
                     };
                 let asked_of_tire = forward * drive + side * cornering;
                 let tire = asked_of_tire.clamp_length_max(grip * load);
+                let tire = shoved_sideways(tire, side, grip, load, shove);
                 // The engine turns a tire faster than the ground goes by when it asks for
                 // more than the tire grips. Throttle against the way the truck goes is the
                 // brakes, unless the truck is sliding back down a hill it faces up.
@@ -1330,6 +1372,34 @@ mod tests {
         // Gripping, it rolls with the ground, and soon after slipping.
         assert_eq!(run(1.0, 5.0, 5.0, 0.0), 5.0);
         assert!((run(0.5, 15.0, 5.0, 0.0) - 5.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn a_shoved_truck_holds_sideways_with_a_share_of_its_grip_and_an_unshoved_one_with_all() {
+        let (grip, load) = (1.1, 13_000.0);
+        let (forward, side) = (Vec3::NEG_Z, Vec3::X);
+        // Mostly cornering, at the grip's limit.
+        let tire = (forward * 10_000.0 + side * 50_000.0).clamp_length_max(grip * load);
+        // Unshoved, the force is untouched.
+        assert_eq!(shoved_sideways(tire, side, grip, load, 0.0), tire);
+        // Shoved, only its sideways part is cut, to the shoved share of the grip.
+        let shoved = shoved_sideways(tire, side, grip, load, 1.0);
+        assert!((shoved.dot(side) - SHOVED_GRIP * grip * load).abs() < 1.0);
+        assert!((shoved.dot(forward) - tire.dot(forward)).abs() < 1e-3);
+        // Half a shove cuts it to halfway between the two.
+        let half = grip * load * (1.0 + SHOVED_GRIP) / 2.0;
+        assert!((shoved_sideways(tire, side, grip, load, 0.5).dot(side) - half).abs() < 1.0);
+        // A force within the shoved grip is left as it is.
+        let small = side * 1_000.0;
+        assert_eq!(shoved_sideways(small, side, grip, load, 1.0), small);
+    }
+
+    #[test]
+    fn a_shove_is_whole_at_a_crawl_and_gone_at_speed() {
+        assert_eq!(shove_at(0.0), 1.0);
+        assert_eq!(shove_at(SHOVE_FULL_BELOW), 1.0);
+        assert!((shove_at((SHOVE_FULL_BELOW + SHOVE_NONE_ABOVE) / 2.0) - 0.5).abs() < 1e-6);
+        assert_eq!(shove_at(SHOVE_NONE_ABOVE + 5.0), 0.0);
     }
 
     #[test]

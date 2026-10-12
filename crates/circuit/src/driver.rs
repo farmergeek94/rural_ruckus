@@ -295,7 +295,7 @@ impl Driver {
             track,
             route,
             trucks,
-            leader,
+            ..
         } = *race;
         let lap = course.length();
         let mine = &trucks[me];
@@ -366,13 +366,9 @@ impl Driver {
         let steering_line = not_towards(self.lane, mine.across, &self.others);
 
         // Its place in the race: one more than the trucks that have raced further than it.
-        let place = 1 + trucks
-            .iter()
-            .filter(|other| other.raced > mine.raced)
-            .count();
-        let chasing = chasing(place, trucks.len(), leader - mine.raced);
+        let chasing = race.chasing(me);
         // Its share of its own engine for the difficulty, and more the further behind.
-        let boost = skill.power * (1.0 + CHASING_POWER * skill.catching_up * chasing);
+        let boost = skill.power * race.catch_up(me, skill);
         // Careful from being put back until it drives through its next checkpoint, which
         // moves the race on from where it was then.
         let put_back = progress.is_some_and(|progress| {
@@ -576,6 +572,27 @@ impl<'a> Race<'a> {
             trucks,
             leader,
         }
+    }
+
+    /// How desperate truck `me` of the race is, from 0 to 1 (`chasing`): by its place in
+    /// the race, one more than the trucks that have raced further than it, and by how far
+    /// it is behind the leader.
+    fn chasing(&self, me: usize) -> f32 {
+        let mine = &self.trucks[me];
+        let place = 1 + self
+            .trucks
+            .iter()
+            .filter(|other| other.raced > mine.raced)
+            .count();
+        chasing(place, self.trucks.len(), self.leader - mine.raced)
+    }
+
+    /// The catch-up truck `me` of the race has this step, for a driver of `skill`: how many
+    /// times its own engine's pull and top speed it is given, 1 for the leader and up to
+    /// 1 + `CHASING_POWER` for the most desperate. The computer's drivers get it through
+    /// `Driver::decide`, and the player's truck is given the same when it is behind.
+    pub fn catch_up(&self, me: usize, skill: Skill) -> f32 {
+        1.0 + CHASING_POWER * skill.catching_up * self.chasing(me)
     }
 }
 

@@ -101,7 +101,7 @@ use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, TaskPool};
 
 use super::drive::{AXLE_ALONG_X, LIGHT_LOOSE, UNDER, UPWARD, carries, on_the_tread};
-use super::{Truck, TruckConfig, WheelCollider, WheelCore};
+use super::{Shoved, Truck, TruckConfig, WheelCollider, WheelCore};
 use crate::collision_groups::{GROUND, GROUND_BOXES};
 
 #[derive(SystemParam)]
@@ -665,6 +665,48 @@ pub fn decide_tire_contacts(contacts: TireContacts, mut graph: ResMut<ContactGra
     });
 }
 
+/// Marks each truck another truck pressed on the side of in the last step (`Shoved`), from
+/// the contacts the physics kept, before the tires' forces are worked out. A pair between
+/// parts of two trucks is always kept (see `keep`), so a touching one with points is a
+/// push; it shoves the truck it pushes more across than along, and not the one it pushes
+/// along its nose or its tail, which rolls anyway, and whose steering is left as it is.
+pub(super) fn note_shoves(
+    graph: Res<ContactGraph>,
+    bodies: Query<&ColliderOf>,
+    mut trucks: Query<(&mut Shoved, &Rotation), With<Truck>>,
+) {
+    for (mut shoved, _) in &mut trucks {
+        shoved.set_if_neq(Shoved(false));
+    }
+    let body_of = |collider: Entity| bodies.get(collider).map_or(collider, |of| of.body);
+    for pair in graph.iter_active_touching() {
+        let (first, second) = (body_of(pair.collider1), body_of(pair.collider2));
+        if first == second || !trucks.contains(first) || !trucks.contains(second) {
+            continue;
+        }
+        for manifold in pair.manifolds.iter().filter(|m| !m.points.is_empty()) {
+            // The normal points out of the first collider: the second is pushed along it,
+            // the first against it. Either way round, what counts is how it lies to the
+            // truck's axes.
+            for truck in [first, second] {
+                if let Ok((mut shoved, rotation)) = trucks.get_mut(truck)
+                    && pushed_across(manifold.normal, rotation.0)
+                {
+                    shoved.set_if_neq(Shoved(true));
+                }
+            }
+        }
+    }
+}
+
+/// Whether a push along `normal` (either way) on a truck turned by `rotation` is more
+/// across the truck than along it.
+fn pushed_across(normal: Vec3, rotation: Quat) -> bool {
+    let across = normal.dot(rotation * Vec3::X).abs();
+    let along = normal.dot(rotation * Vec3::NEG_Z).abs();
+    across > along
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,6 +782,16 @@ mod tests {
         // As the second collider, the relative velocity is the wall's less the tire's.
         let target = target_sliding(Vec3::ZERO, Vec3::Z, [(tread, false)].into_iter());
         assert!(close(target, Vec3::new(0.0, -0.1, 0.0)), "{target}");
+    }
+
+    #[test]
+    fn a_push_on_the_side_of_a_truck_shoves_it_and_one_on_its_nose_does_not() {
+        let facing_west = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        // A push along world X is on the nose of a truck facing west, and on the side of
+        // one facing north (-Z, the truck's forward).
+        assert!(!pushed_across(Vec3::X, facing_west));
+        assert!(pushed_across(Vec3::X, Quat::IDENTITY));
+        assert!(pushed_across(Vec3::NEG_Z, facing_west));
     }
 
     #[test]

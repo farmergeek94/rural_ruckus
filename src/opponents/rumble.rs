@@ -17,11 +17,16 @@
 //! (`rumble::choose_target`), among them one that is about to arrive over the rim
 //! (`ARRIVING`), which it meets there; aims just inside it so that the hit carries it
 //! outward; and never goes faster than it can stop in before its own rim
-//! (`rumble::edge_speed`, `rumble::NavField::run_off`), except that on normal and hard it
-//! counts on the hit itself to slow it when the rival is square in front
-//! (`rumble::charge_speed`). A pushing match that has stalled (`RAM_STALL`) it breaks off
-//! by backing up and hitting again (`RAM_BACK`), and one that stalls again it gives up
-//! for a while (`BREAK_OFF`). Earning nothing, it fights only a rival near it, and
+//! (`rumble::edge_speed`, `rumble::NavField::run_off`, and a look at the real ground ahead
+//! for a drop the field misses, `DROP_LOOK`), except that on normal and hard it counts on
+//! the hit itself to slow it when a rival that is all but standing is square in front
+//! (`rumble::charge_speed`, `CHARGE_STANDING`). A rival it has in contact ahead of it (`rumble::pushing`,
+//! `PUSH_GAP`) it pushes all the way to the rim, whoever else is worth more: the rival is
+//! its buffer before the drop, so it fights on however near the drop it comes and means to
+//! stop only once its own nose is nearly there (`PUSH_MARGIN`), the rival carried over. A
+//! pushing match that has stopped (`STALLED`, `RAM_STALL`) it breaks off by backing up and
+//! hitting again (`RAM_BACK`), and one that stalls again it gives up for a while
+//! (`BREAK_OFF`). Earning nothing, it fights only a rival near it, and
 //! otherwise goes back to the zone. With no one up there it waits at the
 //! safest place of the scoring zone, furthest from any drop
 //! (`rumble::NavField::hold_point`), nose to whoever comes (`rumble::hold_aim`); and on
@@ -72,8 +77,22 @@ const TURN_ROOM: f32 = 9.0;
 const DODGE_FOR: f32 = 0.8;
 const DODGE_AHEAD: f32 = 10.0;
 const DODGE_ROOM: f32 = 10.0;
-/// How much room behind it a driver on the summit needs to back up at all, in metres.
+/// How much room behind it a driver on the summit needs to back up at all, in metres, and
+/// how hard it brakes when it is backing with less: a trench the field misses was behind.
 const BACK_ROOM: f32 = 8.0;
+const BRAKE_BACK: f32 = 0.8;
+/// A driver counts on the hit to slow it only at a rival all but standing along its nose:
+/// going slower than this along it, in m/s. A rival that is itself going towards the rim,
+/// fleeing or pushed, may never be hit before it: two chargers on Hypercube held full
+/// throttle to the drop at 13 m/s with their rival 5 m ahead the whole way, and went over.
+const CHARGE_STANDING: f32 = 3.0;
+/// How far along its nose, and behind it when it backs, a driver on the summit looks at
+/// the real ground for a drop, in metres, a metre at a time, and how far below what it
+/// stands on the ground is a drop (the field's own rule). The field knows the rim to
+/// within half a node and misses a trench narrower than a node: Hypercube's, which
+/// drivers backed into.
+const DROP_LOOK: f32 = 8.0;
+const DROP: f32 = 1.5;
 /// How far in from every drop a driver that has got onto the summit keeps following its
 /// way, in metres, before it turns to the fight: a truck that turned round on the rim it
 /// had just climbed over fell back off it. One node of the field.
@@ -94,11 +113,21 @@ const ARRIVING: f32 = 8.0;
 const ARRIVING_BELOW: f32 = 6.0;
 /// A fight that has stalled: slower than this, in m/s, with its rival within this many
 /// metres, for this long, in seconds, a driver backs off for this long, in seconds, and
-/// hits it again.
-const STALLED: f32 = 1.5;
+/// hits it again. All but stopped: a push that moves at all is carried on to the rim (the
+/// user asked for drivers to back off only when they are stopped).
+const STALLED: f32 = 0.5;
 const RAM_REACH: f32 = 8.0;
 const RAM_STALL: f32 = 1.0;
 const RAM_BACK: f32 = 0.8;
+/// A rival this much further than two trucks' reach ahead of a driver's nose, in metres,
+/// is in contact with it, or about to be: the one it is pushing. While it pushes, the rival
+/// is its buffer before the rim: it fights on however near the drop it comes, and means to
+/// stop only this far short of the rim, in metres, beyond what its truck reaches, so that
+/// the rival, a truck's length ahead, is carried over before it stops. Less than the
+/// usual margin (`Skill::margin`): the rim is known to within 1.6 m, and a pusher may go
+/// over after its rival. The user asked for drivers to push all the way to the edge.
+const PUSH_GAP: f32 = 1.5;
+const PUSH_MARGIN: f32 = 1.0;
 /// After this many stalled pushes of one fight, a driver breaks it off for this long, in
 /// seconds, and holds the scoring zone instead.
 const STALLS: u32 = 2;
@@ -422,8 +451,58 @@ pub(super) fn drive_rumble(
 
         let state = &mut driver.rumble;
         let room_along = |direction: Vec2| nav.field.run_off(position, height, direction, RIM_LOOK);
+        // How far along `direction` the real ground first drops away under the truck, by a
+        // ray down at each metre: between the last sample on the top and the first off it.
+        // Infinite when it does not within `DROP_LOOK`.
+        let stands_at = height + config.wheel_rest[0].y - config.wheel_radius;
+        let look_from = height + 6.0;
+        let drop_along = |direction: Vec2| -> f32 {
+            let mut gone = 1.0;
+            while gone <= DROP_LOOK {
+                let at = position + direction * gone;
+                let floor = spatial
+                    .cast_ray(
+                        Vec3::new(at.x, look_from, at.y),
+                        Dir3::NEG_Y,
+                        look_from - stands_at + DROP + 0.5,
+                        true,
+                        &the_ground,
+                    )
+                    .map(|hit| look_from - hit.distance);
+                if floor.is_none_or(|floor| floor < stands_at - DROP) {
+                    return gone - 0.5;
+                }
+                gone += 1.0;
+            }
+            f32::INFINITY
+        };
+        let room = if on_summit {
+            room_along(forward).min(drop_along(forward))
+        } else {
+            room_along(forward)
+        };
+        // How far ahead of its middle the truck reaches: its front tires.
+        let reach_ahead = config
+            .wheel_rest
+            .iter()
+            .map(|w| w.z.abs())
+            .fold(0.0, f32::max)
+            + config.wheel_radius;
+        // The rival it is pushing, if any: in contact ahead of it, and before its rim.
+        let contact = 2.0 * reach_ahead + PUSH_GAP;
+        let pushed = rivals
+            .iter()
+            .enumerate()
+            .filter(|(_, rival)| rival.on_summit)
+            .find_map(|(index, rival)| {
+                rumble::pushing(&me, rival, contact)
+                    .filter(|&ahead| ahead < room)
+                    .map(|_| index)
+            });
         // Just up, or knocked to the rim, it is still climbing: in from the drops first.
-        let clear = on_summit && nav.field.clear_of_drops(position, height) >= CLIMB_UNTIL;
+        // Unless it is pushing a rival there: that rival is its buffer.
+        let clear = on_summit
+            && (pushed.is_some() || nav.field.clear_of_drops(position, height) >= CLIMB_UNTIL);
         state.broken_off = (state.broken_off - dt).max(0.0);
         let mut mode = if state.dodging > 0.0 {
             Mode::Dodge(rumble::Dodge {
@@ -433,9 +512,12 @@ pub(super) fn drive_rumble(
             match rumble::decide(&me, clear, &rivals, nav.centre, nav.reach, skill.dodges) {
                 // A fight it has broken off: back to the zone for a while.
                 Mode::Fight(_) if state.broken_off > 0.0 => Mode::Hold,
+                // A rival it is pushing it goes on pushing, whoever else is worth more.
+                Mode::Fight(_) if let Some(target) = pushed => Mode::Fight(target),
                 mode => mode,
             }
         };
+        let pushing = matches!(mode, Mode::Fight(target) if pushed == Some(target));
         // A dodge goes to the side with room before a drop, or not at all: better hit than
         // over the rim or into a pit.
         if let Mode::Dodge(dodge) = mode
@@ -594,25 +676,20 @@ pub(super) fn drive_rumble(
         // along the way to its aim, which its nose is turning towards. Unless a rival is
         // square in front, and the hit will do the stopping.
         let to_aim = (aim - position).normalize_or_zero();
-        let room = room_along(forward);
         if on_summit {
-            let reach_ahead = config
-                .wheel_rest
-                .iter()
-                .map(|w| w.z.abs())
-                .fold(0.0, f32::max)
-                + config.wheel_radius;
             let going = velocity.0.xz();
             let mut least = room.min(room_along(to_aim));
             if going.length() > 1.0 {
                 least = least.min(room_along(going.normalize()));
             }
-            let margin = reach_ahead + skill.margin;
+            // Pushing, the rival ahead is the buffer: nearly to the rim.
+            let margin = reach_ahead + if pushing { PUSH_MARGIN } else { skill.margin };
             let mut cap = rumble::edge_speed(least, skill.braking, margin);
             if skill.charges
                 && let Mode::Fight(target) = mode
                 && let Some(to_rival) = rumble::ahead_in_lane(&me, &rivals[target])
                 && to_rival < room
+                && rivals[target].velocity.dot(forward) < CHARGE_STANDING
             {
                 cap = cap.max(rumble::charge_speed(room, to_rival, skill.braking, margin));
             }
@@ -695,9 +772,11 @@ pub(super) fn drive_rumble(
         if on_summit {
             driver.recovery.gave_up = false;
         }
-        // Backing up on the summit needs room behind: a pit or the rim may be there.
-        if on_summit && throttle < 0.0 && speed < 1.0 && room_along(-forward) < BACK_ROOM {
-            throttle = 0.0;
+        // Backing up on the summit needs room behind: a pit or the rim may be there. Already
+        // going back, it brakes.
+        if on_summit && throttle < 0.0 && room_along(-forward).min(drop_along(-forward)) < BACK_ROOM
+        {
+            throttle = if speed < -1.0 { BRAKE_BACK } else { 0.0 };
         }
         // Standing at a drop with nowhere to go, it holds its truck there.
         let standing = on_summit && wanted < STANDING && speed.abs() < STANDING && throttle >= 0.0;

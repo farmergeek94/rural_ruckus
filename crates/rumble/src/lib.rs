@@ -25,5 +25,5 @@ pub use score::{
 };
 pub use tactics::{
     Dodge, Me, Mode, Rival, ahead_in_lane, attack_aim, charge_speed, choose_target, decide,
-    edge_speed, hold_aim, threat,
+    edge_speed, hold_aim, pushing, threat,
 };

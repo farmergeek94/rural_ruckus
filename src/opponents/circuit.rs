@@ -9,8 +9,11 @@
 //! (`track::TrackData::other_courses`), so that a driver on a shortcut keeps to the middle
 //! of its road round the bends. The difficulty scales the drivers' engines and catch-up
 //! power too: when it is behind, a driver's engine is given more, so that it catches up on
-//! the straights (`circuit::Skill`). Where each checkpoint is along the course, and what
-//! fixed scenery stands on it, is found once a race (`circuit::Route`). A driver that gets
+//! the straights (`circuit::Skill`). The player's truck is given the same catch-up when it
+//! is behind, by the same rule (`circuit::Race::catch_up`), as the user asked: the
+//! difficulty's share of the catch-up, and none of its cut of the drivers' engines. Where
+//! each checkpoint is along the course, and what fixed scenery stands on it, is found once
+//! a race (`circuit::Route`). A driver that gets
 //! nowhere, or that has gone past its next checkpoint without driving through it, asks the
 //! race to put it back at its last checkpoint. A track with no course has nothing to
 //! follow, and its computer trucks stand still.
@@ -19,8 +22,8 @@ use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 
 use super::{
-    AIRBORNE, ComputerDriver, Controls, Difficulty, Driving, OpponentsSettings, Recovery, SETTLE,
-    Watching,
+    AIRBORNE, Boosted, ComputerDriver, Controls, Difficulty, Driving, OpponentsSettings,
+    OwnEngine, Recovery, SETTLE,
 };
 use crate::collision_groups::GROUND;
 use crate::game_state::GameState;
@@ -65,13 +68,15 @@ struct Remembered {
     trucks: Vec<::circuit::OnCourse>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drive(
+    mut commands: Commands,
     time: Res<Time>,
     track: Res<Track>,
     settings: Res<OpponentsSettings>,
     spatial: SpatialQuery,
     mut drivers: Query<Driving>,
-    player: Query<Watching, (With<PlayerTruck>, Without<ComputerDriver>)>,
+    mut player: Query<Boosted, (With<PlayerTruck>, Without<ComputerDriver>)>,
     mut remembered: Local<Remembered>,
 ) {
     let difficulty = settings.difficulty;
@@ -111,7 +116,7 @@ fn drive(
             lap_number(racer),
         ));
     }
-    if let Ok((entity, transform, velocity, config, racer)) = player.single() {
+    if let Ok((entity, transform, velocity, config, racer, _)) = player.single() {
         let player = places.of(
             transform.translation.xz(),
             velocity.0.xz(),
@@ -190,6 +195,26 @@ fn drive(
         } else {
             driver.getting_nowhere += dt;
         }
+    }
+
+    // The player's truck, which was put last in `trucks`, gets the same catch-up as the
+    // drivers when it is behind, on its own engine, which is kept the first time.
+    if let Ok((entity, _, _, mut config, _, own)) = player.single_mut() {
+        let me = race.trucks.len() - 1;
+        let (pull, top_speed) = match own {
+            Some(own) => (own.pull, own.top_speed),
+            None => {
+                let own = OwnEngine {
+                    pull: config.engine_force,
+                    top_speed: config.top_speed,
+                };
+                commands.entity(entity).insert(own);
+                (own.pull, own.top_speed)
+            }
+        };
+        let boost = race.catch_up(me, skill);
+        config.engine_force = pull * boost;
+        config.top_speed = top_speed * boost;
     }
 }
 

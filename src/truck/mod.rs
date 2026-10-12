@@ -121,6 +121,7 @@ impl Plugin for TruckPlugin {
                     (gearbox::change_gears, engine::run_engines)
                         .chain()
                         .before(TruckSystems::Drive),
+                    contacts::note_shoves.before(TruckSystems::Drive),
                     drive::drive_truck.in_set(TruckSystems::Drive),
                 ),
             )
@@ -225,6 +226,17 @@ impl Default for GroundGrip {
         Self([1.0; 4])
     }
 }
+
+/// On a truck: whether another truck pressed on its side in the last physics step, more
+/// across it than along it. Written by `contacts` before `TruckSystems::Drive`, from the
+/// step's contacts. A shoved truck's tires give way sideways while it is slow (see
+/// `drive::SHOVED_GRIP`), so that a truck can push another about instead of only creeping
+/// it along: pushed on its side at full throttle, a truck moved a standing one at 0.15 m/s,
+/// as its tires' sideways grip was the pusher's whole drive grip. The pusher, pressed along
+/// its nose, is not shoved, and steers as ever (the user: "the steering should stay
+/// normal").
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Shoved(pub(crate) bool);
 
 /// The truck as it is drawn: the body, with the wheels as its children. It follows its
 /// `truck` smoothly from frame to frame.

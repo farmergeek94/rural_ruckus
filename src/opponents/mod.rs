@@ -202,17 +202,29 @@ fn take_the_wheel(
 /// The player's truck while the player still drives it.
 type PlayersHands = (With<PlayerTruck>, Without<ComputerDriver>);
 
-/// Once the player's truck has finished, drives it on as another driver, the slowest.
+/// On the player's truck: its own engine before the catch-up scales it (see `circuit`),
+/// as `ComputerDriver::engine` keeps a driver's. Its pull in newtons and the speed where
+/// that runs out in m/s.
+#[derive(Component, Clone, Copy, Debug)]
+pub(super) struct OwnEngine {
+    pull: f32,
+    top_speed: f32,
+}
+
+/// Once the player's truck has finished, drives it on as another driver, the slowest. The
+/// driver starts from the truck's own engine, not from what the catch-up had made of it.
 fn take_the_players_wheel(
     mut commands: Commands,
-    player: Query<(Entity, &Racer), PlayersHands>,
+    player: Query<(Entity, &Racer, Option<&OwnEngine>), PlayersHands>,
     drivers: Query<(), With<ComputerDriver>>,
 ) {
-    for (truck, racer) in &player {
+    for (truck, racer, own) in &player {
         if racer.progress.finished.is_some() {
-            commands
-                .entity(truck)
-                .insert((Autopilot, ComputerDriver::new(drivers.iter().count())));
+            let driver = ComputerDriver {
+                engine: own.map(|own| (own.pull, own.top_speed)),
+                ..ComputerDriver::new(drivers.iter().count())
+            };
+            commands.entity(truck).insert((Autopilot, driver));
         }
     }
 }
@@ -319,6 +331,17 @@ type Watching<'a> = (
     &'a LinearVelocity,
     &'a TruckConfig,
     Option<&'a Racer>,
+);
+
+/// The same, on a circuit, where it is given the drivers' catch-up when it is behind,
+/// which scales its `TruckConfig` from its `OwnEngine`.
+type Boosted<'a> = (
+    Entity,
+    &'a Transform,
+    &'a LinearVelocity,
+    &'a mut TruckConfig,
+    Option<&'a Racer>,
+    Option<&'a OwnEngine>,
 );
 
 #[cfg(test)]

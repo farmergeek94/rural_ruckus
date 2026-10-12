@@ -18,7 +18,8 @@ use super::drive::TipGuard;
 use super::interpolate::PhysicsPose;
 use super::lamps;
 use super::{
-    ChosenTruck, ComputerTrucks, Engine, Gearbox, GroundGrip, PlayerTruck, Truck, TruckConfig,
+    ChosenTruck, ComputerTrucks, Engine, Gearbox, GroundGrip, PlayerTruck, Shoved, Truck,
+    TruckConfig,
     TruckData, TruckInput, TruckName, TruckSetup, TruckVisual, TruckWheelColliders, TruckWheels,
     WheelCollider, WheelCore,
 };
@@ -194,6 +195,7 @@ fn spawn_truck(
             // its speed.
             Restitution::new(BODY_BOUNCE).with_combine_rule(CoefficientCombine::Min),
             GroundGrip::default(),
+            Shoved::default(),
             LinearDamping(0.02),
             AngularDamping(0.4),
             // The suspension forces come from us, not from contacts, so the physics can't

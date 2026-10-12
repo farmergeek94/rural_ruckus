@@ -85,6 +85,9 @@ const CREEP: f32 = 6.0;
 /// How far to either side of a driver's nose a rival may be and still be hit square, in
 /// metres: about a truck's width.
 const LANE: f32 = 2.5;
+/// How far to either side of a driver's nose a rival may be and still be the one it is
+/// pushing, in metres: wider than `LANE`, since a push lands on a corner of it too.
+const PUSH_LANE: f32 = 3.5;
 /// A driver that is not earning points fights only a rival within this, in metres;
 /// otherwise it goes back to the scoring zone. A fight drifts, and on Arena Rumble it
 /// drifted the whole field into a corner of the platform, outside the zone, where it
@@ -147,6 +150,16 @@ pub fn ahead_in_lane(me: &Me, rival: &Rival) -> Option<f32> {
     let gap = rival.position - me.position;
     let ahead = gap.dot(me.forward);
     (ahead > 0.0 && gap.perp_dot(me.forward).abs() <= LANE).then_some(ahead)
+}
+
+/// How far ahead of `me`, along its nose, `rival` is while `me` is pushing it: ahead,
+/// within `contact` metres (about a truck's length and a little, so that the two touch
+/// or are about to), and within `PUSH_LANE` of the nose's line. `None` when it is not.
+pub fn pushing(me: &Me, rival: &Rival, contact: f32) -> Option<f32> {
+    let gap = rival.position - me.position;
+    let ahead = gap.dot(me.forward);
+    (ahead > 0.0 && ahead <= contact && gap.perp_dot(me.forward).abs() <= PUSH_LANE)
+        .then_some(ahead)
 }
 
 /// The fastest a driver may go at a rival `to_rival` metres straight ahead of it, in m/s,
@@ -255,6 +268,19 @@ mod tests {
             scoring: on_summit,
             points: 0.0,
         }
+    }
+
+    #[test]
+    fn a_rival_just_ahead_and_near_the_nose_line_is_being_pushed() {
+        let me = me_at(0.0, 0.0, Vec2::NEG_Y, 3.0);
+        let contact = 6.0;
+        // A truck's length ahead, a little to one side: pushed.
+        let ahead = rival_at(2.0, -4.0, Vec2::ZERO, true);
+        assert_eq!(pushing(&me, &ahead, contact), Some(4.0));
+        // Too far ahead, too far aside, or behind: not.
+        assert_eq!(pushing(&me, &rival_at(0.0, -8.0, Vec2::ZERO, true), contact), None);
+        assert_eq!(pushing(&me, &rival_at(4.0, -4.0, Vec2::ZERO, true), contact), None);
+        assert_eq!(pushing(&me, &rival_at(0.0, 4.0, Vec2::ZERO, true), contact), None);
     }
 
     #[test]

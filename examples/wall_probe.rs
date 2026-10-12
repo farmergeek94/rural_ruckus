@@ -2,7 +2,9 @@
 //! met at several angles and speeds, and into a parked truck, and prints what happened.
 //! Run with `cargo run --example wall_probe`; `-- trace <wall m> <degrees> <m/s> <throttle>`
 //! prints one run step by step with the contacts the solver saw, `-- parked <degrees>
-//! <m/s> <throttle>` the same into a parked truck, and `-- box` a bare cube into a wall.
+//! <m/s> <throttle> [distance m]` the same into a parked truck (a short distance and no
+//! speed is a shove: 5.5 m from behind, 5.2 m from the side), and `-- box` a bare cube
+//! into a wall.
 
 use std::time::Duration;
 
@@ -162,15 +164,21 @@ fn run_traced(s: Scenario, trace: bool) -> Outcome {
         }
         if trace && (step % 6 == 0 || last_v.is_some_and(|lv| (v - lv).length() > 1.0)) {
             let (_, pitch, _) = t.rotation.to_euler(EulerRot::YXZ);
+            // Positions along the approach: how far the trucks are past the origin the
+            // way the player came.
+            let other_along = other.map_or(f32::NAN, |o| {
+                app.world().get::<Transform>(o).unwrap().translation.dot(heading)
+            });
             println!(
-                "t={:5.2} z={:7.3} y={:6.3} pitch={:6.1} vz={:7.2} vy={:6.2} dv={:6.2}",
+                "t={:5.2} along={:7.3} y={:6.3} pitch={:6.1} v={:7.2} vy={:6.2} dv={:6.2} other_along={:7.3}",
                 step as f32 * STEP as f32,
-                t.translation.z,
+                t.translation.dot(heading),
                 t.translation.y - standing,
                 pitch.to_degrees(),
-                v.z,
+                v.dot(heading),
                 v.y,
-                last_v.map_or(0.0, |lv| (v - lv).length())
+                last_v.map_or(0.0, |lv| (v - lv).length()),
+                other_along
             );
             if step % 24 == 0 || last_v.is_some_and(|lv| (v - lv).length() > 1.0) {
                 print_contacts(&mut app, player);
@@ -513,7 +521,7 @@ fn main() {
                 parked: Some(0.0),
                 angle_deg: f(2),
                 speed: f(3),
-                distance: 20.0,
+                distance: args.get(5).map_or(20.0, |_| f(5)),
                 throttle: f(4),
             },
             true,
