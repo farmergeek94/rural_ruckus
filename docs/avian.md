@@ -39,7 +39,8 @@ Marks, as in `docs/formats/`: **read** in the source of `avian3d` 0.7.0 or `parr
 
 Avian features used: `3d`, `f32`, `parry-f32`, `parallel`, `debug-plugin`, with
 `default-features = false`. The game has no use for `collider-from-mesh`, `bevy_scene`,
-`bevy_picking` or `xpbd_joints`.
+`bevy_picking` or `xpbd_joints`. `parallel` costs a little in the dev build (section 7)
+and is kept for the release build.
 
 ### 2.2 The app and the schedule
 
@@ -351,7 +352,7 @@ are set up at random, so each engine ran three races; the table gives the mean.
 
 - **Drive it.** Every figure above is headless. The user must drive the game and say
   whether the trucks feel as they did.
-- The "measured" notes in `truck/drive.rs`, `truck/contacts.rs` and `opponents.rs` were
+- The "measured" notes in `truck/drive.rs`, `truck/contacts.rs` and `crates/circuit` were
   measured on Rapier. Those that section 5 measured again agree. The rest (for example
   the Alpine counts in `contacts.rs`) are not; the module document of `truck/contacts.rs`
   says so.
@@ -360,3 +361,33 @@ are set up at random, so each engine ran three races; the table gives the mean.
 - Every figure of section 5 was measured with bodies pushed apart (3.9), not with the
   speed at 0.
 - Steps with a jolt over 5 g are 5% more on Avian, within the spread between races.
+
+## 7. The step on one thread
+
+Measured 2026-10-11 on the development machine (16 cores, the `powersave` governor,
+which wakes a sleeping thread slowly), Baja Beach HD with seven computer trucks and the
+built-in or Max-D trucks, dev build, headless, one fixed step for each update of the app
+and then two, so that the step's own cost is the difference. Stack samples of every
+thread, 300 of them 50 ms apart, showed no thread computing in three of every four; the
+main thread was waiting on the task pool, and the busy threads were in the pool's queues.
+With one truck the step cost 3.3 ms, as with eight: the time was the hand-offs, not the
+work.
+
+| Executors | One step an update | Two | A step | The frame's own |
+| --- | --- | --- | --- | --- |
+| Bevy's multi-threaded everywhere, Avian `parallel` (the default) | 4.85 ms | 8.15 ms | 3.3 ms | 1.5 ms |
+| The step's schedules single-threaded, Avian `parallel` | 3.35 ms | 4.42 ms | 1.1 ms | 2.3 ms |
+| Every schedule single-threaded, Avian `parallel` (`--one-thread-schedules`) | 2.04 ms | 3.20 ms | 1.2 ms | 0.9 ms |
+| Bevy's multi-threaded everywhere, no `parallel` | 4.98 ms | 8.10 ms | 3.1 ms | 1.9 ms |
+| The step's schedules single-threaded, no `parallel` | 3.29 ms | 4.26 ms | 1.0 ms | 2.3 ms |
+| Every schedule single-threaded, no `parallel` | 1.78 ms | 2.61 ms | 0.8 ms | 0.9 ms |
+
+The step's schedules are Bevy's five fixed ones and Avian's `PhysicsSchedule` and
+`SubstepSchedule`; `physics.rs` sets their executor from
+`PhysicsSettings::threaded_schedules`, and `main.rs` the frame's from the same flag.
+`--one-thread-schedules` puts them all on one thread; Bevy's executor and Avian's
+`parallel` are the defaults, at their cost in the dev build, for the release build,
+where the work is worth spreading. That is the user's decision, not measured. Drawn off screen on the integrated GPU at
+1280 x 720 with the whole plugin list, the frame went from 18.0 ms to 13.5 ms (the step's
+schedules alone, 17.7 ms): with every plugin, the frame has a few hundred systems, and
+the hand-offs were most of the frame too (`docs/smoothness.md`).

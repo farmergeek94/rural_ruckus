@@ -10,9 +10,8 @@
 //! A racer is looked for only on the stretch of course between its last gate and its next
 //! one, which is where it is racing, so that a road that doubles back can't mislead it.
 
-use bevy::prelude::*;
-
-use crate::track::{Course, TrackData};
+use bevy::math::Vec2;
+use content::track::{Course, TrackData};
 
 /// How much further from a gate than its nearest piece of course another piece may be and
 /// still be a candidate for where the gate is, as a share of the course's width. The right
@@ -22,11 +21,11 @@ const CANDIDATE_REACH: f32 = 1.0;
 
 /// How far along the course each gate is, in metres from its first point. Empty where the
 /// track has no course or no gates: then distances are straight lines.
-#[derive(Resource, Default)]
-pub(super) struct GatesAlong(Vec<f32>);
+#[derive(Clone, Debug, Default)]
+pub struct GatesAlong(Vec<f32>);
 
 impl GatesAlong {
-    pub(super) fn new(track: &TrackData) -> Self {
+    pub fn new(track: &TrackData) -> Self {
         match &track.course {
             Some(course) if !track.gates.is_empty() => {
                 let centers: Vec<Vec2> = track.gates.iter().map(|gate| gate.center).collect();
@@ -36,9 +35,15 @@ impl GatesAlong {
         }
     }
 
+    /// How far along the course each gate is, in metres, in the gates' order; empty where
+    /// distances are straight lines.
+    pub fn along(&self) -> &[f32] {
+        &self.0
+    }
+
     /// Metres from `position` (world X and Z) to gate `next` of `track`: along the course
     /// from the point of it nearest `position`, or in a straight line without a course.
-    pub(super) fn to_next_gate(&self, track: &TrackData, next: usize, position: Vec2) -> f32 {
+    pub fn to_next_gate(&self, track: &TrackData, next: usize, position: Vec2) -> f32 {
         let Some(gate) = track.gates.get(next) else {
             return 0.0;
         };
@@ -153,7 +158,6 @@ fn candidates(course: &Course, gate: Vec2) -> Vec<Candidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::track::builtin_track;
 
     /// A square loop 100 m a side, round from the origin: -Z, then +X, then +Z, then -X.
     fn square() -> Course {
@@ -223,30 +227,5 @@ mod tests {
         assert!((d - 10.0).abs() < 1e-3, "{d}");
         let d = along_to(&course, 50.0, 50.0, Vec2::new(0.0, -60.0));
         assert!((d - 390.0).abs() < 1e-3, "{d}");
-    }
-
-    #[test]
-    fn the_builtin_tracks_gates_go_round_its_course_once() {
-        let track = builtin_track();
-        let along = GatesAlong::new(&track);
-        let course = track.course.as_ref().unwrap();
-        let lap = course.length();
-        let count = along.0.len();
-        assert_eq!(count, track.gates.len());
-        let turns: f32 = (0..count)
-            .map(|i| (along.0[(i + 1) % count] - along.0[i]).rem_euclid(lap))
-            .sum::<f32>()
-            / lap;
-        assert!((turns - 1.0).abs() < 1e-3);
-    }
-
-    #[test]
-    fn without_a_course_the_distance_is_a_straight_line() {
-        let mut track = builtin_track();
-        track.course = None;
-        let along = GatesAlong::new(&track);
-        let gate = track.gates[1].center;
-        let d = along.to_next_gate(&track, 1, gate + Vec2::new(3.0, 4.0));
-        assert!((d - 5.0).abs() < 1e-4);
     }
 }

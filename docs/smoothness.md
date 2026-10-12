@@ -143,6 +143,24 @@ debug build), parked at Alpine's start: about 9.5 ms, of which the sun's shadows
 `--integrated-graphics`) turns down what costs most on such a GPU. Its values are chosen,
 not measured: measure the same way before you change them.
 
+## The executors: most of a frame was hand-offs between threads
+
+Measured 2026-10-11 on the development machine (16 cores, the `powersave` governor),
+Baja Beach HD with seven computer trucks, dev build. Headless, a fixed step cost 3.3 ms
+with Bevy's multi-threaded executor and 1.1 ms with the single-threaded one, and with one
+truck the multi-threaded step cost the same 3.3 ms: Bevy's executor hands every system to
+the task pool and waits for it, and with a few dozen small systems in each of the step's
+schedules, six substeps, and a thread that wakes slowly, the hand-offs were the step.
+Drawn off screen on the integrated GPU at 1280 x 720 with the whole plugin list, a frame
+took 18.0 ms; with the step's schedules on one thread, 17.7 ms; with the frame's
+schedules on one thread as well, 13.5 ms. `--one-thread-schedules` runs the step's
+schedules (`physics.rs`, `PhysicsSettings::threaded_schedules`) and the frame's
+(`main.rs`) on one thread; Bevy's executor is the default (`--threaded-schedules`), as
+is Avian's `parallel` feature, for the release build, where the work is worth spreading
+(`docs/avian.md`, section 7). A system
+that spreads its own work over the task pool still does; whether that pays is to be
+measured each time (`truck/drive.rs`, `sweep_all`).
+
 ## The water on an integrated GPU
 
 Measured 2026-10-10 on the development machine's Intel Graphics (ARL), headless at

@@ -21,11 +21,12 @@ cargo run -- --base-game=$HOME/Documents/mtm2 --no-settle-scenery   # objects on
 cargo run -- tracks/AlpineMtns.pod --integrated-graphics   # graphics for a processor's built-in GPU (INTEGRATED GRAPHICS on the options screen)
 cargo run -- tracks/AlpineMtns.pod --antialiasing=fxaa --shadow-cascades=2 --shadow-distance=100 --anisotropy=4   # single cheaper settings (F2 changes them in a race)
 cargo run -- --log-fps --no-vsync  # print the true frame time once a second
+cargo run -- --log-fps --no-vsync --one-thread-schedules   # the same with the frame's and the step's schedules on one thread (see docs/smoothness.md); --threaded-schedules is Bevy's executor, the default
 cargo run -- --fifo                # strict vsync (PresentMode::Fifo): never shows a late frame early
 cargo run -- tracks/AlpineMtns.pod --log-fps --autopilot   # measure while it drives itself
 cargo test                         # all tests (headless, no window needed)
 cargo test --test track            # one integration test file
-cargo test -p pod                 # one crate's unit tests (the MTM2 loader; `-p ruckus_content` the content model, `-p ruckus_rumble` the rumble)
+cargo test -p pod                 # one crate's unit tests (the MTM2 loader; `-p ruckus_content` the content model, `-p ruckus_circuit` the lap race, `-p ruckus_rumble` the rumble)
 cargo test --test camera_smoothness -- --nocapture   # the camera's rules, printing every smoothness figure
 cargo test -- --ignored            # slow tests too, and ones that print figures
 cargo clippy --all-targets         # lint
@@ -72,7 +73,7 @@ tracks and trucks borrow is missing: built-in shapes and grey in its place.
 
 ## Build profile
 
-The dev profile compiles the workspace's own crates (the game, `content`, `pod` and `rumble`)
+The dev profile compiles the workspace's own crates (the game, `content`, `pod`, `circuit` and `rumble`)
 unoptimised (for the debugger) and their dependencies at `opt-level = 3`, so dev builds
 are playable. Do not change that, and do not use
 `--release` to test or run the game, unless the user asks. The reference figures in

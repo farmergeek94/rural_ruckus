@@ -37,17 +37,12 @@ pub fn is_rumble(track: Res<Track>) -> bool {
     track.rumble.is_some()
 }
 
-/// Begins the session, on a rumble track.
+/// Begins the session.
 pub(super) fn start_session(
     mut commands: Commands,
-    track: Res<Track>,
     settings: Res<RaceSettings>,
     time: Res<Time<Fixed>>,
 ) {
-    if track.rumble.is_none() {
-        commands.remove_resource::<RumbleSession>();
-        return;
-    }
     let seconds = f64::from(settings.rumble_minutes.max(1)) * 60.0;
     commands.insert_resource(RumbleSession {
         duration: (seconds / time.timestep().as_secs_f64()).round() as u64,
@@ -57,6 +52,13 @@ pub(super) fn start_session(
 
 pub(super) fn end_session(mut commands: Commands) {
     commands.remove_resource::<RumbleSession>();
+}
+
+/// Gives each new racer its score.
+pub(super) fn score_racers(mut commands: Commands, racers: Query<Entity, Added<Racer>>) {
+    for racer in &racers {
+        commands.entity(racer).insert(RumbleScore::default());
+    }
 }
 
 /// Scores every racer for the tick, after GO, and ends the session when its time is up.

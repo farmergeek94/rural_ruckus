@@ -3754,6 +3754,7 @@ dependencies = [
  "png",
  "pod",
  "redb",
+ "ruckus_circuit",
  "ruckus_content",
  "ruckus_rumble",
 ]
@@ -5033,6 +5034,14 @@ dependencies = [
  "heapless 0.8.0",
  "num-traits",
  "smallvec",
+]
+
+[[package]]
+name = "ruckus_circuit"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ruckus_content",
 ]
 
 [[package]]

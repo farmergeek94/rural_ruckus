@@ -1,25 +1,25 @@
-//! Racing laps around the track: a countdown on the grid, checkpoint gates crossed in
-//! order, lap counting and timing, and the results once the player has finished, plus the
-//! gate markers, the race readout, a compass to the next checkpoint and a map of the track
-//! with every truck on it on screen. Esc pauses the race (`pause`). On a track with
-//! `TrackData::rumble` zones the race is a Summit Rumble instead (`rumble`): scored by the
-//! time on the summit for a set number of minutes, with no laps and no gates, and every
-//! truck's score over it on the screen (`labels`).
+//! A race: a countdown on the grid, the trucks let go at GO, the results once the player
+//! has finished, the race readout and a map of the track with every truck on it on screen.
+//! Esc pauses the race (`pause`). Which race it is comes from the track, and only that
+//! race's rules are run: laps around a circuit (`circuit`: checkpoint gates crossed in
+//! order, lap counting and timing, by the `circuit` crate's rules, with the gate markers
+//! and a compass to the next checkpoint), or, on a track with `TrackData::rumble` zones, a
+//! Summit Rumble (`rumble`: scored by the `rumble` crate's rules on the time on the summit
+//! for a set number of minutes, with no laps and no gates, and every truck's score over it
+//! on the screen, `labels`).
 //!
 //! Uses the `track` slice for the gates and start position, and the `truck` slice for
 //! the trucks. Every truck becomes a `Racer` with a place on the starting grid: the
 //! player's truck (`truck::PlayerTruck`) behind the others. The readout and the keys are
 //! the player's.
 
-mod along;
+mod circuit;
 mod compass;
-mod gate;
 mod hud;
 mod labels;
 mod map;
 mod markers;
 mod pause;
-mod progress;
 mod results;
 mod rumble;
 mod start;
@@ -35,10 +35,9 @@ use crate::keys::{Control, just_pressed};
 use crate::track::TrackSystems;
 use crate::truck::TruckSystems;
 
-pub use gate::crossed;
+pub use circuit::{Milestone, RaceProgress, is_circuit, position, standings};
 pub use labels::ScoreLabel;
 pub use pause::{RaceCancelled, RacePause};
-pub use progress::{Milestone, RaceProgress, position, standings};
 pub use rumble::{RumbleScore, RumbleSession, is_rumble};
 pub use start::{BLUE, RaceStart};
 pub use systems::BackToCheckpoint;
@@ -64,7 +63,7 @@ impl Plugin for RacePlugin {
             .init_resource::<RaceStart>()
             .init_resource::<pause::PauseMenu>()
             .init_resource::<map::MapShown>()
-            .init_resource::<along::GatesAlong>()
+            .init_resource::<circuit::GatesAlong>()
             .add_message::<BackToCheckpoint>()
             .add_message::<RaceCancelled>()
             .add_systems(
@@ -89,12 +88,19 @@ impl Plugin for RacePlugin {
                 OnEnter(GameState::Racing),
                 (
                     (systems::reset_clock, start::begin_countdown).chain(),
-                    systems::find_gates_along.after(TrackSystems::Prepare),
-                    rumble::start_session.after(TrackSystems::Prepare),
                     systems::tell_trucks_of_the_world.after(TrackSystems::Prepare),
-                    markers::spawn_gate_markers.after(TrackSystems::Prepare),
+                    // What one race has and the other does not.
+                    (
+                        circuit::find_gates_along,
+                        markers::spawn_gate_markers,
+                        compass::spawn_compass,
+                    )
+                        .after(TrackSystems::Prepare)
+                        .run_if(is_circuit),
+                    rumble::start_session
+                        .after(TrackSystems::Prepare)
+                        .run_if(is_rumble),
                     hud::spawn_race_hud,
-                    compass::spawn_compass,
                     // Painted from the track the race is run on.
                     map::spawn_map.after(TrackSystems::Prepare),
                     start::spawn_count,
@@ -112,12 +118,15 @@ impl Plugin for RacePlugin {
                     )
                         .before(TruckSystems::Place),
                     systems::race_again.run_if(pause::running),
-                    markers::highlight_next_gate,
                     hud::update_race_hud,
                     start::show_count,
                     results::show_results,
-                    // After the drawn truck has been placed for the frame.
-                    compass::update_compass.after(TruckSystems::PlaceVisuals),
+                    (
+                        markers::highlight_next_gate,
+                        // After the drawn truck has been placed for the frame.
+                        compass::update_compass.after(TruckSystems::PlaceVisuals),
+                    )
+                        .run_if(is_circuit),
                     map::toggle_map
                         .run_if(pause::running)
                         .run_if(just_pressed(Control::Map)),
@@ -128,14 +137,13 @@ impl Plugin for RacePlugin {
                     )
                         .chain()
                         .after(TruckSystems::PlaceVisuals),
-                    // In a rumble, a score over every truck.
+                    // In a rumble, a score for every racer, and over every truck.
                     (
-                        labels::add_labels
-                            .after(systems::enlist_trucks)
-                            .run_if(rumble::is_rumble),
+                        (rumble::score_racers, labels::add_labels).after(systems::enlist_trucks),
                         labels::number_labels,
                     )
-                        .chain(),
+                        .chain()
+                        .run_if(is_rumble),
                 )
                     // Outside a race there are no gates, and before the first one no
                     // banner materials either.
@@ -146,7 +154,8 @@ impl Plugin for RacePlugin {
                 PostUpdate,
                 labels::place_labels
                     .before(UiSystems::Layout)
-                    .run_if(in_state(GameState::Racing)),
+                    .run_if(in_state(GameState::Racing))
+                    .run_if(is_rumble),
             )
             // After the physics step, so that a truck's position is this tick's.
             .add_systems(OnExit(GameState::Racing), rumble::end_session)
@@ -154,8 +163,8 @@ impl Plugin for RacePlugin {
                 FixedPostUpdate,
                 (
                     systems::tick_clock,
-                    systems::track_progress,
-                    rumble::score_rumble,
+                    circuit::track_progress.run_if(is_circuit),
+                    rumble::score_rumble.run_if(is_rumble),
                 )
                     .chain()
                     .after(PhysicsSystems::Writeback)

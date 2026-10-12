@@ -1,6 +1,6 @@
 [workspace]
 # The game is the root package. `cargo test` and `cargo clippy` at the root cover the
-# three crates, as `cargo run` runs the game.
+# four crates, as `cargo run` runs the game.
 members = ["crates/*"]
 default-members = [".", "crates/*"]
 
@@ -16,8 +16,11 @@ content = { package = "ruckus_content", path = "crates/content" }
 # The reader for Monster Truck Madness 2 archives (`crates/pod`). Only `main.rs`,
 # `front_end.rs` and `base_game.rs` may name it.
 pod = { path = "crates/pod" }
-# The rules of a Summit Rumble and the mind of a computer truck in one (`crates/rumble`),
-# plain data and pure functions over `content`. The `race` and `opponents` slices use it.
+# The rules of a lap race round a circuit and the mind of a computer truck on its course
+# (`crates/circuit`), and the same for a Summit Rumble (`crates/rumble`): plain data and
+# pure functions over `content`. The `race` and `opponents` slices use them, each only
+# while its race is run.
+circuit = { package = "ruckus_circuit", path = "crates/circuit" }
 rumble = { package = "ruckus_rumble", path = "crates/rumble" }
 # Writes the screenshots that the pause screen saves. Bevy already builds this version for
 # its own image loading, so it adds nothing to compile.
@@ -27,7 +30,8 @@ bevy = "0.19"
 # The physics engine (see `docs/avian.md`, and `physics.rs` for how it is set up). Only
 # what the game uses: no colliders from meshes, scenes or picking. `parallel` spreads a
 # step's work over the CPU's cores, with eight trucks and their wheels to solve 120 times
-# a second.
+# a second. In the dev build it costs a little more in hand-offs than it saves
+# (`physics.rs`); it is kept for the release build, where the work is worth spreading.
 avian3d = { version = "0.7", default-features = false, features = [
     "3d",
     "f32",

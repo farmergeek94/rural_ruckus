@@ -1,3 +1,4 @@
+use bevy::ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
 use bevy::prelude::*;
 use monster_truck_rural_ruckus::{
     backdrop, base_game, camera, controls_help, diagnostics, display, environment, footing,
@@ -56,6 +57,10 @@ fn main() {
     let mut backdrop_settings = backdrop::BackdropSettings::default();
     let mut water_settings = water::WaterSettings::default();
     let mut log_fps = false;
+    // The frame's schedules (see `one_thread`) and the step's (`physics::PhysicsSettings`)
+    // keep Bevy's multi-threaded executor unless `--one-thread-schedules` says otherwise;
+    // `--threaded-schedules` says so again.
+    let mut threaded_schedules = physics::PhysicsSettings::default().threaded_schedules;
     let mut autopilot = false;
     // Draws frames as fast as they come instead of waiting for the screen, so that
     // `--log-fps` shows how much time there is to spare.
@@ -112,6 +117,8 @@ fn main() {
             Some("--no-mipmaps") => settings.mipmaps = false,
             Some("--no-settle-scenery") => settings.settle_scenery = false,
             Some("--log-fps") => log_fps = true,
+            Some("--threaded-schedules") => threaded_schedules = true,
+            Some("--one-thread-schedules") => threaded_schedules = false,
             Some("--autopilot") => autopilot = true,
             Some("--unlit") => environment_settings.lighting = environment::Lighting::Off,
             Some("--simple-lighting") => {
@@ -200,7 +207,7 @@ fn main() {
             }
             Some(flag) if flag.starts_with("--") => {
                 eprintln!(
-                    "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-blend-ground --no-mipmaps --log-fps --no-vsync --fifo --autopilot --unlit --simple-lighting \
+                    "Unknown option {flag}. Options: --race --builtin --smooth-terrain --no-blend-ground --no-mipmaps --log-fps --no-vsync --fifo --autopilot --threaded-schedules --one-thread-schedules --unlit --simple-lighting \
                      --no-antialiasing --antialiasing=OFF|FXAA|MSAA --integrated-graphics --no-backdrop --no-decorations --flat-water --no-water-reflections --shadow-cascades=N --shadow-distance=METRES --anisotropy=N --scenery-distance=METRES --opponents=N --difficulty=EASY|NORMAL|HARD --minutes=N --manual --weather=NAME --time=DAY|DUSK|NIGHT --base-game=FOLDER"
                 );
                 std::process::exit(2);
@@ -263,6 +270,10 @@ fn main() {
         },
         ..default()
     };
+    app.insert_resource(physics::PhysicsSettings {
+        threaded_schedules,
+        ..default()
+    });
     app.insert_resource(settings)
         .insert_resource(camera_settings)
         .insert_resource(environment_settings)
@@ -339,7 +350,30 @@ fn main() {
     app.insert_resource(frame_pacing::FramePacing { on: vsync })
         .add_plugins(frame_pacing::FramePacingPlugin);
     app.add_plugins(diagnostics::DiagnosticsPlugin { log_fps, autopilot });
+    if !threaded_schedules {
+        one_thread(&mut app, First);
+        one_thread(&mut app, PreUpdate);
+        one_thread(&mut app, RunFixedMainLoop);
+        one_thread(&mut app, Update);
+        one_thread(&mut app, PostUpdate);
+        one_thread(&mut app, Last);
+    }
     app.run();
+}
+
+/// Runs one of the frame's schedules on the main thread, one system after another, as
+/// `physics` can run the step's (`--one-thread-schedules`). Bevy's multi-threaded executor
+/// hands each of the frame's few hundred systems to the task pool and waits for it, which
+/// on the development machine (16 cores, the `powersave` governor) cost more than the
+/// systems in the dev build: measured 2026-10-11, Baja Beach with eight trucks, drawn off
+/// screen on the integrated GPU at 1280 x 720, a frame took 17.7 ms with the
+/// multi-threaded executor and 13.5 ms with this (`docs/smoothness.md`). Bevy's is the
+/// default for the release build, where the work is worth spreading. The systems that
+/// spread their own work over the task pool, such as Bevy's visibility checks, still do.
+fn one_thread(app: &mut App, label: impl ScheduleLabel) {
+    app.edit_schedule(label, |schedule| {
+        schedule.set_executor(SingleThreadedExecutor::default());
+    });
 }
 
 /// The number after the `=` of an option like `--anisotropy=4`.

@@ -4,9 +4,8 @@
 //! sensor: it cannot be tunnelled through at speed, it knows which way the truck was
 //! going, and it needs no physics world to test.
 
-use bevy::prelude::*;
-
-use crate::track::{Gate, HeightGrid};
+use bevy::math::{Vec3, Vec3Swizzles};
+use content::track::{Gate, HeightGrid};
 
 /// Whether moving in a straight line `from` one position `to` another passes through
 /// the gate in its direction of travel. Height is ignored, so jumping through counts.
@@ -33,7 +32,7 @@ pub fn crossed(gate: &Gate, from: Vec3, to: Vec3) -> bool {
 /// piece, whichever edge of the map it went across. A truck going across an edge is moved
 /// to the other one, and a gate can stand on the edge: Monte Carlo has one. As it is where
 /// the ground does not repeat.
-pub(super) fn beside(gate: &Gate, ground: &HeightGrid, from: Vec3, to: Vec3) -> (Vec3, Vec3) {
+pub fn beside(gate: &Gate, ground: &HeightGrid, from: Vec3, to: Vec3) -> (Vec3, Vec3) {
     if !ground.repeats() {
         return (from, to);
     }
@@ -50,6 +49,7 @@ mod tests {
     use std::f32::consts::FRAC_PI_2;
 
     use super::*;
+    use bevy::math::Vec2;
 
     /// At (100, 50) on the ground plane, 20 m wide, driven through towards -Z.
     fn gate() -> Gate {

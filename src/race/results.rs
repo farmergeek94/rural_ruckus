@@ -10,9 +10,8 @@
 use bevy::prelude::*;
 
 use super::hud::format_time;
-use super::progress::standings;
 use super::rumble::{RumbleScore, RumbleSession, points_text};
-use super::{RaceSettings, Racer};
+use super::{RaceSettings, Racer, standings};
 use crate::game_state::GameState;
 use crate::track::Track;
 use crate::truck::{PlayerTruck, TruckName};

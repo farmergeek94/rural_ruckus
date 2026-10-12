@@ -239,7 +239,16 @@ fn drive_the_course(
         return;
     };
     let (transform, velocity, config, input) = *truck;
-    let (wanted, now) = lead_driver(course, *along, transform, velocity.0, config);
+    let forward = transform.forward().xz().normalize_or_zero();
+    let speed = velocity.0.dot(transform.forward().as_vec3());
+    let (wanted, now) = lead_driver(
+        course,
+        *along,
+        transform.translation.xz(),
+        forward,
+        speed,
+        config,
+    );
     *along = now;
 
     // The arrow keys, which drive whatever the player has bound (see `keys`).

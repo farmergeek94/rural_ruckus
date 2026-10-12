@@ -40,13 +40,17 @@ use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 use rumble::{Limits, Me, Mode, NavField, NavParams, Rival, Waypoint};
 
+// How a driver works the controls, and when it has got somewhere, are the circuit's, and
+// the same in a rumble.
+use ::circuit::{FULL_LOCK_ANGLE, PROGRESS, throttle_for};
+
 use super::{
-    AIRBORNE, Controls, Difficulty, Driving, FULL_LOCK_ANGLE, OpponentsSettings, PROGRESS,
-    REVERSING, Recovery, SETTLE, Watching, throttle_for,
+    AIRBORNE, ComputerDriver, Controls, Difficulty, Driving, OpponentsSettings, REVERSING,
+    Recovery, SETTLE, Watching,
 };
 use crate::collision_groups::GROUND;
 use crate::game_state::GameState;
-use crate::race::{RumbleScore, RumbleSession};
+use crate::race::{BackToCheckpoint, RaceSystems, Racer, RumbleScore, RumbleSession, is_rumble};
 use crate::track::{Track, TrackSystems};
 use crate::truck::{PlayerTruck, TruckInput};
 
@@ -237,7 +241,6 @@ fn skill(difficulty: Difficulty) -> Skill {
 /// Works the field out for a rumble track, once a race.
 pub(super) fn prepare_rumble(mut commands: Commands, track: Res<Track>) {
     let Some(zones) = &track.rumble else {
-        commands.remove_resource::<RumbleNav>();
         return;
     };
     let centre = zones.scoring.center;
@@ -273,15 +276,43 @@ pub(super) fn forget_rumble(mut commands: Commands) {
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         OnEnter(GameState::Racing),
-        prepare_rumble.after(TrackSystems::Prepare),
+        prepare_rumble
+            .after(TrackSystems::Prepare)
+            .run_if(is_rumble),
     )
     .add_systems(OnExit(GameState::Racing), forget_rumble)
+    .add_systems(
+        Update,
+        // So that the race sees the request in the same frame.
+        ask_to_be_put_back
+            .before(RaceSystems::BackToCheckpoint)
+            .run_if(in_state(GameState::Racing))
+            .run_if(is_rumble),
+    )
     .add_systems(
         FixedUpdate,
         drive_rumble
             .run_if(in_state(GameState::Racing))
             .run_if(resource_exists::<RumbleNav>),
     );
+}
+
+/// In `Update`, where the race puts trucks back: a driver that is stuck, which with no
+/// checkpoint to go back to is put on the grid. A driver on the summit is never stuck
+/// (`drive_rumble`): put back from up there would cost it a fall.
+fn ask_to_be_put_back(
+    mut drivers: Query<(Entity, &mut ComputerDriver, Option<&Name>), With<Racer>>,
+    mut back: MessageWriter<BackToCheckpoint>,
+) {
+    for (truck, mut driver, name) in &mut drivers {
+        if driver.is_stuck() {
+            info!(
+                "{}: back to the grid, having got stuck",
+                name.map_or("A computer truck", |name| name.as_str()),
+            );
+            super::put_back(&mut back, truck, &mut driver);
+        }
+    }
 }
 
 /// A truck as every driver sees it this step, taken before any of them is driven.
@@ -303,7 +334,7 @@ pub(super) fn drive_rumble(
     session: Option<Res<RumbleSession>>,
     spatial: SpatialQuery,
     mut drivers: Query<Driving>,
-    player: Query<Watching, (With<PlayerTruck>, Without<super::ComputerDriver>)>,
+    player: Query<Watching, (With<PlayerTruck>, Without<ComputerDriver>)>,
     scores: Query<&RumbleScore>,
 ) {
     let Some(zones) = &track.rumble else {

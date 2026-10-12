@@ -1,0 +1,12 @@
+[package]
+name = "ruckus_circuit"
+version = "0.1.0"
+edition = "2024"
+description = "The rules of a lap race round a circuit and the mind of a computer truck on its course in one, as plain data and pure functions over the content model"
+
+[dependencies]
+# The content model the race is run on: the course, the checkpoint gates, the ground and
+# the scenery.
+content = { package = "ruckus_content", path = "../content" }
+# For its vectors alone, as `content` uses them. No default features: no engine.
+bevy = { version = "0.19", default-features = false }

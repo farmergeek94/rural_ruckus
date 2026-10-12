@@ -1,13 +1,10 @@
-//! The systems that run the race: following each truck's progress, and the keys that
-//! put a truck back on the course.
+//! The systems that run whichever race it is: the clock, the starting grid, and the keys
+//! that put a truck back on the course and race again.
 
 use bevy::prelude::*;
 
-use super::along::GatesAlong;
-use super::gate;
 use super::pause::running;
-use super::rumble::RumbleScore;
-use super::{RaceClock, RacePause, RaceSettings, Racer};
+use super::{RaceClock, RacePause, Racer};
 use crate::game_state::GameState;
 use crate::keys::{Control, KeyBindings};
 use crate::track::{Track, TrackData, yaw_direction};
@@ -16,11 +13,6 @@ use crate::truck::{PlaceTruck, PlayerTruck, RepeatingWorld, Truck};
 /// Every race starts from nothing. Each `Racer` does too, being part of a new truck.
 pub(super) fn reset_clock(mut clock: ResMut<RaceClock>) {
     clock.tick = 0;
-}
-
-/// Where the gates of the race's track are along its course.
-pub(super) fn find_gates_along(mut commands: Commands, track: Res<Track>) {
-    commands.insert_resource(GatesAlong::new(&track));
 }
 
 /// Where the track's ground repeats, so does the world the trucks race in: one that goes
@@ -32,30 +24,6 @@ pub(super) fn tell_trucks_of_the_world(track: Res<Track>, mut world: ResMut<Repe
 
 pub(super) fn tick_clock(mut clock: ResMut<RaceClock>) {
     clock.tick += 1;
-}
-
-pub(super) fn track_progress(
-    clock: Res<RaceClock>,
-    settings: Res<RaceSettings>,
-    track: Res<Track>,
-    gates_along: Res<GatesAlong>,
-    mut racers: Query<(&Transform, &mut Racer)>,
-) {
-    for (transform, mut racer) in &mut racers {
-        let position = transform.translation;
-        if let Some(last_position) = racer.last_position {
-            let (from, to) = match track.gates.get(racer.progress.next_gate) {
-                Some(gate) => gate::beside(gate, &track.heights, last_position, position),
-                None => (last_position, position),
-            };
-            racer
-                .progress
-                .advance(&track.gates, settings.laps, from, to, clock.tick);
-        }
-        racer.last_position = Some(position);
-        racer.to_next_gate =
-            gates_along.to_next_gate(&track, racer.progress.next_gate, position.xz());
-    }
 }
 
 /// Every truck takes part: make it a racer and put it on the starting grid. The player
@@ -76,15 +44,10 @@ pub(super) fn enlist_trucks(
     let taken = racers.iter().count();
     for (index, &(_, truck)) in trucks.iter().enumerate() {
         let grid_place = taken + index;
-        let mut racer = commands.entity(truck);
-        racer.insert(Racer {
+        commands.entity(truck).insert(Racer {
             grid_place,
             ..default()
         });
-        // In a rumble, a score to go with it.
-        if track.rumble.is_some() {
-            racer.insert(RumbleScore::default());
-        }
         place.write(on_grid(truck, grid_place, &track));
     }
 }

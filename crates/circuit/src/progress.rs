@@ -2,10 +2,10 @@
 //!
 //! Time is counted in physics ticks, so lap times don't depend on the frame rate.
 
-use bevy::prelude::*;
+use bevy::math::Vec3;
+use content::track::Gate;
 
-use super::gate::crossed;
-use crate::track::Gate;
+use crate::gate::crossed;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RaceProgress {
@@ -169,6 +169,7 @@ pub fn standings(racers: &[(&RaceProgress, f32)], gate_count: usize) -> Vec<usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::math::Vec2;
 
     /// Three gates along a line heading -Z, at z = 0, -100 and -200. Not a real loop,
     /// but progress only cares about the order gates are crossed in.
