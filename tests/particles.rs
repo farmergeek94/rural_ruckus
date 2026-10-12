@@ -4,7 +4,7 @@
 //! How the dirt and the spray look is checked by driving (see AGENTS.md).
 
 use bevy::prelude::*;
-use monster_truck_rural_ruckus::particles::{Dirt, ParticlesPlugin};
+use monster_truck_rural_ruckus::particles::{Dirt, ParticlesPlugin, Sparks, TireMarks};
 use monster_truck_rural_ruckus::physics::GamePhysicsPlugin;
 use monster_truck_rural_ruckus::track::{Track, TrackPlugin, builtin_track};
 use monster_truck_rural_ruckus::truck::TruckPlugin;
@@ -32,4 +32,8 @@ fn a_headless_app_races_with_no_dirt() {
     }
     let dirt = app.world_mut().query::<&Dirt>().iter(app.world()).count();
     assert_eq!(dirt, 0);
+    let sparks = app.world_mut().query::<&Sparks>().iter(app.world()).count();
+    assert_eq!(sparks, 0);
+    let marks = app.world_mut().query::<&TireMarks>().iter(app.world()).count();
+    assert_eq!(marks, 0);
 }

@@ -65,7 +65,7 @@ use crate::environment::{EnvironmentSettings, Lighting};
 use crate::game_state::GameState;
 use crate::keys::{BINDABLE, Control, KeyBindings};
 use crate::opponents::{Difficulty, OpponentsSettings};
-use crate::particles::DirtSettings;
+use crate::particles::{DirtSettings, SparkSettings, TireMarkSettings};
 use crate::physics::PhysicsSettings;
 use crate::race::{RaceCancelled, RacePause, RaceSettings};
 use crate::sound::SoundSettings;
@@ -189,6 +189,8 @@ impl Plugin for FrontEndPlugin {
             .init_resource::<TruckLooksSettings>()
             .init_resource::<WaterSettings>()
             .init_resource::<DirtSettings>()
+            .init_resource::<SparkSettings>()
+            .init_resource::<TireMarkSettings>()
             .init_resource::<BackdropSettings>()
             .init_resource::<WeatherSettings>()
             .init_resource::<PhysicsSettings>()
@@ -789,6 +791,8 @@ struct Options {
     truck_looks: TruckLooksSettings,
     water: WaterSettings,
     dirt: DirtSettings,
+    sparks: SparkSettings,
+    tire_marks: TireMarkSettings,
     backdrop: BackdropSettings,
     weather: WeatherSettings,
     physics: PhysicsSettings,
@@ -810,6 +814,8 @@ impl Options {
             truck_looks: default(),
             water: default(),
             dirt: default(),
+            sparks: default(),
+            tire_marks: default(),
             backdrop: default(),
             weather: default(),
             physics: default(),
@@ -830,6 +836,8 @@ impl Options {
             truck_looks: *world.resource(),
             water: *world.resource(),
             dirt: *world.resource(),
+            sparks: *world.resource(),
+            tire_marks: *world.resource(),
             backdrop: *world.resource(),
             weather: *world.resource(),
             physics: *world.resource(),
@@ -849,6 +857,8 @@ impl Options {
         world.insert_resource(self.truck_looks);
         world.insert_resource(self.water);
         world.insert_resource(self.dirt);
+        world.insert_resource(self.sparks);
+        world.insert_resource(self.tire_marks);
         world.insert_resource(self.backdrop);
         world.insert_resource(self.weather);
         world.insert_resource(self.physics);
@@ -870,6 +880,8 @@ struct OptionResources<'w> {
     truck_looks: ResMut<'w, TruckLooksSettings>,
     water: ResMut<'w, WaterSettings>,
     dirt: ResMut<'w, DirtSettings>,
+    sparks: ResMut<'w, SparkSettings>,
+    tire_marks: ResMut<'w, TireMarkSettings>,
     backdrop: ResMut<'w, BackdropSettings>,
     weather: ResMut<'w, WeatherSettings>,
     physics: ResMut<'w, PhysicsSettings>,
@@ -890,6 +902,8 @@ impl OptionResources<'_> {
             truck_looks: *self.truck_looks,
             water: *self.water,
             dirt: *self.dirt,
+            sparks: *self.sparks,
+            tire_marks: *self.tire_marks,
             backdrop: *self.backdrop,
             weather: *self.weather,
             physics: *self.physics,
@@ -910,6 +924,8 @@ impl OptionResources<'_> {
         self.truck_looks.set_if_neq(options.truck_looks);
         self.water.set_if_neq(options.water);
         self.dirt.set_if_neq(options.dirt);
+        self.sparks.set_if_neq(options.sparks);
+        self.tire_marks.set_if_neq(options.tire_marks);
         self.backdrop.set_if_neq(options.backdrop);
         self.weather.set_if_neq(options.weather);
         self.physics.set_if_neq(options.physics);
@@ -1245,6 +1261,24 @@ const OPTIONS: &[OptionLine] = &[
         values: &["Off", "On"],
         get: |options| options.dirt.on as usize,
         set: |options, value| options.dirt.on = value == 1,
+    },
+    OptionLine {
+        key: "option.tire_marks",
+        section: GRAPHICS,
+        label: "Tire tracks",
+        detail: "The tracks that tires press into dirt, sand, grass and snow.",
+        values: &["Off", "On"],
+        get: |options| options.tire_marks.on as usize,
+        set: |options, value| options.tire_marks.on = value == 1,
+    },
+    OptionLine {
+        key: "option.sparks",
+        section: GRAPHICS,
+        label: "Sparks",
+        detail: "The sparks that fly where a truck's body scrapes or hits something hard.",
+        values: &["Off", "On"],
+        get: |options| options.sparks.on as usize,
+        set: |options, value| options.sparks.on = value == 1,
     },
     OptionLine {
         key: "option.camera",

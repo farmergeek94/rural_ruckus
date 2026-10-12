@@ -106,9 +106,13 @@ pub fn add(app: &mut App) {
     }
 }
 
-/// Makes every pool as bright as `level` says, from 0 (black) to 1 (their own colours, as
-/// in full daylight). Only a real change is sent.
-pub fn light(level: f32, pools: &Query<&Particles>, materials: &mut Assets<ParticleMaterial>) {
+/// Makes each of `pools` as bright as `level` says, from 0 (black) to 1 (their own
+/// colours, as in full daylight). Only a real change is sent.
+pub fn light<'a>(
+    level: f32,
+    pools: impl IntoIterator<Item = &'a Particles>,
+    materials: &mut Assets<ParticleMaterial>,
+) {
     let level = level.clamp(0.0, 1.0);
     let color = Color::linear_rgb(level, level, level);
     for pool in pools {
@@ -355,16 +359,17 @@ impl Slot {
 }
 
 /// Writes of slots to a pool's buffer: in the main world, those of this frame, which the
-/// render world takes at extraction and writes to the graphics card.
+/// render world takes at extraction and writes to the graphics card. The ribbons
+/// (`ribbon`) write theirs here too.
 #[derive(Resource, Default)]
-pub(super) struct Uploads(Vec<Upload>);
+pub(super) struct Uploads(pub(super) Vec<Upload>);
 
 /// A run of neighbouring slots, written as one.
-struct Upload {
-    buffer: AssetId<ShaderBuffer>,
+pub(super) struct Upload {
+    pub(super) buffer: AssetId<ShaderBuffer>,
     /// Where the first slot starts in the buffer, in bytes.
-    offset: u64,
-    bytes: Vec<u8>,
+    pub(super) offset: u64,
+    pub(super) bytes: Vec<u8>,
 }
 
 impl MaterialExtension for ParticleMotion {
