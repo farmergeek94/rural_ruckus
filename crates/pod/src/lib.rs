@@ -18,7 +18,8 @@
 //!
 //! A track or truck names files that are only in the base game's archives: `BaseGame`
 //! holds those archives on disk, and reads each one when a file in it is first asked
-//! for. `archives_in` lists the archives in a folder.
+//! for. `archives_listed` lists the archives a game folder's `POD.INI` says to load, and
+//! `archives_in` the archives in a folder.
 //!
 //! Nothing here knows the game: no entities, no engine types, only the content model.
 
@@ -28,7 +29,7 @@ pub mod sound;
 pub mod track;
 pub mod truck;
 
-pub use base_game::{BaseGame, archives_in};
+pub use base_game::{BaseGame, POD_INI, archives_in, archives_listed, parse_pod_ini, pod_ini_in};
 
 use std::collections::BTreeMap;
 

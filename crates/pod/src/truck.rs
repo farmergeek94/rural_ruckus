@@ -26,8 +26,8 @@ use crate::base_game::BaseGame;
 use crate::hd_decode;
 
 use content::truck::{
-    AxleLink, AxleLinks, Beam, CHASSIS_HALF_EXTENTS, Dashboard, DashboardPicture, Dial, NormalMap,
-    SteeringWheel, TruckConfig, TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel,
+    AxleLink, AxleLinks, Beam, CHASSIS_HALF_EXTENTS, Dashboard, DashboardPicture, Dial, LitWhen,
+    NormalMap, SteeringWheel, TruckConfig, TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel,
     TruckTexture, TruckTextureCycle, headlight_beam, headlight_facing, lamps_for_body,
 };
 
@@ -346,6 +346,21 @@ fn dashboard_picture(picture: &crate::CockpitPicture) -> DashboardPicture {
 /// The type of a truck file's light that its headlights have: forwards, `HEADLITE`, a
 /// beam. What the types mean is **open**; this one is by how its lamps look.
 const HEADLIGHT_KIND: i32 = 0;
+/// The types of its brake lights and its reversing lights, by their pictures (**measured**:
+/// every type 1 light has a brake-light picture, `BRLT*`, and every type 5 light the
+/// reversing one, `BRLTRV`; see `docs/formats/truck.md`). The game lights them with the
+/// brakes and with reverse gear; whether MTM2 did is **open**.
+const BRAKE_LIGHT_KIND: i32 = 1;
+const REVERSING_LIGHT_KIND: i32 = 5;
+
+/// What lights a truck file's light of type `kind`.
+fn lit_when(kind: i32) -> LitWhen {
+    match kind {
+        BRAKE_LIGHT_KIND => LitWhen::Braking,
+        REVERSING_LIGHT_KIND => LitWhen::Reversing,
+        _ => LitWhen::Dark,
+    }
+}
 
 /// Makes sure the truck has headlights that light the road, which every truck has in the
 /// game. A truck whose lamps have no beam at all gets the base game's usual headlight beam
@@ -426,6 +441,7 @@ fn lamp(light: &crate::TruckLight, truck: &crate::Truck, textures: &mut Textures
         color,
         beam,
         blink: (on > 0 && off > 0).then(|| [on as f32 / 1000.0, off as f32 / 1000.0]),
+        lit_when: lit_when(light.kind),
     }
 }
 
@@ -1116,6 +1132,15 @@ mod tests {
         let mut lit = none.clone();
         light_the_road(&mut lit, &[0, 0], &body);
         assert_eq!(lit, none);
+    }
+
+    #[test]
+    fn brake_and_reversing_lights_are_told_by_their_type() {
+        assert_eq!(lit_when(1), LitWhen::Braking);
+        assert_eq!(lit_when(5), LitWhen::Reversing);
+        for kind in [0, 3, 4] {
+            assert_eq!(lit_when(kind), LitWhen::Dark);
+        }
     }
 
     /// A picture of palette indices, and a palette where index `i` is grey `i`.

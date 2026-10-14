@@ -43,9 +43,10 @@ fn main() {
     // hills a track draws round its horizon, and `--no-decorations` the scenery that trucks
     // drive through. `--no-settle-scenery` stands each object as the track puts it, though
     // its foot floats over a slope. `--flat-water` draws the water as a plain flat plane,
-    // and `--no-water-reflections` mirrors only the sky in it. `--base-game=FOLDER` looks for the base game's
-    // archives, which tracks and trucks borrow from, in FOLDER and its subfolders, in place
-    // of the Shared and language folders chosen in the front end (or `base/`, if none was);
+    // and `--no-water-reflections` mirrors only the sky in it. `--base-game=FOLDER` loads the base game's
+    // archives, which tracks and trucks borrow from, and the add-ons installed with them,
+    // as FOLDER's POD.INI lists them (every archive in FOLDER and its subfolders, without
+    // one), in place of the game folder chosen in the front end (or `base/`, if none was);
     // it may be given more than once.
     // In the front end, what was set on its options screen is set again over these.
     let mut settings = track::TrackSettings::default();
@@ -96,8 +97,8 @@ fn main() {
         base_folders.push(base_game::DEFAULT_FOLDER.into());
     }
     let base = base_game::BaseGame::open(&base_folders);
-    // The front end asks for the Shared and the language folder until the player has chosen
-    // both. One that has gone, such as a CD that is not in, is asked for again.
+    // The front end asks for the game's folder until the player has chosen one. One that has
+    // gone, such as a CD that is not in, is asked for again.
     let ask_for_base_game = !base_named && !remembered.is_complete();
     if base.archive_count() == 0 {
         eprintln!(

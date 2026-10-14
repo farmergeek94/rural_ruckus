@@ -42,10 +42,15 @@ Put your files in these folders. Git ignores all three.
 | --- | --- |
 | `tracks/` | Track archives (`.pod`) |
 | `trucks/` | Truck archives (`.pod`) |
-| `base/` | The base game's archives, or links to the `Shared` and `English` folders of your MTM2 CD |
+| `base/` | Links to the `Shared` and `English` folders of your MTM2 CD, if MTM2 is not installed |
 
-Tracks and trucks borrow textures and models from the base game's archives. To link the
-CD folders:
+Tracks and trucks borrow textures and models from the base game's archives. The first
+time it opens, the game asks for the folder where Monster Truck Madness 2 is installed,
+and loads the archives that its `POD.INI` names: the base game's, and every track or
+truck you added to `POD.INI` the way MTM2's README says. You can change the folder at
+OPTIONS > FILES.
+
+Without an installed game, link the CD folders instead:
 
 ```sh
 mkdir -p base
@@ -53,8 +58,7 @@ ln -s "/media/<you>/MTM2/Shared"  base/Shared
 ln -s "/media/<you>/MTM2/English" base/English
 ```
 
-You can also choose these folders in the game, at OPTIONS > FILES. Without the base game
-the game still runs, but borrowed parts show as plain grey shapes.
+Without the base game the game still runs, but borrowed parts show as plain grey shapes.
 
 ## 3. Start the game
 

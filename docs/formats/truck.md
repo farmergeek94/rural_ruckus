@@ -179,11 +179,19 @@ file counts reads.
   MTM2 presumably drew the beam as a textured cone. The game draws each lamp's picture as
   a glow that adds to what is behind it, and each beam as a spot light as long and wide
   as its cone, coloured by the beam texture's mean colour (`crates/pod/src/truck.rs`).
-- **Types**, by what the lamps of each look like (not proved): 0 headlights (forward, a
-  75 ft beam, `HEADLITE`), 1 brake lights (backwards, red, no beam), 3 roof lights
-  (forward, a 40 ft beam), 4 beacons that turn or blink, 5 reversing lights (`BRLTRV`).
-  Whether MTM2 lights brake lights only when braking and reversing lights only when
-  reversing is **open**; the game lights them all when it is dark.
+- **Types**, by what the lamps of each look like: 0 headlights (forward, a 75 ft beam,
+  `HEADLITE`), 1 brake lights, 3 roof lights (forward, a 40 ft beam), 4 beacons that turn
+  or blink, 5 reversing lights. **Measured** on 2026-10-12, on the 172 lights of the 33
+  truck files of the user's archives, the base game's `TRUCK2.POD` and the Community
+  Patch's `GAME.POD`: every one of the 65 type 1 lights faces backwards (headings 2.88 to
+  3.40) with no beam and a brake-light picture (`BRLTFORD`, `BRLTCHEV`, `BRLTDODG`,
+  `BRLTROUN`, `BRLTTCAB` for the one high in the cab's rear window, `BRAKLITE`,
+  `MAXDTAIL`), and every one of the 44 type 5 lights the same way with `BRLTRV`
+  (brake-light-reverse). Whether MTM2 lights brake lights only when braking and reversing
+  lights only when reversing is **open**. The game lights a brake light with the brakes,
+  in any light, and dimly in the dark as a tail light, and a reversing light in reverse
+  gear (`LitWhen` in `crates/content`, `src/truck/lamps.rs`); the other types shine when
+  it is dark.
 - **Trucks without beams** (**measured**): 8 of the 12 community trucks examined have no
   lights, and Maximum Destruction's two headlights (type 0) have a beam of length 0 and a
   picture only 0.28 ft across. Its rear lamps have pitches of 0.6 and 1.1. The game gives
@@ -197,6 +205,6 @@ file counts reads.
   and `Slingshot.pod` carry a `BLACK.ACT` of 769 bytes, not 768. Whether MTM2 does that
   for a palette it cannot read is **open**.
 - Sounds.
-- What each light type means, when each shines, and which way pitch goes.
+- When each light type shines in MTM2, and which way pitch goes.
 - Whether pure black is a hole in a truck's cutout faces (type 51) as it is in a track's.
   It is treated the same way.

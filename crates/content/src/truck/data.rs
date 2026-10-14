@@ -22,7 +22,8 @@ pub struct TruckData {
     /// Red, green and blue of the built-in box, which is the body of a truck that brings
     /// none. Changing it tells trucks that look alike apart.
     pub body_color: [u8; 3],
-    /// The lamps on the body, which shine when `TruckLamps` says it is dark.
+    /// The lamps on the body: each shines when `TruckLamps` says it is dark, or when the
+    /// truck brakes or reverses (`TruckLamp::lit_when`).
     pub lamps: Vec<TruckLamp>,
     /// What the driver sees round the road from the cockpit. `None` shows the road alone.
     /// Shared, since its pictures are large and every truck of a kind has the same.
@@ -104,6 +105,19 @@ pub struct TruckLamp {
     pub beam: Option<Beam>,
     /// For a lamp that blinks: how long it is on, then off, in seconds.
     pub blink: Option<[f32; 2]>,
+    /// What lights it.
+    pub lit_when: LitWhen,
+}
+
+/// What lights a lamp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LitWhen {
+    /// The dark: a headlight, a roof light or a beacon.
+    Dark,
+    /// The brakes, in any light. In the dark it also shines dimly, as a tail light.
+    Braking,
+    /// Reverse gear, in any light.
+    Reversing,
 }
 
 /// The light a lamp throws.
@@ -172,8 +186,8 @@ pub fn headlight_facing() -> Vec3 {
 
 /// The game's own lamps for a body that reaches from `min` to `max` (in the truck's own
 /// axes, the front towards -Z): two white headlights with beams on its front, a little in
-/// from its sides and a little over halfway up, and two red lamps on its back. For a truck
-/// that brings none.
+/// from its sides and a little over halfway up, and two red brake lamps on its back. For a
+/// truck that brings none.
 pub fn lamps_for_body(min: Vec3, max: Vec3) -> (Vec<TruckLamp>, Vec<TruckLamp>) {
     let across = (max.x - min.x) / 2.0;
     let middle = (max.x + min.x) / 2.0;
@@ -187,6 +201,7 @@ pub fn lamps_for_body(min: Vec3, max: Vec3) -> (Vec<TruckLamp>, Vec<TruckLamp>) 
         color: [1.0, 1.0, 1.0],
         beam: Some(headlight_beam()),
         blink: None,
+        lit_when: LitWhen::Dark,
     };
     let tail = |side: f32| TruckLamp {
         position: Vec3::new(middle + side * across * 0.8, height(0.6), max.z),
@@ -194,6 +209,7 @@ pub fn lamps_for_body(min: Vec3, max: Vec3) -> (Vec<TruckLamp>, Vec<TruckLamp>) 
         glow_radius: 0.15,
         color: [1.0, 0.0, 0.0],
         beam: None,
+        lit_when: LitWhen::Braking,
         ..head(side)
     };
     (vec![head(-1.0), head(1.0)], vec![tail(-1.0), tail(1.0)])

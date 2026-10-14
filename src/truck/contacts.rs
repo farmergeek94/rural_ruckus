@@ -89,7 +89,23 @@
 //!
 //! A tire with its springs shut pushes straight up off the ground (`stand_it_up`), not
 //! back along it: where the ground rises ahead of such a tire, a solid tire pushed back
-//! along the slope was stopped as a wheel is by a kerb.
+//! along the slope was stopped as a wheel is by a kerb. Any tire pushes straight up off a
+//! step of scenery or of a ground box that touches it nowhere higher than the sweep would
+//! stand the tire on it (`drive::UNDER`, `step_under`): a log, a kerb, the end of a
+//! crushed car, which the sweep lifts the tire over while the springs have room, and
+//! which the collider met as a wall once they had none, since the sweep can lift a hub no
+//! further than the top of its travel and the body takes time to follow; or before the
+//! sweep had seen it, since a sweep stops at the first thing it meets, and the top of a
+//! low step is under what the tire stands on until the tire is well onto it. Measured on
+//! Mud Pies with Max-D on the diagnostics autopilot, a front tire pressed to its bump
+//! stop by a whoop stopped the truck from 27 m/s to 4 in one step (315 g) on the side of
+//! a 0.3 m log, and from 40 m/s to 6 (454 g) on the end of a crushed car 0.16 m above the
+//! ramp it had just climbed; on flat ground the same log cost 1 g. Pushed up instead, the
+//! log costs under 5 g there too, and the car's end 10 g, as much as the ramp before it.
+//! Ground-box walls of 1 to 3 m stop and are climbed as before (`examples/wall_probe.rs`),
+//! and the step costs the physics nothing that can be measured: 2.40 against 2.46 ms a
+//! step with eight trucks, within the run-to-run noise. A wall touches the tire out at
+//! its hub, and is still met as a wall.
 //!
 //! `physics::GamePhysicsPlugin` runs `decide_tire_contacts`. An app that sets up the
 //! physics without it keeps every contact as the physics makes it, and its trucks stand
@@ -299,13 +315,6 @@ impl TireContacts<'_, '_> {
             .is_ok_and(|(_, _, wheel)| wheel.bottomed)
     }
 
-    /// Whether this collider is the ground: the terrain or the ground boxes.
-    fn is_ground(&self, collider: Entity) -> bool {
-        self.layers
-            .get(collider)
-            .is_ok_and(|layers| layers.memberships.has_all(GROUND))
-    }
-
     /// Whether this collider is the terrain: the ground, and not the ground boxes.
     fn is_terrain(&self, collider: Entity) -> bool {
         self.layers.get(collider).is_ok_and(|layers| {
@@ -313,14 +322,61 @@ impl TireContacts<'_, '_> {
         })
     }
 
-    /// Whether this collider is the ground boxes, and pushes a tire this way, in the world,
-    /// with an upright side: a wall, where the rest of the ground is a floor or a slope.
-    fn is_box_wall(&self, collider: Entity, pushed: Vec3) -> bool {
-        pushed.y.abs() <= UPWARD
-            && self
-                .layers
-                .get(collider)
-                .is_ok_and(|layers| layers.memberships.has_all(GROUND_BOXES))
+    /// Whether a pair of colliders is a wheel collider and a step under its tire: scenery
+    /// or a ground box, which touches the tire nowhere higher than the sweep would stand
+    /// the tire on it (`drive::UNDER`), judged over every manifold of the pair, and in the
+    /// world: how far below the hub each touch is as the truck stands, whichever way it is
+    /// pitched. The side of such a step is pushed up off, not back along (see the module's
+    /// notes). A wall, the side of a ground box or of a building, touches the tire out at
+    /// its hub, and is met as it is: in the wheel's own frame instead, a 2 m wall that a
+    /// truck had climbed to a pitch of 40 degrees touched its tires from under, and the
+    /// climb stopped there; and a log met nose down at 38 degrees, landing off a whoop,
+    /// touched them from ahead, and stopped the truck at 262 g. So is the side of
+    /// something taller than the sweep would stand on, a crushed car met from the
+    /// ground, although its lower faces touch the tire from under: pushed up off those by
+    /// a rule that judged each face alone, while its upper faces held it, Max-D was
+    /// thrown over the car at 15 m/s. The terrain the sweep stands on wherever it holds
+    /// the tire up, and another truck or light loose scenery the tire meets as they are.
+    /// Says which of the two is the wheel.
+    fn step_under(
+        &self,
+        first: Entity,
+        second: Entity,
+        manifolds: &[ContactManifold],
+    ) -> Option<Entity> {
+        let (wheel, other, wheel_first) = if self.wheels.contains(first) {
+            (first, second, true)
+        } else if self.wheels.contains(second) {
+            (second, first, false)
+        } else {
+            return None;
+        };
+        if self.is_terrain(other) || self.is_truck_part(other) || self.is_loose(other) {
+            return None;
+        }
+        let (wheel_at, child_of, _) = self.wheels.get(wheel).ok()?;
+        let (_, rotation, _, _, centre) = self.trucks.get(child_of.0).ok()?;
+        let config = self.configs.get(child_of.0).ok()?;
+        // The hub from the truck's centre of mass, in the world, as the points are given.
+        let hub = rotation.0 * (wheel_at.translation - centre.0);
+        let low = UNDER * config.wheel_radius;
+        let mut touched = false;
+        for manifold in manifolds {
+            let normal = manifold.normal;
+            for point in &manifold.points {
+                // On the wheel's surface (see `keep`).
+                let touch = if wheel_first {
+                    point.anchor1 + normal * point.penetration / 2.0
+                } else {
+                    point.anchor2 - normal * point.penetration / 2.0
+                };
+                if hub.y - touch.y < low {
+                    return None;
+                }
+                touched = true;
+            }
+        }
+        touched.then_some(wheel)
     }
 
     /// Whether `ground` is the terrain and `part` a wheel collider or core that it pushes
@@ -405,13 +461,13 @@ impl TireContacts<'_, '_> {
         let rolling = -sign * relative.dot(along);
         let mut push = rolls
             * asked_of_the_tread(
-            rolling,
-            state.throttle,
-            state.engine_force,
-            state.brakes_on,
-            config,
-            self.time.delta_secs(),
-        );
+                rolling,
+                state.throttle,
+                state.engine_force,
+                state.brakes_on,
+                config,
+                self.time.delta_secs(),
+            );
         // Climbing, only until the truck rises at `CLIMB_SPEED`, and less the further its
         // nose is up (`CLIMB_PITCH_FULL`).
         if -along.y * push > 0.0 {
@@ -419,7 +475,11 @@ impl TireContacts<'_, '_> {
             let pitch = (rotation.0 * Vec3::NEG_Z).y.clamp(-1.0, 1.0).asin() * push.signum();
             let fade = ((CLIMB_PITCH_NONE - pitch) / (CLIMB_PITCH_NONE - CLIMB_PITCH_FULL))
                 .clamp(0.0, 1.0);
-            push = if rising > CLIMB_SPEED { 0.0 } else { push * fade };
+            push = if rising > CLIMB_SPEED {
+                0.0
+            } else {
+                push * fade
+            };
         }
         Some(Tread {
             along,
@@ -445,7 +505,10 @@ impl TireContacts<'_, '_> {
         let mut treads = [(first, true), (second, false)]
             .into_iter()
             .filter_map(|(collider, is_first)| {
-                Some((self.tread(collider, point, normal, depth, relative, is_first)?, is_first))
+                Some((
+                    self.tread(collider, point, normal, depth, relative, is_first)?,
+                    is_first,
+                ))
             })
             .collect::<Vec<_>>();
         if treads.is_empty() {
@@ -455,7 +518,9 @@ impl TireContacts<'_, '_> {
         // normal points out of the first, so the first goes into the second along it.
         if let [(rider, _), (other, _)] = treads.as_mut_slice() {
             let first_into = self.moving_at(first, point).map_or(0.0, |v| v.dot(normal));
-            let second_into = self.moving_at(second, point).map_or(0.0, |v| -v.dot(normal));
+            let second_into = self
+                .moving_at(second, point)
+                .map_or(0.0, |v| -v.dot(normal));
             if rides_up(first_into, second_into) {
                 other.push = 0.0;
             } else {
@@ -510,7 +575,10 @@ impl TireContacts<'_, '_> {
     /// The bounce goes by how fast the two meet along the normal, which the physics worked
     /// out along the old one, so that is worked out again.
     fn stand_it_up(&self, wheel: Entity, wheel_first: bool, manifold: &mut ContactManifold) {
-        manifold.normal = Vec3::Y * manifold.normal.y.signum();
+        // The normal points out of the first collider, which is pushed against it: the
+        // wheel is pushed up along -Y as the first, and along +Y as the second. Not the
+        // old normal's sign: the side of a step pushes level, with no sign to it.
+        manifold.normal = if wheel_first { Vec3::NEG_Y } else { Vec3::Y };
         let normal = manifold.normal;
         for point in &mut manifold.points {
             let Some(moving) = self.moving_at(wheel, point.point) else {
@@ -544,7 +612,11 @@ fn tread_frame(axle: Vec3, from_hub: Vec3, normal: Vec3) -> Option<(Vec3, Vec3)>
 /// with whether it is the first collider's. The physics lets the first collider's surface
 /// slide along the second's at this velocity without friction (see `tests/physics.rs`), so
 /// this is what friction brings the two to, if the push on the contact allows.
-fn target_sliding(relative: Vec3, normal: Vec3, treads: impl Iterator<Item = (Tread, bool)>) -> Vec3 {
+fn target_sliding(
+    relative: Vec3,
+    normal: Vec3,
+    treads: impl Iterator<Item = (Tread, bool)>,
+) -> Vec3 {
     let mut target = relative.reject_from_normalized(normal);
     for (tread, is_first) in treads {
         target -= tread.across * target.dot(tread.across);
@@ -577,16 +649,24 @@ impl TireContacts<'_, '_> {
     /// gives it nothing to do.
     fn modify(&self, contacts: &mut ContactPair) {
         let (first, second) = (contacts.collider1, contacts.collider2);
+        let step_under = self.step_under(first, second, &contacts.manifolds);
         for manifold in &mut contacts.manifolds {
-            if !self.keep(first, second, manifold) {
+            if !self.keep(first, second, step_under, manifold) {
                 manifold.points.clear();
             }
         }
     }
 
     /// Whether the physics is to solve this manifold between `first` and `second`, which it
-    /// may first have changed.
-    fn keep(&self, first: Entity, second: Entity, manifold: &mut ContactManifold) -> bool {
+    /// may first have changed. `step_under` is the wheel of the pair whose tire the other
+    /// is a step under, if it is one (see `step_under`).
+    fn keep(
+        &self,
+        first: Entity,
+        second: Entity,
+        step_under: Option<Entity>,
+        manifold: &mut ContactManifold,
+    ) -> bool {
         // The normal points out of the first collider, so the first is pushed against
         // it and the second along it. Each point is given from each body's centre of
         // mass, in the world, halfway between the two surfaces; each surface is half the
@@ -614,20 +694,20 @@ impl TireContacts<'_, '_> {
         {
             return false;
         }
-        // A tire with its springs shut pushes straight up off the ground, not back along
-        // it. A wheel's core does not: it meets the ground where the tire has gone into
-        // it, which is often a bank beside the wheel, and it must push the wheel back out
-        // of the bank. Pushed straight up it slid into the bank and rode up inside it: an
-        // axle was under the ground for 1 164 wheel-steps on Alpine in two minutes of 7
-        // trucks, and for none pushed along the ground's own face. Nor where the core meets
-        // a steep slope ahead: turned up there too, a truck driven head on into a bank of
-        // 50 degrees or more at 10 to 30 m/s went through it, nearly every time.
-        // Nor against the side of a ground box, which is a wall: turned up, it would let
-        // the tire through.
-        if self.bottomed(first) && self.is_ground(second) && !self.is_box_wall(second, -normal) {
+        // A tire with its springs shut pushes straight up off the terrain, not back along
+        // it, and any tire straight up off a step under it (`step_under`). A wheel's core
+        // does not: it meets the ground where the tire has gone into it, which is often a
+        // bank beside the wheel, and it must push the wheel back out of the bank. Pushed
+        // straight up it slid into the bank and rode up inside it: an axle was under the
+        // ground for 1 164 wheel-steps on Alpine in two minutes of 7 trucks, and for none
+        // pushed along the ground's own face. Nor where the core meets a steep slope
+        // ahead: turned up there too, a truck driven head on into a bank of 50 degrees or
+        // more at 10 to 30 m/s went through it, nearly every time. Nor against a wall, the
+        // side of a ground box or of a building, which touches the tire out at its hub:
+        // turned up, it would let the tire through.
+        if (self.bottomed(first) && self.is_terrain(second)) || step_under == Some(first) {
             self.stand_it_up(first, true, manifold);
-        } else if self.bottomed(second) && self.is_ground(first) && !self.is_box_wall(first, normal)
-        {
+        } else if (self.bottomed(second) && self.is_terrain(first)) || step_under == Some(second) {
             self.stand_it_up(second, false, manifold);
         } else if !self.meet_edge(first, second, -normal, true, manifold) {
             self.meet_edge(second, first, normal, false, manifold);
@@ -748,7 +828,10 @@ mod tests {
         // Forwards it is left to roll; the sideways part is to be stopped.
         assert!(close(target, Vec3::new(0.0, 0.0, -10.0)), "{target}");
         // On the sidewall nothing rolls: the tire holds like a block.
-        let sidewall = Tread { rolls: 0.0, ..tread };
+        let sidewall = Tread {
+            rolls: 0.0,
+            ..tread
+        };
         let target = target_sliding(going, Vec3::Y, [(sidewall, true)].into_iter());
         assert!(close(target, Vec3::ZERO), "{target}");
         // The same wheel as the second collider: the relative velocity is the other way.
@@ -819,23 +902,41 @@ mod tests {
         let push = asked_of_the_tread(0.0, 1.0, 20_000.0, false, &config, dt);
         assert!((push - 20_000.0 * per_force).abs() < 1e-6, "{push}");
         // Rolling at the top speed: none of it.
-        assert_eq!(asked_of_the_tread(config.top_speed, 1.0, 20_000.0, false, &config, dt), 0.0);
+        assert_eq!(
+            asked_of_the_tread(config.top_speed, 1.0, 20_000.0, false, &config, dt),
+            0.0
+        );
         // Rolling backwards under forward throttle: the brakes, towards rolling with the
         // surface, and never past it.
         let braking = asked_of_the_tread(-10.0, 1.0, 20_000.0, false, &config, dt);
-        assert!(braking > 0.0 && braking <= config.brake_force * per_force, "{braking}");
+        assert!(
+            braking > 0.0 && braking <= config.brake_force * per_force,
+            "{braking}"
+        );
         // Barely rolling backwards under forward throttle is driving forwards, not braking.
         assert!(asked_of_the_tread(-0.1, 1.0, 20_000.0, false, &config, dt) > 0.0);
         // Held: the brakes whatever the throttle, nothing at a standstill, and no more than
         // stops the tread when it is nearly stopped already.
         assert!(asked_of_the_tread(5.0, 1.0, 20_000.0, true, &config, dt) < 0.0);
-        assert_eq!(asked_of_the_tread(0.0, 1.0, 20_000.0, true, &config, dt), 0.0);
-        assert_eq!(asked_of_the_tread(0.01, 1.0, 20_000.0, true, &config, dt), -0.01);
+        assert_eq!(
+            asked_of_the_tread(0.0, 1.0, 20_000.0, true, &config, dt),
+            0.0
+        );
+        assert_eq!(
+            asked_of_the_tread(0.01, 1.0, 20_000.0, true, &config, dt),
+            -0.01
+        );
         // Off the throttle the engine only slows the tread, whichever way it rolls, and by
         // no more than its braking.
         let coasting = asked_of_the_tread(5.0, 0.0, -3_000.0, false, &config, dt);
-        assert!(coasting < 0.0 && coasting >= -3_000.0 * per_force, "{coasting}");
+        assert!(
+            coasting < 0.0 && coasting >= -3_000.0 * per_force,
+            "{coasting}"
+        );
         assert!(asked_of_the_tread(-5.0, 0.0, -3_000.0, false, &config, dt) > 0.0);
-        assert_eq!(asked_of_the_tread(0.0, 0.0, -3_000.0, false, &config, dt), 0.0);
+        assert_eq!(
+            asked_of_the_tread(0.0, 0.0, -3_000.0, false, &config, dt),
+            0.0
+        );
     }
 }

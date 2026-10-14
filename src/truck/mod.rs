@@ -50,7 +50,7 @@ use crate::game_state::GameState;
 
 pub use contacts::{TireContacts, decide_tire_contacts};
 pub use content::truck::{
-    AxleLink, AxleLinks, Beam, Dashboard, DashboardPicture, Dial, EngineConfig, NormalMap,
+    AxleLink, AxleLinks, Beam, Dashboard, DashboardPicture, Dial, EngineConfig, LitWhen, NormalMap,
     SteeringWheel, TruckConfig, TruckData, TruckLamp, TruckLooks, TruckMesh, TruckModel,
     TruckSetup, TruckTexture, TruckTextureCycle,
 };
@@ -106,8 +106,10 @@ impl Plugin for TruckPlugin {
                     (axle::place_axles, axle::place_axle_links).after(TruckSystems::PlaceVisuals),
                     display::build_displays,
                     lamps::dress_lamps,
-                    lamps::light_lamps,
-                    lamps::turn_glows.after(TruckSystems::PlaceVisuals),
+                    // The glows are sized by what `light_lamps` decides this frame.
+                    (lamps::light_lamps, lamps::turn_glows)
+                        .chain()
+                        .after(TruckSystems::PlaceVisuals),
                     lamps::show_from_inside,
                     looks::apply_settings.run_if(resource_changed::<TruckLooksSettings>),
                     looks::cycle_textures,
@@ -273,6 +275,10 @@ pub(crate) struct WheelCollider {
     /// tread to the suspension, and keeps every other's, so that an edge the sweep refused
     /// (see `drive::EDGE_RAMP`) is the collider's and not nobody's.
     pub(super) stands_on: Option<Entity>,
+    /// How far the tire, and this collider with it, is above the hub its springs push on,
+    /// in metres, enveloping scenery or a ground box it has risen onto faster than they
+    /// follow (`drive::ENVELOP`). `drive` keeps it from one step to the next.
+    pub(super) enveloped: f32,
     /// What the driver asks of the tread, which `contacts` drives the tire's kept contacts
     /// with, so that a tire pressed against a wall or another truck climbs it under
     /// throttle, and a truck on its roof drives on its tires' tops (see `contacts`): the

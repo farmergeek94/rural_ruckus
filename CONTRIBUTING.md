@@ -36,23 +36,25 @@ cargo fmt                          # format
 ## Real files
 
 MTM2's files are copyrighted and are never committed. Git ignores `tracks/`, `trucks/`
-and `base/` (see the README for what goes where). `base/` is searched with its
-subfolders, so links to an MTM2 CD's `Shared` and `English` (or other language) folders
-will do.
+and `base/` (see the README for what goes where).
 
 The game finds the base game's archives, which tracks and trucks borrow from, in this
 order:
 
 1. `--base-game=FOLDER` on the command line. Not kept.
-2. The two folders that the player chose in the front end: `Shared`, and one language
-   folder (`English`, `French` or `German`). Kept in `saves/ruckus.redb`.
+2. The folder that the player chose in the front end: where MTM2 is installed. Kept in
+   `saves/ruckus.redb`.
 3. `base/`.
 
-On the CD the language folders are beside `Shared` and hold archives with the same
-names, so the player chooses one language folder, not the CD root. Only a folder that
-holds archives directly can be chosen. The front end asks for each folder when it opens
-if nothing above gives one, and OPTIONS > FILES changes them. Without the base game, what
-tracks and trucks borrow is missing: built-in shapes and grey in its place.
+In each folder, the archives that its `POD.INI` names are loaded, in its order: the base
+game's 19, and every add-on track or truck whose archive was added to `POD.INI`, as
+MTM2's README says to install one. Their tracks and trucks are listed with those in
+`tracks/` and `trucks/`. An archive in the folder that `POD.INI` does not name is not
+loaded. A folder with no `POD.INI` gives every archive in it and in its subfolders one
+level down, so `base/` with links to a CD's `Shared` and `English` folders works too.
+Only a folder with archives to load can be chosen. The front end asks for the folder when
+it opens if nothing above gives one, and OPTIONS > FILES changes it. Without the base
+game, what tracks and trucks borrow is missing: built-in shapes and grey in its place.
 
 ## Keys in a race
 

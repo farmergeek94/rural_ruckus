@@ -53,8 +53,18 @@ palettes, tires and axles. MTM2 finds them in its own archives.
   all 20 base trucks, one `.TRK` each. `METALCR2.ACT` is in `STARTUP.POD`. The 15 tracks
   are in 13 archives in `Shared`: `JUNK.POD` and `SNAKE.POD` hold two each, so a track is
   named by its archive and its track file (`Track::from_file`).
-- `Shared\POD.INI` lists all 19, after a first line with their number (`19`).
-  **Measured.** What the game does with the order is **open**.
+- `POD.INI` lists the archives the game loads. **Reference**, MTM2's `README.TXT`
+  (sections 1.2 and 1.3): it is in the folder where MTM2 is installed; its first line is
+  the number of archives listed; each later line is the path of one archive; a track or
+  truck is added to the game by adding a line with its archive's path at the end and
+  raising the number. **Measured** on an installed game (`~/Documents/mtm2/POD.INI`, 226
+  bytes): `19`, then 19 bare lower-case file names (`startup.pod` ... `summit3.pod`), one
+  per line, CRLF line ends, no path. The same 19 names are in `Shared\POD.INI` on the CD,
+  3 of which are archives in `English`, so the installer puts both folders' archives in
+  one. An archive in the folder that `POD.INI` does not name (the Community Patch's
+  `GAME.POD` in that install) is not loaded. What the game does with the order is
+  **open**. The reader (`pod::archives_listed`) takes every non-blank line after the
+  count as a name, bare or a path, case-insensitive, and skips one that is not there.
 - **Measured:** 354 file names occur in more than one of the 19 archives, and every copy
   has the same content. So the search order of the base archives does not matter.
 - The game looks in the track's or truck's own archive first, in any folder, then in the

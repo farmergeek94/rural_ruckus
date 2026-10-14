@@ -1,6 +1,7 @@
 //! The base game's archives on disk, as a resource: `pod::BaseGame`, which `main.rs`
-//! opens (`--base-game=FOLDER`, else the `Shared` and language folders the player chose,
-//! else `base/`) and `front_end` hands to the loaders.
+//! opens on the folder where MTM2 is installed (`--base-game=FOLDER`, else the folder the
+//! player chose, else `base/`), loading what its `POD.INI` names, and `front_end` hands to
+//! the loaders.
 //!
 //! Not a slice: with `main.rs` and `front_end.rs`, the only code that names the `pod`
 //! crate. The `sound` slice asks it for the engine's loops, so that it needs no loader.
@@ -11,11 +12,12 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use content::sound::EngineLoops;
 
-pub use pod::archives_in;
+pub use pod::{archives_listed, pod_ini_in};
 
 /// Where the base archives are looked for when the command line names no folder: beside
-/// `tracks/` and `trucks/`, and git ignores it as it does them. Its subfolders are searched
-/// too, so that it can hold links to the `Shared` and `English` folders of an MTM2 CD.
+/// `tracks/` and `trucks/`, and git ignores it as it does them. Without a `POD.INI` its
+/// subfolders are searched too, so that it can hold links to the `Shared` and `English`
+/// folders of an MTM2 CD.
 pub const DEFAULT_FOLDER: &str = "base";
 
 /// The base game's archives. Cheap to clone: the clones share what has been read.
@@ -28,7 +30,7 @@ impl BaseGame {
         Self(pod::BaseGame::none())
     }
 
-    /// The archives in each folder and in its subfolders: see `pod::BaseGame::open`.
+    /// The archives each game folder's `POD.INI` names: see `pod::BaseGame::open`.
     pub fn open(folders: &[PathBuf]) -> Self {
         Self(pod::BaseGame::open(folders))
     }

@@ -699,31 +699,33 @@ fn a_key_is_bound_by_pressing_it_and_is_remembered() {
     );
 }
 
-/// A made-up CD in a folder of its own, laid out as MTM2's is: `cd/Shared`, `cd/English`
-/// and `cd/French`, each with an archive with nothing in it, and `cd/Other`, with nothing
-/// at all. Gone again when it is dropped.
-struct MadeUpCd(std::path::PathBuf);
+/// A made-up MTM2 install in a folder of its own: `games/MTM2`, with a `POD.INI` that
+/// names an archive with nothing in it, as the game writes it; `games/Loose`, with such an
+/// archive and no `POD.INI`; and `games/Other`, with nothing at all. Gone again when it is
+/// dropped.
+struct MadeUpInstall(std::path::PathBuf);
 
-impl MadeUpCd {
+impl MadeUpInstall {
     fn new(test: &str) -> Self {
         let root = std::env::temp_dir().join(format!("ruckus-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         // A header that says there are no files.
         let empty = vec![0; pod::ARCHIVE_HEADER_LENGTH];
-        for folder in ["Shared", "English", "French"] {
-            std::fs::create_dir_all(root.join("cd").join(folder)).unwrap();
-            std::fs::write(root.join("cd").join(folder).join("EMPTY.POD"), &empty).unwrap();
+        for folder in ["MTM2", "Loose"] {
+            std::fs::create_dir_all(root.join("games").join(folder)).unwrap();
+            std::fs::write(root.join("games").join(folder).join("EMPTY.POD"), &empty).unwrap();
         }
-        std::fs::create_dir_all(root.join("cd/Other")).unwrap();
+        std::fs::write(root.join("games/MTM2/POD.INI"), "1\r\nempty.pod\r\n").unwrap();
+        std::fs::create_dir_all(root.join("games/Other")).unwrap();
         Self(root)
     }
 
     fn folder(&self, name: &str) -> std::path::PathBuf {
-        self.0.join("cd").join(name)
+        self.0.join("games").join(name)
     }
 }
 
-impl Drop for MadeUpCd {
+impl Drop for MadeUpInstall {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
@@ -735,15 +737,10 @@ fn browsing(app: &App) -> Option<String> {
     browser.0.as_ref().map(|folder| folder.path.clone())
 }
 
-/// What the folder browser asks.
-fn asking(app: &App) -> String {
+/// What the folder browser says is in the folder.
+fn found(app: &App) -> String {
     let browser = app.world().resource::<FolderBrowser>();
-    browser
-        .0
-        .as_ref()
-        .expect("a folder browsed")
-        .heading
-        .clone()
+    browser.0.as_ref().expect("a folder browsed").found.clone()
 }
 
 /// Goes into the subfolder with this name.
@@ -761,51 +758,66 @@ fn remembered(store: &Store) -> BaseGameChoice {
     BaseGameChoice::remembered(store)
 }
 
-/// With nowhere to find the base game, the front end opens by asking for the Shared folder
-/// and then the language's, beside it. Only a folder with archives in it can be chosen, so
-/// not the CD itself, which has every language in it. Both are kept for next time.
+/// With nowhere to find the base game, the front end opens by asking for the folder where
+/// MTM2 is installed. Only a folder with archives to load can be chosen: those its POD.INI
+/// names, or, without one, those in it. It is kept for next time.
 #[test]
 fn the_front_end_asks_where_the_base_game_is_and_remembers_it() {
-    let cd = MadeUpCd::new("asks");
+    let install = MadeUpInstall::new("asks");
     let store = Arc::new(Store::in_memory());
     let settings = FrontEndSettings {
-        base_game_folders: vec![cd.0.join("gone")],
+        base_game_folders: vec![install.0.join("gone")],
         ask_for_base_game: true,
         ..nowhere()
     };
     let mut app = headless_app(settings.clone(), Some(store.clone()));
     app.update();
     // Where it was looked for has gone, so from the folder that it was in.
-    assert_eq!(browsing(&app), Some(cd.0.display().to_string()));
-    assert_eq!(asking(&app), "WHERE IS THE SHARED FOLDER?");
+    assert_eq!(browsing(&app), Some(install.0.display().to_string()));
+    let heading = app
+        .world()
+        .resource::<FolderBrowser>()
+        .0
+        .clone()
+        .unwrap()
+        .heading;
+    assert_eq!(heading, "WHERE IS MONSTER TRUCK MADNESS 2?");
     // Browsing takes the keys that would change the screen.
     player_does(&mut app, Action::NextScreen);
     assert!(browsing(&app).is_some());
 
-    go_into(&mut app, "cd");
-    // The CD, with no archives of its own.
-    player_does(&mut app, Action::ChooseFolder);
-    assert_eq!(asking(&app), "WHERE IS THE SHARED FOLDER?");
+    go_into(&mut app, "games");
+    // The folder of games has no POD.INI, so what counts is every archive in it and one
+    // level down, as in `base/` with links to a CD's folders.
+    assert_eq!(
+        found(&app),
+        "No POD.INI; 2 archives (.pod) in and under here"
+    );
     go_into(&mut app, "Other");
+    // Nothing to load here, so it cannot be chosen.
     player_does(&mut app, Action::ChooseFolder);
     assert_eq!(
         browsing(&app),
-        Some(cd.folder("Other").display().to_string())
+        Some(install.folder("Other").display().to_string())
+    );
+    assert_eq!(
+        found(&app),
+        "No POD.INI, and no archives (.pod) in or under here"
     );
 
     // Up, which comes back to the folder it was in, highlighted.
     player_does(&mut app, Action::FolderUp);
     let browser = app.world().resource::<FolderBrowser>().0.clone().unwrap();
-    assert_eq!(browser.path, cd.0.join("cd").display().to_string());
+    assert_eq!(browser.path, install.0.join("games").display().to_string());
     assert_eq!(browser.folders[browser.highlighted].name, "Other");
-    assert!(!browser.can_choose, "{}", browser.found);
 
-    go_into(&mut app, "Shared");
-    player_does(&mut app, Action::ChooseFolder);
-    // And now the language, from beside Shared.
-    assert_eq!(asking(&app), "WHICH LANGUAGE?");
-    assert_eq!(browsing(&app), Some(cd.0.join("cd").display().to_string()));
-    go_into(&mut app, "French");
+    // A folder with archives but no POD.INI can be chosen too.
+    go_into(&mut app, "Loose");
+    assert_eq!(found(&app), "No POD.INI; 1 archive (.pod) in or under here");
+    player_does(&mut app, Action::FolderUp);
+
+    go_into(&mut app, "MTM2");
+    assert_eq!(found(&app), "POD.INI names 1 archive");
     player_does(&mut app, Action::ChooseFolder);
     assert_eq!(browsing(&app), None);
 
@@ -815,25 +827,23 @@ fn the_front_end_asks_where_the_base_game_is_and_remembers_it() {
             .chosen_value()
             .to_string()
     };
-    assert_eq!(value(&app, "folder.base_shared"), "Shared");
-    assert_eq!(value(&app, "folder.base_language"), "French");
+    assert_eq!(value(&app, "folder.base_game"), "MTM2");
     let kept = remembered(&store);
     assert_eq!(
         kept,
         BaseGameChoice {
-            shared: Some(cd.folder("Shared")),
-            language: Some(cd.folder("French")),
+            folder: Some(install.folder("MTM2")),
         }
     );
     assert!(kept.is_complete());
-    assert_eq!(kept.folders(), [cd.folder("Shared"), cd.folder("French")]);
+    assert_eq!(kept.folders(), [install.folder("MTM2")]);
     // The screens are back.
     player_does(&mut app, Action::Show(Screen::Race));
     run_until(&mut app, "the built-in truck", |app| {
         !on_show(app).is_empty()
     });
 
-    // Skipped, nothing is kept, and the language is not asked for.
+    // Skipped, nothing is kept.
     let store = Arc::new(Store::in_memory());
     let mut skipped = headless_app(settings.clone(), Some(store.clone()));
     skipped.update();
@@ -841,29 +851,42 @@ fn the_front_end_asks_where_the_base_game_is_and_remembers_it() {
     assert_eq!(browsing(&skipped), None);
     assert_eq!(remembered(&store), BaseGameChoice::default());
 
-    // With Shared kept, only the language is asked for.
+    // With a folder kept that has archives to load, nothing is asked.
     let store = Arc::new(Store::in_memory());
     store
         .write(|batch| {
-            batch.set_text("folder.base_shared", cd.folder("Shared").to_str().unwrap());
+            batch.set_text("folder.base_game", install.folder("MTM2").to_str().unwrap());
         })
         .unwrap();
-    let mut half = headless_app(settings, Some(store.clone()));
-    half.update();
-    assert_eq!(asking(&half), "WHICH LANGUAGE?");
-    go_into(&mut half, "English");
-    player_does(&mut half, Action::ChooseFolder);
-    assert_eq!(browsing(&half), None);
-    assert_eq!(remembered(&store).language, Some(cd.folder("English")));
+    let mut kept = headless_app(settings.clone(), Some(store.clone()));
+    kept.update();
+    assert_eq!(browsing(&kept), None);
+
+    // With one kept that has none, it is asked for again, from where it was.
+    let store = Arc::new(Store::in_memory());
+    store
+        .write(|batch| {
+            batch.set_text(
+                "folder.base_game",
+                install.folder("Other").to_str().unwrap(),
+            );
+        })
+        .unwrap();
+    let mut gone = headless_app(settings, Some(store.clone()));
+    gone.update();
+    assert_eq!(
+        browsing(&gone),
+        Some(install.folder("Other").display().to_string())
+    );
 }
 
-/// The options screen's FILES lines open the same browser, which can be left with nothing
+/// The options screen's FILES line opens the same browser, which can be left with nothing
 /// changed. Nothing asks where the base game is unless `main.rs` says to.
 #[test]
 fn the_base_game_can_be_changed_from_the_options_screen() {
-    let cd = MadeUpCd::new("options");
+    let install = MadeUpInstall::new("options");
     let settings = FrontEndSettings {
-        base_game_folders: vec![cd.folder("Other")],
+        base_game_folders: vec![install.folder("Other")],
         ..nowhere()
     };
     let mut app = headless_app(settings, None);
@@ -871,7 +894,7 @@ fn the_base_game_can_be_changed_from_the_options_screen() {
     assert_eq!(browsing(&app), None);
 
     player_does(&mut app, Action::Show(Screen::Options));
-    let line = option(&app, "folder.base_language");
+    let line = option(&app, "folder.base_game");
     let value = |app: &App| {
         app.world().resource::<Settings>().0[line]
             .chosen_value()
@@ -879,33 +902,26 @@ fn the_base_game_can_be_changed_from_the_options_screen() {
     };
     assert_eq!(value(&app), "Not chosen");
     player_does(&mut app, Action::OpenSetting(line));
-    assert_eq!(asking(&app), "WHICH LANGUAGE?");
     assert_eq!(
         browsing(&app),
-        Some(cd.folder("Other").display().to_string())
+        Some(install.folder("Other").display().to_string())
     );
     player_does(&mut app, Action::LeaveFolder);
     assert_eq!(browsing(&app), None);
     assert_eq!(value(&app), "Not chosen");
 
-    // Enter on the line opens it too, and a folder chosen shows on the line. The other
-    // folder is not asked for from here.
+    // Enter on the line opens it too, and a folder chosen shows on the line.
     player_does(&mut app, Action::Go);
     player_does(&mut app, Action::FolderUp);
-    go_into(&mut app, "English");
+    go_into(&mut app, "MTM2");
     player_does(&mut app, Action::ChooseFolder);
     assert_eq!(browsing(&app), None);
     // Its name on the line, and the whole path in the detail.
-    assert_eq!(value(&app), "English");
+    assert_eq!(value(&app), "MTM2");
     let detail = app.world().resource::<Settings>().0[line].detail.clone();
     assert!(
-        detail.starts_with(&cd.folder("English").display().to_string()),
+        detail.starts_with(&install.folder("MTM2").display().to_string()),
         "{detail}"
-    );
-    let shared = option(&app, "folder.base_shared");
-    assert_eq!(
-        app.world().resource::<Settings>().0[shared].chosen_value(),
-        "Not chosen"
     );
     assert_eq!(state(&app), GameState::FrontEnd);
 }

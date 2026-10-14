@@ -46,6 +46,15 @@
 //! A sweep that begins inside the terrain says nothing of how deep the tire is in it, so
 //! such a tire is swept again from `RESWEEP` of its radius higher.
 //!
+//! What the sweep stands a tire on that is not the terrain -- a log, a rock, a crushed
+//! car, a ramp -- the tire envelops, as a big soft tire does: it is drawn, and its
+//! collider placed, riding over it, while the hub its springs push on rises only so fast
+//! (`GLIDE_RISE_SPEED`) and lags no further behind the tire than `ENVELOP` of its radius.
+//! Taken up at once, a rock the size of the travel asked the springs for all they had in
+//! two or three steps and threw the body into the air; enveloped, it lifts the body a
+//! tenth of a metre. The terrain is not enveloped: its whoops and mounds are the dampers'
+//! (`GROUND_DAMPING`).
+//!
 //! A tire pressed further than its springs go squashes before it is solid, up to
 //! `GROUND_SQUASH` past the top of its travel.
 //!
@@ -321,6 +330,28 @@ const EDGE_RAMP: f32 = 2.0;
 /// the truck goes, in m/s, so that a truck creeping onto a kerb still gets onto it. Higher
 /// is quicker at a crawl.
 const EDGE_RISE_SPEED: f32 = 3.0;
+
+/// How fast the springs see the hub rise onto scenery or a ground box, in m/s, at any
+/// speed (see `ENVELOP`): faster than this, the tire envelops what it rides over, and the
+/// springs are left behind. A ramp asks for the truck's speed times the slope: 14 degrees
+/// at 25 m/s is 6 m/s. Higher passes more of a rock to the body, and keeps a jump off a
+/// steeper ramp whole.
+const GLIDE_RISE_SPEED: f32 = 6.0;
+
+/// How far the springs may lag behind a tire that rides up onto scenery or a ground box
+/// faster than `EDGE_RISE_SPEED`, as a share of the tire's radius: the tire envelops a
+/// rock or a log as a big soft tire does, and is drawn riding over it, while the hub its
+/// springs push on rises only so fast (`GLIDE_RISE_SPEED`), and no further behind the
+/// tire than this. Taken up
+/// at once, a rock asked the springs for all they had in two or three steps: over a 0.6 m
+/// rock at 20 m/s, Max-D's front springs shut, the bump stop and the tire's squash pushed
+/// with 200 kN, and the body was thrown up at 1.6 m/s, half a metre into the air, with the
+/// nose kicked up at 4.6 m/s (`examples/bump_probe.rs`). The terrain is left alone: its
+/// whoops are taken by the dampers (`GROUND_DAMPING`). A ramp is a rise that goes on, so
+/// on one the springs follow the tire this far behind, and the jump is a little lower.
+/// Higher glides over taller things, and jumps lower off ramps; 0 is the tire taken up at
+/// once, as before.
+const ENVELOP: f32 = 0.3;
 
 /// How far under the tire a face of scenery or of a ground box touches it to be a top the
 /// tire lands on and not an edge it runs up to, as the cosine of the angle round the tire
@@ -686,7 +717,11 @@ pub(super) fn drive_truck(
                 })
             };
             // A touch on what the suspension carries the tire on.
-            let stood_on = |collider: Entity, normal: Vec3, below_mount: f32, on_the_tread: f32| {
+            let stood_on = |collider: Entity,
+                            normal: Vec3,
+                            below_mount: f32,
+                            on_the_tread: f32,
+                            enveloped: f32| {
                 // The ground and scenery are each a body of their own; only a collider
                 // within a body, such as a truck's, needs its body looked up.
                 let (surface, kind) = match kinds.get(collider) {
@@ -707,18 +742,33 @@ pub(super) fn drive_truck(
                     // Pressed past the top of its travel, the tire squashes (see
                     // `GROUND_SQUASH`).
                     squash: (-below_mount).clamp(0.0, GROUND_SQUASH * config.wheel_radius),
+                    enveloped,
                 }
             };
             // Where the hub was after the last step, as far below its mount.
-            let last_length = wheel_colliders
-                .get(collider)
-                .map_or(travel, |(at, _)| mount_in_truck.y - at.translation.y);
+            // Where the tire was after the last step, as far below its mount, and how far
+            // the hub lagged behind it, enveloping what the tire stood on (`ENVELOP`).
+            let (last_tire, last_enveloped, enveloping) =
+                wheel_colliders
+                    .get(collider)
+                    .map_or((travel, 0.0, None), |(at, state)| {
+                        let enveloping =
+                            (state.enveloped > 0.0).then_some(state.stands_on).flatten();
+                        (
+                            mount_in_truck.y - at.translation.y,
+                            state.enveloped,
+                            enveloping,
+                        )
+                    });
+            let last_length = last_tire + last_enveloped;
             // How far the hub may rise onto what is not the terrain in this step (see
             // `EDGE_RAMP` and `EDGE_RISE_SPEED`), and more as the body comes down onto it.
             let mount_velocity = forces.velocity_at_point(mount);
             let rolling = mount_velocity.reject_from_normalized(up).length();
             let sinking = (-mount_velocity.dot(up)).max(0.0);
             let rise_limit = (EDGE_RISE_SPEED.max(rolling * EDGE_RAMP) + sinking) * dt;
+            // And how far the springs follow it up in this step (see `ENVELOP`).
+            let glide_limit = (GLIDE_RISE_SPEED + sinking) * dt;
             // What a sweep from `lift` above the mount found, if the suspension stands the
             // tire on it.
             let stand_on = |hit: &ShapeHitData, from: Vec3, lift: f32| {
@@ -753,25 +803,38 @@ pub(super) fn drive_truck(
                     if hit.distance <= 0.0 && up.y <= UPWARD {
                         return None;
                     }
-                    return Some(stood_on(hit.entity, normal, found, on_the_tread));
+                    return Some(stood_on(hit.entity, normal, found, on_the_tread, 0.0));
                 }
                 // Scenery and the ground boxes have edges, which the wheel collider climbs:
                 // the suspension stands the tire on them only where they touch it from
                 // under (`UNDER`), and a sweep that began inside them says nothing of how
                 // deep the tire is in.
+                // What the tire envelops it goes on standing on while it is in it,
+                // wherever it touches: the tire is riding up over it (see `ENVELOP`).
                 let under = -on_the_tire.y / config.wheel_radius;
-                if hit.distance <= 0.0 || under < UNDER {
+                if hit.distance <= 0.0 || (under < UNDER && enveloping != Some(hit.entity)) {
                     return None;
                 }
                 // An edge the tire runs up to is rolled up only as fast as a tire rolls up
                 // an edge (`EDGE_RAMP`): asked for more in one step, it is a wall met at
                 // speed, which the collider stops the truck against. A top the tire lands
                 // on (`UNDER_TOP`) is stood on, with the hub rising onto it only so fast.
-                if under < UNDER_TOP && last_length - found > rise_limit {
+                if under < UNDER_TOP && last_tire - found > rise_limit {
                     return None;
                 }
-                let length = found.max(last_length - rise_limit);
-                Some(stood_on(hit.entity, normal, length, on_the_tread))
+                // The tire envelops what it rides up onto (`ENVELOP`): its springs see
+                // the hub rise onto it only so fast, and lag no further behind the tire
+                // than that.
+                let length = found
+                    .max(last_length - glide_limit)
+                    .min(found + ENVELOP * config.wheel_radius);
+                Some(stood_on(
+                    hit.entity,
+                    normal,
+                    length,
+                    on_the_tread,
+                    length - found,
+                ))
             };
             // Against a face that it cannot roll over, with nothing found under it, the
             // wheel holds its length rather than dropping to the bottom of its travel: a
@@ -840,7 +903,7 @@ pub(super) fn drive_truck(
                 // No deeper than a sweep that begins inside something says.
                 let below_mount = (ray.distance - config.wheel_radius - lift).max(-lift);
                 carries(normal, up, is_terrain(ray.entity))
-                    .then(|| stood_on(ray.entity, normal, below_mount, 1.0))
+                    .then(|| stood_on(ray.entity, normal, below_mount, 1.0, 0.0))
             });
 
             // Suspension length: from the mount down to the hub. With nothing under it the
@@ -1085,7 +1148,10 @@ pub(super) fn drive_truck(
                 ),
             };
             wheel.spin -= wheel.tread_speed / config.wheel_radius * dt;
-            let hub_in_truck = wheel.mount - Vec3::Y * sweep.length;
+            // Where the tire is: on what it stands on, which may be above the hub the
+            // springs push on (`ENVELOP`).
+            let enveloped = sweep.touch.map_or(0.0, |touch| touch.enveloped);
+            let hub_in_truck = wheel.mount - Vec3::Y * (sweep.length - enveloped);
             // The wheel is a pivot whose axle lies along X. What is drawn hangs from it, and
             // is drawn between this step's pose and the last (see `interpolate`).
             pose.step(
@@ -1103,6 +1169,7 @@ pub(super) fn drive_truck(
                 collider_transform.rotation = tire_rotation * AXLE_ALONG_X;
                 wheel_collider.bottomed = bottomed;
                 wheel_collider.stands_on = sweep.touch.map(|touch| touch.on);
+                wheel_collider.enveloped = enveloped;
                 wheel_collider.throttle = if held { 0.0 } else { input.throttle };
                 wheel_collider.engine_force = engine.wheel_force;
                 wheel_collider.brakes_on = held || input.handbrake;
@@ -1202,6 +1269,9 @@ struct Touch {
     /// How far the tire is squashed, in metres: as far as it is pressed past the top of
     /// its travel (`GROUND_SQUASH`).
     squash: f32,
+    /// How far the tire is above the hub, in metres, enveloping what it has risen onto
+    /// faster than the springs follow (`ENVELOP`). `below_mount` is the hub's.
+    enveloped: f32,
 }
 
 /// How fast a hub is pressed up towards its mount, in m/s, by what its tire stands on:

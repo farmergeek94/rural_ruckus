@@ -14,16 +14,23 @@
 //!
 //! Whether they shine is `TruckLamps::lit`, and whether the cones are seen is
 //! `TruckLamps::cones`. This slice leaves both off: whoever knows how dark it is turns them
-//! on. A beacon turns round the truck's up, and a blinking lamp goes
-//! on and off, by the game's clock.
+//! on. Brake lights and reversing lights (`TruckLamp::lit_when`) are the truck's own: a
+//! brake light shines when the truck brakes, in any light, and dimly in the dark as a tail
+//! light; a reversing light shines in reverse gear. A beacon turns round the truck's up,
+//! and a blinking lamp goes on and off, by the game's clock.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
+use avian3d::prelude::LinearVelocity;
+
 use super::looks::texture_image;
-use super::{Beam, SeenFromInside, TruckLamp, TruckTexture, TruckVisual};
+use super::{
+    Beam, Gear, Gearbox, Held, LitWhen, SeenFromInside, Truck, TruckInput, TruckLamp, TruckTexture,
+    TruckVisual,
+};
 
 /// How bright a beam is at its middle, in lumens. Enough to light the course a beam's
 /// length ahead at night; higher washes the ground near the truck out to white. At 400 000
@@ -50,7 +57,8 @@ const CONE_SIDES: u32 = 16;
 /// well as its middle. At 0.001 only a strip down the middle was well lit.
 const BEAM_CORE: f32 = 0.35;
 
-/// Whether the trucks' lamps shine. Off unless someone turns them on.
+/// Whether the trucks' lamps shine. Off unless someone turns them on. Brake lights and
+/// reversing lights go by the truck instead (see the module's notes).
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct TruckLamps {
     pub lit: bool,
@@ -61,10 +69,48 @@ pub struct TruckLamps {
 
 /// On each of a truck's lamps, a child of the drawn truck.
 #[derive(Component)]
+#[require(Shine)]
 pub(super) struct Lamp {
     lamp: TruckLamp,
     /// The glow's picture, from the truck's textures.
     picture: Option<TruckTexture>,
+}
+
+/// On each lamp: how big its glow is drawn this frame, as a share of its size. 1 for a lamp
+/// that shines, `TAIL_LIGHT` for a brake light in the dark with the brakes off. Written
+/// by `light_lamps`, and read by `turn_glows`, which sizes the glow.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(super) struct Shine(f32);
+
+impl Default for Shine {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+/// How big a brake light's glow is in the dark with the brakes off, as a share of its size:
+/// a tail light. Higher is harder to tell from the brakes.
+const TAIL_LIGHT: f32 = 0.45;
+/// How fast a truck must go, in m/s, for the throttle against the way it goes to be the
+/// brakes and not a start the other way: as `drive` has it.
+const BRAKING_SPEED: f32 = 0.5;
+
+/// Whether a truck's brakes are on: it is held, the handbrake is pulled, or the throttle is
+/// against the way it goes at `forward_speed` (m/s, forwards positive).
+fn braking(held: bool, handbrake: bool, throttle: f32, forward_speed: f32) -> bool {
+    held || handbrake || (throttle * forward_speed < 0.0 && forward_speed.abs() > BRAKING_SPEED)
+}
+
+/// How much a lamp lit `when` shines, from 0 (dark) to 1, when it is `dark` out and the
+/// truck is `braking` or `reversing`.
+fn shine(when: LitWhen, dark: bool, braking: bool, reversing: bool) -> f32 {
+    match when {
+        LitWhen::Dark if dark => 1.0,
+        LitWhen::Braking if braking => 1.0,
+        LitWhen::Braking if dark => TAIL_LIGHT,
+        LitWhen::Reversing if reversing => 1.0,
+        _ => 0.0,
+    }
 }
 
 /// Puts the lamps of a truck with `lamps` and `textures` on `visual`, the drawn truck, dark.
@@ -295,14 +341,14 @@ fn glow_scale(towards: f32) -> f32 {
 /// things were drawn last frame: a round glow a frame behind is not seen.
 pub(super) fn turn_glows(
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    lamps: Query<(&GlobalTransform, &Children), With<Lamp>>,
+    lamps: Query<(&GlobalTransform, &Shine, &Children), With<Lamp>>,
     mut glows: Query<&mut Transform, With<Glow>>,
 ) {
     let Some((_, eye)) = cameras.iter().find(|(camera, _)| camera.is_active) else {
         return;
     };
     let eye = eye.translation();
-    for (lamp, children) in &lamps {
+    for (lamp, shine, children) in &lamps {
         let (_, rotation, at) = lamp.to_scale_rotation_translation();
         let Some(to_eye) = (eye - at).try_normalize() else {
             continue;
@@ -313,7 +359,7 @@ pub(super) fn turn_glows(
         let placed = Transform {
             translation: Vec3::ZERO,
             rotation: rotation.inverse() * facing_eye,
-            scale: Vec3::splat(glow_scale(towards)),
+            scale: Vec3::splat(glow_scale(towards) * shine.0),
         };
         for &child in children {
             if let Ok(mut glow) = glows.get_mut(child) {
@@ -348,22 +394,54 @@ fn soft_glow() -> Image {
     )
 }
 
-/// Shows the lamps that shine now and hides the rest, and turns the beacons.
+/// Shows the lamps that shine now and hides the rest, by the dark and by what each truck
+/// does, and turns the beacons.
+#[allow(clippy::type_complexity)]
 pub(super) fn light_lamps(
     time: Res<Time>,
     settings: Res<TruckLamps>,
-    mut lamps: Query<(&Lamp, &mut Transform, &mut Visibility)>,
+    trucks: Query<
+        (
+            &TruckInput,
+            &Gearbox,
+            &LinearVelocity,
+            &Transform,
+            Has<Held>,
+        ),
+        (With<Truck>, Without<Lamp>),
+    >,
+    visuals: Query<(&TruckVisual, &Children)>,
+    mut lamps: Query<(&Lamp, &mut Shine, &mut Transform, &mut Visibility)>,
 ) {
     let seconds = time.elapsed_secs();
-    for (Lamp { lamp, .. }, mut transform, mut visibility) in &mut lamps {
-        let on = settings.lit && blinked_on(lamp.blink, seconds);
-        visibility.set_if_neq(if on {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        });
-        if on && lamp.spin != 0.0 {
-            *transform = placed(lamp, seconds);
+    for (visual, children) in &visuals {
+        let Ok((input, gearbox, velocity, transform, held)) = trucks.get(visual.truck) else {
+            continue;
+        };
+        let forward_speed = velocity.0.dot(transform.rotation * Vec3::NEG_Z);
+        let braking = braking(held, input.handbrake, input.throttle, forward_speed);
+        let reversing = gearbox.gear() == Gear::Reverse;
+        for &child in children {
+            let Ok((Lamp { lamp, .. }, mut lamp_shine, mut transform, mut visibility)) =
+                lamps.get_mut(child)
+            else {
+                continue;
+            };
+            let how_much = if blinked_on(lamp.blink, seconds) {
+                shine(lamp.lit_when, settings.lit, braking, reversing)
+            } else {
+                0.0
+            };
+            let on = how_much > 0.0;
+            lamp_shine.set_if_neq(Shine(how_much));
+            visibility.set_if_neq(if on {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            });
+            if on && lamp.spin != 0.0 {
+                *transform = placed(lamp, seconds);
+            }
         }
     }
 }
@@ -427,6 +505,33 @@ mod tests {
         assert_eq!(glow_scale(-0.5), 0.0);
         assert!(glow_scale(0.1) >= GLOW_FROM_THE_SIDE);
         assert!(glow_scale(0.5) < glow_scale(0.9));
+    }
+
+    #[test]
+    fn the_brakes_are_the_throttle_against_the_way_the_truck_goes() {
+        // Braking from speed, forwards and backwards.
+        assert!(braking(false, false, -1.0, 10.0));
+        assert!(braking(false, false, 1.0, -10.0));
+        // Driving, coasting, and starting off the other way from a standstill.
+        assert!(!braking(false, false, 1.0, 10.0));
+        assert!(!braking(false, false, 0.0, 10.0));
+        assert!(!braking(false, false, -1.0, 0.1));
+        // Held or on the handbrake, whatever the throttle.
+        assert!(braking(true, false, 1.0, 10.0));
+        assert!(braking(false, true, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_brake_light_shines_with_the_brakes_and_dimly_in_the_dark() {
+        assert_eq!(shine(LitWhen::Braking, false, true, false), 1.0);
+        assert_eq!(shine(LitWhen::Braking, true, true, false), 1.0);
+        assert_eq!(shine(LitWhen::Braking, true, false, false), TAIL_LIGHT);
+        assert_eq!(shine(LitWhen::Braking, false, false, false), 0.0);
+        // A headlight is the dark's alone, and a reversing light reverse gear's.
+        assert_eq!(shine(LitWhen::Dark, true, false, false), 1.0);
+        assert_eq!(shine(LitWhen::Dark, false, true, true), 0.0);
+        assert_eq!(shine(LitWhen::Reversing, false, false, true), 1.0);
+        assert_eq!(shine(LitWhen::Reversing, true, true, false), 0.0);
     }
 
     #[test]

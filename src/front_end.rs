@@ -17,13 +17,14 @@
 //! pause dialog (`race::RaceCancelled`) comes back, with the choices kept. EXIT closes the
 //! game. What was chosen is kept in a `store::Store` on GO and chosen again the next time.
 //!
-//! Where the base game's archives are is two folders the player chooses, `Shared` and one
-//! language's, kept in the store. When the command line names no folder and the store
-//! does not name both, with archives in them, the front end opens by asking for what is
-//! missing (`FrontEndSettings::ask_for_base_game`), in a folder browser that the `ui`
-//! module draws and this fills in. The two FILES lines of the options screen open the same
-//! browser. `BaseGame` is opened again from the folders chosen, and the lists are made
-//! again from it.
+//! Where the base game's archives are is one folder the player chooses, where MTM2 is
+//! installed, kept in the store: its `POD.INI` names the archives to load, the base
+//! game's and every add-on track and truck installed in it. When the command line names
+//! no folder and the store does not name one with archives to load, the front end opens
+//! by asking for it (`FrontEndSettings::ask_for_base_game`), in a folder browser that the
+//! `ui` module draws and this fills in. The FILES line of the options screen opens the
+//! same browser. `BaseGame` is opened again from the folder chosen, and the lists are
+//! made again from it.
 //!
 //! The options screen, and the ADVANCED screen beside it, show settings that belong to
 //! other slices: the window's (`display`), the graphics (`camera`, `environment`, `track`,
@@ -213,24 +214,15 @@ impl Plugin for FrontEndPlugin {
                 .unwrap_or_default(),
         };
         let mut option_lines = ui::Settings(settings_for(&options));
-        option_lines
-            .0
-            .extend(BaseFolder::ALL.map(|which| base_folder_line(which, &base_folders.chosen)));
+        option_lines.0.push(base_folder_line(&base_folders.chosen));
         options.put_in_world(app.world_mut());
 
         let mut browsing = Browsing::default();
         let mut browser = FolderBrowser::default();
-        if settings.ask_for_base_game {
-            // Those not chosen yet, or gone, in turn.
-            let mut wanted = BaseFolder::ALL
-                .into_iter()
-                .filter(|&which| !base_folders.chosen.usable(which));
-            if let Some(which) = wanted.next() {
-                let view;
-                (browsing, view) =
-                    Browsing::start(which, wanted.next(), "SKIP FOR NOW", &base_folders);
-                browser.0 = Some(view);
-            }
+        if settings.ask_for_base_game && !base_folders.chosen.is_complete() {
+            let view;
+            (browsing, view) = Browsing::start("SKIP FOR NOW", &base_folders);
+            browser.0 = Some(view);
         }
 
         app.insert_resource(catalogue)
@@ -281,114 +273,46 @@ impl Plugin for FrontEndPlugin {
 #[derive(Resource)]
 struct Saves(Option<Arc<Store>>);
 
-/// The two folders of the base game. MTM2's CD has one `Shared` folder, and beside it one
-/// folder for each language (`English`, `French`, `German`), whose archives have the same
-/// names: only one language is wanted, so each folder is chosen on its own.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum BaseFolder {
-    #[default]
-    Shared,
-    Language,
-}
+/// Where the chosen game folder is kept in the store. Also the id of its line on the
+/// options screen.
+const KEY_BASE_GAME: &str = "folder.base_game";
+const BASE_GAME_LABEL: &str = "Game folder";
+const BASE_GAME_HEADING: &str = "WHERE IS MONSTER TRUCK MADNESS 2?";
+const BASE_GAME_ABOUT: &str = "The folder where Monster Truck Madness 2 is installed, with \
+                               POD.INI in it. Its archives, and every track and truck added \
+                               to POD.INI, are loaded from there.";
 
-impl BaseFolder {
-    /// In the order they are asked for, and searched.
-    const ALL: [BaseFolder; 2] = [BaseFolder::Shared, BaseFolder::Language];
-
-    /// Where it is kept in the store. Also the id of its line on the options screen.
-    fn key(self) -> &'static str {
-        match self {
-            BaseFolder::Shared => "folder.base_shared",
-            BaseFolder::Language => "folder.base_language",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            BaseFolder::Shared => "Shared",
-            BaseFolder::Language => "Language",
-        }
-    }
-
-    fn heading(self) -> &'static str {
-        match self {
-            BaseFolder::Shared => "WHERE IS THE SHARED FOLDER?",
-            BaseFolder::Language => "WHICH LANGUAGE?",
-        }
-    }
-
-    fn about(self) -> &'static str {
-        match self {
-            BaseFolder::Shared => {
-                "The Shared folder of Monster Truck Madness 2, on its CD or where it is \
-                 installed. Tracks and trucks borrow from its archives."
-            }
-            BaseFolder::Language => {
-                "The folder of one language of Monster Truck Madness 2: English, French or \
-                 German, beside Shared. The base game's trucks are in it."
-            }
-        }
-    }
-}
-
-/// The base game's folders that the player chose, as the store keeps them.
+/// The base game's folder that the player chose, as the store keeps it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BaseGameChoice {
-    pub shared: Option<PathBuf>,
-    pub language: Option<PathBuf>,
+    pub folder: Option<PathBuf>,
 }
 
 impl BaseGameChoice {
     /// What the store says. For `main.rs`, which opens the base game before the front end
     /// is built. A store that can't be read says nothing.
     pub fn remembered(store: &Store) -> Self {
-        let folder = |which: BaseFolder| {
-            store
-                .get_text(which.key())
-                .inspect_err(|error| warn!("{error}"))
-                .ok()
-                .flatten()
-                .filter(|folder| !folder.is_empty())
-                .map(PathBuf::from)
-        };
-        Self {
-            shared: folder(BaseFolder::Shared),
-            language: folder(BaseFolder::Language),
-        }
-    }
-
-    /// Those chosen, to open the base game from.
-    pub fn folders(&self) -> Vec<PathBuf> {
-        [&self.shared, &self.language]
-            .into_iter()
+        let folder = store
+            .get_text(KEY_BASE_GAME)
+            .inspect_err(|error| warn!("{error}"))
+            .ok()
             .flatten()
-            .cloned()
-            .collect()
+            .filter(|folder| !folder.is_empty())
+            .map(PathBuf::from);
+        Self { folder }
     }
 
-    /// Whether both are chosen and hold archives. If not, the front end asks.
+    /// The folder chosen, to open the base game from.
+    pub fn folders(&self) -> Vec<PathBuf> {
+        self.folder.iter().cloned().collect()
+    }
+
+    /// Whether a folder is chosen, and has archives to load. If not, the front end asks. A
+    /// CD that is not in has none.
     pub fn is_complete(&self) -> bool {
-        BaseFolder::ALL.into_iter().all(|which| self.usable(which))
-    }
-
-    fn get(&self, which: BaseFolder) -> Option<&PathBuf> {
-        match which {
-            BaseFolder::Shared => self.shared.as_ref(),
-            BaseFolder::Language => self.language.as_ref(),
-        }
-    }
-
-    fn set(&mut self, which: BaseFolder, folder: PathBuf) {
-        match which {
-            BaseFolder::Shared => self.shared = Some(folder),
-            BaseFolder::Language => self.language = Some(folder),
-        }
-    }
-
-    /// Chosen, and with archives in it. A CD that is not in has none.
-    fn usable(&self, which: BaseFolder) -> bool {
-        self.get(which)
-            .is_some_and(|folder| !base_game::archives_in(folder).is_empty())
+        self.folder
+            .as_ref()
+            .is_some_and(|folder| !base_game::archives_listed(folder).is_empty())
     }
 }
 
@@ -404,28 +328,17 @@ struct BaseGameFolders {
 struct Browsing {
     /// Always absolute, so that there is a folder to go up to.
     at: Option<PathBuf>,
-    /// Which of the base game's folders is looked for.
-    which: BaseFolder,
-    /// The one to ask for once this one is chosen, if it is still wanted then.
-    then: Option<BaseFolder>,
     /// What the button that stops browsing says.
     leave: &'static str,
 }
 
 impl Browsing {
-    /// Browsing for `which`, and what to show of where it starts.
-    fn start(
-        which: BaseFolder,
-        then: Option<BaseFolder>,
-        leave: &'static str,
-        folders: &BaseGameFolders,
-    ) -> (Self, Folder) {
-        let at = start_folder(which, folders);
-        let view = folder_view(&at, None, which, leave);
+    /// Browsing, and what to show of where it starts.
+    fn start(leave: &'static str, folders: &BaseGameFolders) -> (Self, Folder) {
+        let at = start_folder(folders);
+        let view = folder_view(&at, None, leave);
         let browsing = Self {
             at: Some(at),
-            which,
-            then,
             leave,
         };
         (browsing, view)
@@ -480,39 +393,39 @@ fn track_peeked(peek: pod::track::TrackPeek) -> (String, Option<&'static str>) {
     (peek.name, kind)
 }
 
-/// The options screen's line that shows where one of the base game's folders is, and
-/// opens the browser. After those of `OPTIONS`, which the systems that apply the options
-/// walk in step with `ui::Settings`.
-fn base_folder_line(which: BaseFolder, chosen: &BaseGameChoice) -> Setting {
-    // The folder's name alone fits on the line, and says which language. The whole path is
-    // in the detail, which is shown while the line is highlighted.
+/// The options screen's line that shows where the base game's folder is, and opens the
+/// browser. After those of `OPTIONS`, which the systems that apply the options walk in
+/// step with `ui::Settings`.
+fn base_folder_line(chosen: &BaseGameChoice) -> Setting {
+    // The folder's name alone fits on the line. The whole path is in the detail, which is
+    // shown while the line is highlighted.
     let name = |folder: &PathBuf| {
         folder.file_name().map_or_else(
             || folder.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
         )
     };
-    let (value, detail) = match chosen.get(which) {
+    let (value, detail) = match &chosen.folder {
         None => (
             "Not chosen".to_string(),
-            format!("{} Enter or a click chooses it.", which.about()),
+            format!("{BASE_GAME_ABOUT} Enter or a click chooses it."),
         ),
-        Some(folder) if chosen.usable(which) => (
+        Some(folder) if chosen.is_complete() => (
             name(folder),
             format!("{}. Enter or a click chooses another.", folder.display()),
         ),
         Some(folder) => (
             format!("{} (not found)", name(folder)),
             format!(
-                "{} has no archives in it now. Enter or a click chooses another.",
+                "{} has no archives to load now. Enter or a click chooses another.",
                 folder.display()
             ),
         ),
     };
     Setting {
-        id: which.key().into(),
+        id: KEY_BASE_GAME.into(),
         section: FILES.into(),
-        label: which.label().into(),
+        label: BASE_GAME_LABEL.into(),
         values: vec![value],
         chosen: 0,
         default: 0,
@@ -524,24 +437,17 @@ fn base_folder_line(which: BaseFolder, chosen: &BaseGameChoice) -> Setting {
     }
 }
 
-/// Where browsing for one of the base game's folders starts: where it is; else beside the
-/// other one, as the two are on the CD; else where the base game was looked for. Or the
-/// nearest folder above that which is there, or the working directory.
-fn start_folder(which: BaseFolder, folders: &BaseGameFolders) -> PathBuf {
+/// Where browsing for the base game's folder starts: where it is; else where the base game
+/// was looked for. Or the nearest folder above that which is there, or the working
+/// directory.
+fn start_folder(folders: &BaseGameFolders) -> PathBuf {
     let absolute = |path: &Path| std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let other = match which {
-        BaseFolder::Shared => BaseFolder::Language,
-        BaseFolder::Language => BaseFolder::Shared,
-    };
     folders
         .chosen
-        .get(which)
+        .folder
+        .as_ref()
+        .or(folders.opened_from.first())
         .map(|folder| absolute(folder))
-        .or_else(|| {
-            let other = absolute(folders.chosen.get(other)?);
-            other.parent().map(Path::to_path_buf)
-        })
-        .or_else(|| folders.opened_from.first().map(|folder| absolute(folder)))
         .and_then(|folder| {
             folder
                 .ancestors()
@@ -552,9 +458,9 @@ fn start_folder(which: BaseFolder, folders: &BaseGameFolders) -> PathBuf {
 }
 
 /// What the browser shows of the folder `at`, with the subfolder `highlight` highlighted
-/// if it is there. A folder can be chosen when there are archives in it, and not only in
-/// the folders in it: on the CD the folder above `Shared` holds every language's folder.
-fn folder_view(at: &Path, highlight: Option<&OsString>, which: BaseFolder, leave: &str) -> Folder {
+/// if it is there. A folder can be chosen when it has archives to load: those its
+/// `POD.INI` names, or, without one, those in it and in the folders in it.
+fn folder_view(at: &Path, highlight: Option<&OsString>, leave: &str) -> Folder {
     let mut names: Vec<OsString> = Vec::new();
     let listed = std::fs::read_dir(at).map(|entries| {
         names = entries
@@ -566,18 +472,24 @@ fn folder_view(at: &Path, highlight: Option<&OsString>, which: BaseFolder, leave
             .collect();
     });
     names.sort_by_key(|name| name.to_string_lossy().to_lowercase());
-    let archives = base_game::archives_in(at).len();
-    let found = match (listed, archives) {
-        (Err(error), _) => format!("Cannot be read: {error}"),
-        (Ok(()), 0) => "No archives (.pod) in here".into(),
-        (Ok(()), 1) => "1 archive (.pod) in here".into(),
-        (Ok(()), count) => format!("{count} archives (.pod) in here"),
+    let archives = base_game::archives_listed(at).len();
+    let has_ini = base_game::pod_ini_in(at).is_some();
+    let found = match (listed, has_ini, archives) {
+        (Err(error), _, _) => format!("Cannot be read: {error}"),
+        (Ok(()), true, 0) => "POD.INI is here, but names no archive that is".into(),
+        (Ok(()), true, 1) => "POD.INI names 1 archive".into(),
+        (Ok(()), true, count) => format!("POD.INI names {count} archives"),
+        (Ok(()), false, 0) => "No POD.INI, and no archives (.pod) in or under here".into(),
+        (Ok(()), false, 1) => "No POD.INI; 1 archive (.pod) in or under here".into(),
+        (Ok(()), false, count) => {
+            format!("No POD.INI; {count} archives (.pod) in and under here")
+        }
     };
     Folder {
-        heading: which.heading().into(),
+        heading: BASE_GAME_HEADING.into(),
         path: at.display().to_string(),
         found,
-        about: which.about().into(),
+        about: BASE_GAME_ABOUT.into(),
         highlighted: highlight
             .and_then(|highlight| names.iter().position(|name| name == highlight))
             .unwrap_or(0),
@@ -1634,7 +1546,7 @@ fn apply_the_options(
     }
 }
 
-/// A base game line on the options screen opens the browser, where that folder is.
+/// The base game line on the options screen opens the browser, where that folder is.
 fn open_the_browser(
     mut opened: MessageReader<SettingOpened>,
     lines: Res<ui::Settings>,
@@ -1642,13 +1554,15 @@ fn open_the_browser(
     mut browser: ResMut<FolderBrowser>,
     mut browsing: ResMut<Browsing>,
 ) {
-    let which = opened.read().find_map(|SettingOpened(index)| {
-        let id = &lines.0.get(*index)?.id;
-        BaseFolder::ALL.into_iter().find(|which| which.key() == id)
+    let base_game = opened.read().any(|SettingOpened(index)| {
+        lines
+            .0
+            .get(*index)
+            .is_some_and(|line| line.id == KEY_BASE_GAME)
     });
-    if let Some(which) = which {
+    if base_game {
         let view;
-        (*browsing, view) = Browsing::start(which, None, "CANCEL", &folders);
+        (*browsing, view) = Browsing::start("CANCEL", &folders);
         browser.0 = Some(view);
     }
 }
@@ -1661,7 +1575,7 @@ fn browse(
     mut browser: ResMut<FolderBrowser>,
     mut browsing: ResMut<Browsing>,
 ) {
-    let (which, leave) = (browsing.which, browsing.leave);
+    let leave = browsing.leave;
     let Some(at) = &mut browsing.at else {
         entered.clear();
         up.clear();
@@ -1694,13 +1608,13 @@ fn browse(
         browser.0 = None;
         browsing.at = None;
     } else if moved {
-        browser.0 = Some(folder_view(at, highlight.as_ref(), which, leave));
+        browser.0 = Some(folder_view(at, highlight.as_ref(), leave));
     }
 }
 
-/// The folder chosen is where that part of the base game is from now on: it is kept, the
-/// base game is opened again from both folders, and the lists are made again. What is
-/// highlighted stays so where it can. Then the other folder is asked for, if it is to be.
+/// The folder chosen is where the base game is from now on: it is kept, the base game is
+/// opened again from it, and the lists are made again. What is highlighted stays so where
+/// it can.
 #[expect(
     clippy::too_many_arguments,
     reason = "the base game is under everything"
@@ -1727,12 +1641,11 @@ fn choose_the_base_game(
     let Some(at) = browsing.at.take() else {
         return;
     };
-    let which = browsing.which;
 
     if let Some(store) = &saves.0 {
         let written = match at.to_str() {
             Some(folder) => store.write(|batch| {
-                batch.set_text(which.key(), folder);
+                batch.set_text(KEY_BASE_GAME, folder);
             }),
             None => Err(store::StoreError {
                 store: "saves".into(),
@@ -1743,14 +1656,11 @@ fn choose_the_base_game(
             warn!("Where the base game is was not saved: {error}");
         }
     }
-    folders.chosen.set(which, at);
+    folders.chosen.folder = Some(at);
     *base = BaseGame::open(&folders.chosen.folders());
     for line in &mut lines.0 {
-        if let Some(which) = BaseFolder::ALL
-            .into_iter()
-            .find(|which| which.key() == line.id)
-        {
-            *line = base_folder_line(which, &folders.chosen);
+        if line.id == KEY_BASE_GAME {
+            *line = base_folder_line(&folders.chosen);
         }
     }
 
@@ -1784,12 +1694,6 @@ fn choose_the_base_game(
     choices.truck = find(&catalogue.trucks, choices.truck, &new.trucks, KEY_TRUCK);
     choices.track = find(&catalogue.tracks, choices.track, &new.tracks, KEY_TRACK);
     *catalogue = new;
-
-    if let Some(next) = browsing.then.filter(|&next| !folders.chosen.usable(next)) {
-        let view;
-        (*browsing, view) = Browsing::start(next, None, browsing.leave, &folders);
-        browser.0 = Some(view);
-    }
 }
 
 fn open(mut open: ResMut<NextState<FrontEndOpen>>, mut showing: ResMut<Showing>) {
@@ -2356,7 +2260,7 @@ mod tests {
     #[test]
     fn a_base_game_id_names_its_archive_and_file() {
         let entry = base_entry(
-            Path::new("base/Shared/JUNK.POD"),
+            Path::new("base/JUNK.POD"),
             "WORLD\\GRAVEY.SIT",
             Ok(("The Graveyard".into(), None)),
         );
@@ -2364,7 +2268,7 @@ mod tests {
         assert_eq!(entry.detail, "base game: JUNK.POD");
         assert_eq!(
             in_base(&entry.id),
-            Some((Path::new("base/Shared/JUNK.POD"), "WORLD\\GRAVEY.SIT"))
+            Some((Path::new("base/JUNK.POD"), "WORLD\\GRAVEY.SIT"))
         );
     }
 

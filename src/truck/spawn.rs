@@ -19,9 +19,8 @@ use super::interpolate::PhysicsPose;
 use super::lamps;
 use super::{
     ChosenTruck, ComputerTrucks, Engine, Gearbox, GroundGrip, PlayerTruck, Shoved, Truck,
-    TruckConfig,
-    TruckData, TruckInput, TruckName, TruckSetup, TruckVisual, TruckWheelColliders, TruckWheels,
-    WheelCollider, WheelCore,
+    TruckConfig, TruckData, TruckInput, TruckName, TruckSetup, TruckVisual, TruckWheelColliders,
+    TruckWheels, WheelCollider, WheelCore,
 };
 use crate::game_state::GameState;
 
@@ -65,6 +64,12 @@ const RIM_ROUNDING: f32 = 0.3;
 pub(super) const CORE_SHARE: f32 = 0.75;
 /// The same for the body: none either. A truck that lands on its roof stays down.
 const BODY_BOUNCE: f32 = 0.0;
+/// How much the bodywork grips what it slides over: metal on road, rock and dirt, from 0
+/// (slides freely) up. The body takes the lower figure of the two (`Min`), so that the
+/// ground's own grip (1, a tire's) does not pull it up: under the engine's average with the
+/// ground, 0.4 here was 0.7, and a truck on its side or its roof stuck where it fell. Higher
+/// stops a sliding truck sooner. Against a tire, the tire's grip wins (`Max`).
+const BODY_FRICTION: f32 = 0.2;
 /// How far ahead of touching something the physics makes a contact with it, in metres.
 /// The physics makes one as far ahead as the truck will go in a step unless told
 /// otherwise, which keeps a fast body from passing through a thin one. But a truck is
@@ -188,7 +193,7 @@ fn spawn_truck(
                 NoAutoAngularInertia,
                 NoAutoCenterOfMass,
             ),
-            Friction::new(0.4),
+            Friction::new(BODY_FRICTION).with_combine_rule(CoefficientCombine::Min),
             // Bodywork that does not spring back off what it hits. `Min`, as the tires
             // have: scenery names a bounce of 1 (see `scenery::bouncy`), and `Max` wins
             // over every other rule, so under it the body bounced off scenery with all of
@@ -235,6 +240,7 @@ fn spawn_truck(
                     WheelCollider {
                         bottomed: false,
                         stands_on: None,
+                        enveloped: 0.0,
                         throttle: 0.0,
                         engine_force: 0.0,
                         brakes_on: false,
