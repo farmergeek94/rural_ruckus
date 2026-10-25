@@ -10,7 +10,8 @@
 // - The field of heights round the camera that the trucks disturb (`field.rs`): their
 //   bow waves, wakes and rings, which the graphics card spreads, and the foam they churn
 //   up, which lies on the water and fades. It really moves the surface on the patch, and
-//   bends the light and whitens the water everywhere it is shown.
+//   bends the light and whitens the water everywhere it is shown, but for the tracks the
+//   tires leave in the foam: the mud they stir up off the bottom, coloured like the bed.
 //
 // And where the water is shallow, from a map of its depth (`shore.rs`): foam along the
 // water's edge, which moves up and down the ground with the swell, lines of surf that roll
@@ -25,33 +26,43 @@
 // nothing shows the sky's colour. The water is drawn solid after everything else solid,
 // and mixes in the picture under it itself (see `surface.rs`).
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
     mesh_view_bindings::{globals, view},
     mesh_functions,
     view_transformations::position_world_to_clip,
-}
+};
 
-#ifdef PREPASS_PIPELINE
-#import bevy_pbr::{
-    prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
-}
-#else
-#import bevy_pbr::{
+@if(PREPASS_PIPELINE)
+import bevy_pbr::{
+    prepass::io::{VertexOutput, FragmentOutput},
+    deferred::functions::deferred_output,
+};
+@else
+import bevy_pbr::render::{
     forward_io::{Vertex, VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-    mesh_view_bindings::{view_transmission_texture, view_transmission_sampler},
     view_transformations::{depth_ndc_to_view_z, frag_coord_to_uv, ndc_to_uv},
-}
-#endif
+};
+// The view binds the picture drawn so far only in the transmissive pass.
+@if(VIEW_TRANSMISSION_TEXTURE)
+import bevy_pbr::render::mesh_view_bindings::{view_transmission_texture, view_transmission_sampler};
 
 // The field of heights (`field.wgsl`): per texel the height, in metres, how much it
 // rises for each metre along X and Z, and the foam. Texel `i` holds every cell of the
 // world whose index is `i` modulo `FIELD_TEXELS`, so it is read round and round.
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var field: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(105) var field_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var field: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(105) var field_sampler: sampler;
+// The mud the tires have stirred up off the bottom (`field.wgsl`), in its red, laid out
+// as the field is.
+@group(constants::MATERIAL_BIND_GROUP) @binding(107) var mud: texture_2d<f32>;
+struct Bed {
+    // The colour of that mud, in linear light.
+    mud: vec4<f32>,
+}
+
+@group(constants::MATERIAL_BIND_GROUP) @binding(108) var<uniform> bed: Bed;
 struct Mirroring {
     // The sky's colour, in linear light.
     sky: vec4<f32>,
@@ -59,7 +70,7 @@ struct Mirroring {
     scenery: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> mirroring: Mirroring;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<uniform> mirroring: Mirroring;
 
 struct Wind {
     // Which way it blows, on the ground plane (world X and Z), of length 1. How hard, is
@@ -69,7 +80,7 @@ struct Wind {
     round_camera: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> wind: Wind;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var<uniform> wind: Wind;
 
 struct Shore {
     // Where the depth map's first texel is (world X and Z), in metres.
@@ -81,12 +92,12 @@ struct Shore {
     repeats: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<uniform> shore: Shore;
+@group(constants::MATERIAL_BIND_GROUP) @binding(103) var<uniform> shore: Shore;
 // How deep the still water is over the ground, in metres. 32-bit, so not filterable.
-@group(#{MATERIAL_BIND_GROUP}) @binding(104) var depth_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(104) var depth_map: texture_2d<f32>;
 // The depth of the picture drawn before the water, at each pixel (`scene_depth`). 32-bit,
 // so not filterable.
-@group(#{MATERIAL_BIND_GROUP}) @binding(106) var scene_depth: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(106) var scene_depth: texture_2d<f32>;
 
 // As in `surface.rs`: how far the patch round the camera reaches, and how far apart its
 // vertices are, in metres; and the same for the fine patch ahead of the camera, round the
@@ -148,6 +159,18 @@ const FOAM_SWIRL_PERIOD: f32 = 6.0;
 // churned water is white all over.
 const FOAM_GAPS: f32 = 0.3;
 const SOLID_FOAM: vec2<f32> = vec2(0.8, 1.4);
+// The foam the trucks churn up is white, but for the tracks their tires leave in it:
+// where a tread has stirred up mud off the bottom, the foam is silt, solid, of the bed's
+// colour (`bed.mud`) this much brighter, since it is full of bubbles. From this much mud
+// on, the foam over it is all silt; less, and it is part white. As the foam ages it thins
+// (from `MOST_FOAM` in `field.wgsl` when fresh, to a third every `FOAM_LIFE`), and the
+// white and the tracks merge into one soft, mostly dirty foam: foam thinner than this is
+// aged, and this much of it is silt, with its lumps smoothed away by this much.
+const SILT_LIGHT: f32 = 1.05;
+const MUD_SOLID: f32 = 0.6;
+const AGED_FOAM: vec2<f32> = vec2(0.6, 1.7);
+const AGED_DIRT: f32 = 1.0;
+const AGED_SMOOTH: f32 = 0.8;
 // What the water is like where it is shallow: its colour, in linear light, lighter and
 // greener than deep water (`WATER_COLOR` in `surface.rs`), and how deep it is where the
 // deep colour has taken over, in metres.
@@ -333,6 +356,18 @@ fn field_at(position: vec2<f32>) -> vec4<f32> {
     return textureSampleLevel(field, field_sampler, uv, 0.0) * shown;
 }
 
+// How much mud the tires have stirred up at `position`, read as `field_at` reads the
+// field.
+fn mud_at(position: vec2<f32>) -> f32 {
+    let out = max(
+        abs(position.x - view.world_position.x),
+        abs(position.y - view.world_position.z),
+    ) / (FIELD_TEXELS * FIELD_SPACING / 2.0);
+    let shown = 1.0 - smoothstep(FIELD_SHOWN, 1.0, out);
+    let uv = position / (FIELD_TEXELS * FIELD_SPACING);
+    return textureSampleLevel(mud, field_sampler, uv, 0.0).r * shown;
+}
+
 // How far the swell moves the patch's vertices up and down at a point `out_from_middle` of
 // the way from its middle to its edge: all the way, easing to none.
 fn patch_ease(out_from_middle: f32) -> f32 {
@@ -378,7 +413,7 @@ fn coarse_lift(position: vec2<f32>) -> f32 {
     return mix(near, far, within.y);
 }
 
-#ifndef PREPASS_PIPELINE
+@if(!PREPASS_PIPELINE)
 @vertex
 fn vertex(mesh_vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -404,34 +439,27 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
     out.position = position_world_to_clip(world_position.xyz);
     // The fragment shader works out the normal for itself.
     out.world_normal = vec3(0.0, 1.0, 0.0);
-#ifdef VERTEX_UVS_A
+@if(VERTEX_UVS_A)
     out.uv = mesh_vertex.uv;
-#endif
-#ifdef VERTEX_UVS_B
+@if(VERTEX_UVS_B)
     out.uv_b = mesh_vertex.uv_b;
-#endif
-#ifdef VERTEX_TANGENTS
+@if(VERTEX_TANGENTS)
     out.world_tangent = mesh_functions::mesh_tangent_local_to_world(
         world_from_local,
         mesh_vertex.tangent,
         mesh_vertex.instance_index,
     );
-#endif
-#ifdef VERTEX_COLORS
+@if(VERTEX_COLORS)
     out.color = mesh_vertex.color;
-#endif
-#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
+@if(VERTEX_OUTPUT_INSTANCE_INDEX)
     out.instance_index = mesh_vertex.instance_index;
-#endif
-#ifdef VISIBILITY_RANGE_DITHER
+@if(VISIBILITY_RANGE_DITHER)
     out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(
         mesh_vertex.instance_index,
         world_from_local[3],
     );
-#endif
     return out;
 }
-#endif
 
 // How hard the wind blows at `time`, in m/s. As the speed of `Wind::air` in `wind.rs`.
 fn wind_speed(time: f32) -> f32 {
@@ -443,11 +471,11 @@ fn wind_speed(time: f32) -> f32 {
     return WIND_SPEED + GUSTINESS * gust;
 }
 
-#ifndef PREPASS_PIPELINE
 // The reflected ray, as the picture sees it: where it starts in clip space and how that
 // changes for each metre along it, and the same for how far it is ahead of the camera,
 // along the view (view space's Z). Both change in a straight line along the ray, so are
 // worked out once for it, and each step only adds to them.
+@if(!PREPASS_PIPELINE)
 struct Ray {
     clip_start: vec4<f32>,
     clip_way: vec4<f32>,
@@ -458,6 +486,7 @@ struct Ray {
 // Where the ray is `along` metres out, in the picture drawn so far, and how far it is
 // behind what is drawn there, in metres along the view: below 0 in front of it, or where
 // only the sky is.
+@if(!PREPASS_PIPELINE)
 struct Probe {
     uv: vec2<f32>,
     // Whether it is in front of the camera.
@@ -466,6 +495,7 @@ struct Probe {
     behind: f32,
 }
 
+@if(!PREPASS_PIPELINE)
 fn probe(ray: Ray, along: f32) -> Probe {
     var out: Probe;
     let clip = ray.clip_start + ray.clip_way * along;
@@ -486,12 +516,17 @@ fn probe(ray: Ray, along: f32) -> Probe {
 }
 
 // What is drawn at `uv`, in linear light.
+@if(!PREPASS_PIPELINE)
 fn drawn_at(uv: vec2<f32>) -> vec3<f32> {
+@if(VIEW_TRANSMISSION_TEXTURE)
     return textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
+@if(!VIEW_TRANSMISSION_TEXTURE)
+    return mirroring.sky.rgb;
 }
 
 // What the water at `start`, which is at `uv` in the picture, mirrors along `direction`,
 // in linear light.
+@if(!PREPASS_PIPELINE)
 fn reflection(start: vec3<f32>, uv: vec2<f32>, direction: vec3<f32>) -> vec3<f32> {
     var ray: Ray;
     ray.clip_start = view.clip_from_world * vec4(start, 1.0);
@@ -536,7 +571,6 @@ fn reflection(start: vec3<f32>, uv: vec2<f32>, direction: vec3<f32>) -> vec3<f32
     }
     return mirroring.sky.rgb;
 }
-#endif
 
 @fragment
 fn fragment(
@@ -583,7 +617,13 @@ fn fragment(
     // for it is the dearest thing in this shader on a built-in GPU.
     var covered = 0.0;
     var foam_bump = vec2(0.0);
+    // How much of the foam here is the tires' mud, from 0 to 1.
+    var muddy = 0.0;
     if foam > 0.002 {
+        // Aged foam is mostly dirty wherever it is; fresh foam only along the tracks.
+        let aged = 1.0 - smoothstep(AGED_FOAM.x, AGED_FOAM.y, foam);
+        muddy = max(smoothstep(0.0, MUD_SOLID, mud_at(position)), aged * AGED_DIRT);
+        let smoothed = aged * AGED_SMOOTH;
         let swirl = vec2(
             noise(position / 3.0 + time / FOAM_SWIRL_PERIOD),
             noise(position / 3.0 + 11.0 - time / FOAM_SWIRL_PERIOD),
@@ -592,7 +632,8 @@ fn fragment(
         let lumps = noise(swirled / 0.25 + 7.0) * 0.5 + noise(swirled / 0.7 + 31.0) * 0.3
             + noise(position / 2.1 + 57.0) * 0.2;
         // Thinner between the lumps, where the dark water shows through the bubbles.
-        let gaps = mix(FOAM_GAPS, 1.0, smoothstep(SOLID_FOAM.x, SOLID_FOAM.y, foam));
+        // Aged foam has merged into one soft sheet, with few gaps and low lumps.
+        let gaps = mix(mix(FOAM_GAPS, 1.0, smoothstep(SOLID_FOAM.x, SOLID_FOAM.y, foam)), 1.0, smoothed);
         covered = smoothstep(0.0, FOAM_EDGE, foam - (1.0 - lumps))
             * mix(gaps, 1.0, smoothstep(0.3, 0.8, lumps));
         // The lumps of foam are lit as lumps: the normal leans with the slope of their
@@ -604,7 +645,8 @@ fn fragment(
         let along_z = noise((swirled + vec2(0.0, step)) / 0.25 + 7.0) * 0.5
             + noise((swirled + vec2(0.0, step)) / 0.7 + 31.0) * 0.3;
         let fine = noise(swirled / 0.25 + 7.0) * 0.5 + noise(swirled / 0.7 + 31.0) * 0.3;
-        foam_bump = vec2(along_x - fine, along_z - fine) / step * FOAM_BUMP * covered * FOAM_BUMP_SCALE;
+        foam_bump = vec2(along_x - fine, along_z - fine) / step * FOAM_BUMP * covered * FOAM_BUMP_SCALE
+            * (1.0 - smoothed);
     }
     var normal = normalize(vec3(-slope.x + foam_bump.x, 1.0, -slope.y + foam_bump.y));
     // Seen from under the water, the surface faces down.
@@ -629,11 +671,15 @@ fn fragment(
     let surf_line = pow(max(cos(TAU * (depth / SURF_SPACING + time / SURF_PERIOD)), 0.0), 6.0);
     let surf = surf_line * (1.0 - smoothstep(0.2, SURF_DEPTH, depth)) * SURF_FOAM
         * min(breeze, 1.5) * mix(0.7, 1.3, gust) * mix(0.5, 1.1, patches);
+    // The field's foam is white, but for the tracks the tires leave in it: where they have
+    // stirred up mud, the foam is silt, coloured like the bed below, and fades with the
+    // foam and the mud.
     let whiteness = clamp(
-        covered + whitecaps * smoothstep(0.35, 0.7, patches) + edge + surf,
+        covered * (1.0 - muddy) + whitecaps * smoothstep(0.35, 0.7, patches) + edge + surf,
         0.0,
         0.85,
     );
+    let silt = covered * muddy * (1.0 - whiteness);
     // Water looked into from above is clear, and seen at a glancing angle mirrors the sky
     // and hides what is under it (Fresnel).
     let facing = abs(dot(normal, pbr_input.V));
@@ -649,18 +695,25 @@ fn fragment(
         let through = max(depth, 0.0) / max(facing, 0.2);
         murk = color.a * (1.0 - exp(-through / WATER_CLARITY));
     }
-    let opacity = max(mix(murk, 0.95, glancing), whiteness);
-    pbr_input.material.base_color = vec4(mix(color.rgb, vec3(0.95, 0.97, 1.0), whiteness), opacity);
-    pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, FOAM_ROUGHNESS, whiteness);
+    // The silt is painted on, solid, under the white: it is lit as the foam is.
+    let opacity = max(max(mix(murk, 0.95, glancing), whiteness), silt);
+    let silted = mix(color.rgb, bed.mud.rgb * SILT_LIGHT, silt);
+    pbr_input.material.base_color = vec4(mix(silted, vec3(0.95, 0.97, 1.0), whiteness), opacity);
+    pbr_input.material.perceptual_roughness = mix(pbr_input.material.perceptual_roughness, FOAM_ROUGHNESS, max(whiteness, silt));
     // Only there to put the water in the transmissive pass (see `surface.rs`).
     pbr_input.material.specular_transmission = 0.0;
 
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    pbr_input.material.base_color = alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        pbr_input.material.base_color,
+    );
 
-#ifdef PREPASS_PIPELINE
+@if(PREPASS_PIPELINE)
     let out = deferred_output(in, pbr_input);
-#else
+@if(!PREPASS_PIPELINE)
     var out: FragmentOutput;
+@if(!PREPASS_PIPELINE) {
     out.color = apply_pbr_lighting(pbr_input);
     // Foam is white whatever it mirrors.
     let ruffled = 1.0 - GUST_DARKENING * gust * min(breeze, 1.5);
@@ -683,13 +736,13 @@ fn fragment(
     if mirroring.scenery == 1u {
         // In the transmissive pass, drawn solid: what is under the water, through it, as a
         // see-through material would show it.
-        let under = textureSampleLevel(view_transmission_texture, view_transmission_sampler, uv, 0.0).rgb;
+        let under = drawn_at(uv);
         out.color = vec4(mix(under, out.color.rgb, opacity), 1.0);
     } else {
         // In the transparent pass, blended over what is under it (see `surface.rs`).
         out.color = vec4(out.color.rgb, opacity);
     }
-#endif
+}
 
     return out;
 }

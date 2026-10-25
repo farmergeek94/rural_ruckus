@@ -7,7 +7,7 @@
 //! those behind go out. So the rain keeps to its place in the world, and the camera goes
 //! through it.
 //!
-//! All of them are one mesh, a small square each, made once. `fall.wgsl` places every
+//! All of them are one mesh, a small square each, made once. `fall.wesl` places every
 //! corner of it each frame, on the graphics card, from the drop's place, the time and the
 //! camera: done here, for thousands of drops, it cost 4 to 6 ms a frame in a debug build.
 //! A raindrop is a thin streak along the way it falls, as long as the way it goes in
@@ -74,12 +74,12 @@ const SNOW_OPACITY: f32 = 0.9;
 /// How near the camera a drop starts to look smaller the nearer it comes, in metres.
 const NEAR_CAMERA: f32 = 3.0;
 
-/// Where `fall.wgsl` is among the embedded assets (see `WeatherPlugin`).
-pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/fall.wgsl";
+/// Where `fall.wesl` is among the embedded assets (see `WeatherPlugin`).
+pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/fall.wesl";
 
 pub(super) type FallMaterial = ExtendedMaterial<StandardMaterial, FallMotion>;
 
-/// How the drops move, for `fall.wgsl`.
+/// How the drops move, for `fall.wesl`.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub(super) struct FallMotion {
     #[uniform(100)]
@@ -95,7 +95,7 @@ impl MaterialExtension for FallMotion {
     }
 }
 
-/// As `Fall` in `fall.wgsl`, where each is explained.
+/// As `Fall` in `fall.wesl`, where each is explained.
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
 struct FallUniform {
     velocity: Vec3,
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn the_shader_reads_the_fall_in_the_order_it_is_written() {
-        let shader = include_str!("../shaders/fall.wgsl");
+        let shader = include_str!("../shaders/fall.wesl");
         let fields = [
             "velocity",
             "snow",
@@ -417,7 +417,7 @@ mod tests {
         for field in fields {
             let at = shader[from..]
                 .find(&format!("    {field}: "))
-                .unwrap_or_else(|| panic!("{field} out of order in fall.wgsl"));
+                .unwrap_or_else(|| panic!("{field} out of order in fall.wesl"));
             from += at + 1;
         }
         // And the uniform has those fields, as `FallUniform::new` fills them.

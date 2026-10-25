@@ -191,14 +191,14 @@ mod tests {
         store
             .write(|batch| {
                 batch
-                    .set_text("choice.truck", "trucks/Big.pod")
+                    .set_text("choice.truck", "pods/Big.pod")
                     .set_number("choice.laps", 5.0)
                     .set_blob("world.quick", &[1, 2, 3]);
             })
             .unwrap();
         assert_eq!(
             store.get_text("choice.truck").unwrap().as_deref(),
-            Some("trucks/Big.pod")
+            Some("pods/Big.pod")
         );
         assert_eq!(store.get_number("choice.laps").unwrap(), Some(5.0));
         assert_eq!(store.get_blob("world.quick").unwrap(), Some(vec![1, 2, 3]));

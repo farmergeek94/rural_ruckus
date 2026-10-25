@@ -32,11 +32,10 @@ use monster_truck_rural_ruckus::water::WaterSettings;
 
 const STEP: f64 = 1.0 / 120.0;
 
-/// Folders with nothing in them, so that only the built-in truck and track are listed.
+/// A folder with nothing in it, so that only the built-in truck and track are listed.
 fn nowhere() -> FrontEndSettings {
     FrontEndSettings {
-        trucks_folder: "no/such/trucks".into(),
-        tracks_folder: "no/such/tracks".into(),
+        pods_folder: "no/such/pods".into(),
         builtin: true,
         base_game_folders: vec!["no/such/base".into()],
         ask_for_base_game: false,
@@ -210,9 +209,9 @@ fn an_archive_that_will_not_load_is_greyed_out() {
         .resource_mut::<Catalogue>()
         .trucks
         .push(Entry {
-            id: "no/such/trucks/gone.pod".into(),
+            id: "no/such/pods/gone.pod".into(),
             name: "Gone".into(),
-            detail: "no/such/trucks/gone.pod".into(),
+            detail: "no/such/pods/gone.pod".into(),
             available: true,
         });
     app.update();
@@ -224,7 +223,7 @@ fn an_archive_that_will_not_load_is_greyed_out() {
     app.update();
     let entry = app.world().resource::<Catalogue>().trucks[1].clone();
     assert!(entry.detail.contains("gone.pod"), "{}", entry.detail);
-    assert_ne!(entry.detail, "no/such/trucks/gone.pod");
+    assert_ne!(entry.detail, "no/such/pods/gone.pod");
     assert!(on_show(&mut app).is_empty());
 
     player_does(&mut app, Action::Go);
@@ -456,7 +455,7 @@ fn remembered_numbers_are_kept_within_range() {
     store
         .write(|batch| {
             batch
-                .set_text("choice.truck", "trucks/long_gone.pod")
+                .set_text("choice.truck", "pods/long_gone.pod")
                 .set_number("choice.laps", 5000.0)
                 .set_number("choice.opponents", 5000.0)
                 .set_number("setup.suspension", -40.0);

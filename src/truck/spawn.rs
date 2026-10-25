@@ -71,8 +71,9 @@ const BODY_BOUNCE: f32 = 0.0;
 /// stops a sliding truck sooner. Against a tire, the tire's grip wins (`Max`).
 const BODY_FRICTION: f32 = 0.2;
 /// How far ahead of touching something the physics makes a contact with it, in metres.
-/// The physics makes one as far ahead as the truck will go in a step unless told
-/// otherwise, which keeps a fast body from passing through a thin one. But a truck is
+/// Avian 0.7 made one as far ahead as the truck would go in a step unless told otherwise,
+/// which keeps a fast body from passing through a thin one; 0.8 makes none unless asked
+/// (`SpeculativeCcd`), and this says what the truck wants whatever the default. A truck is
 /// built round contacts that are made only where it overlaps something: `contacts` reads
 /// where a tire is pressed in, and the sweep in `drive` climbs whatever a tire has
 /// reached into. Made ahead of time, the contact with a kerb's face held the tire off it,
@@ -158,7 +159,7 @@ fn spawn_truck(
     // The hull of the body's corners, where the truck says what they are.
     let collider = Some(&chosen.collider_points)
         .filter(|points| points.len() >= 4)
-        .and_then(|points| Collider::convex_hull(points.clone()))
+        .and_then(|points| Collider::convex_hull(points))
         .unwrap_or_else(|| {
             let size = CHASSIS_HALF_EXTENTS * 2.0;
             Collider::cuboid(size.x, size.y, size.z)
@@ -208,7 +209,12 @@ fn spawn_truck(
             SleepingDisabled,
             // Contacts only where the truck touches, not where it is about to: see
             // `SPECULATION`.
-            SpeculativeMargin(SPECULATION),
+            SpeculativeCcd::new(SPECULATION),
+            // Not swept against the ground either (`docs/avian.md`, 3.6): Avian 0.8 sweeps a
+            // body whose step is more than half its thinnest collider, a wheel core at
+            // 18 m/s and over, and puts it back where it first touched, which would hold a
+            // tire off a kerb's face as the contact ahead did. `drive` sweeps the tires.
+            SweptCcd::new().with_filter(CcdFilter::NONE),
         ))
         .id();
 

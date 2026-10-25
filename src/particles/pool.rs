@@ -3,7 +3,7 @@
 //! A pool of particles is one mesh of small squares, one for each slot, and a storage
 //! buffer on the graphics card with one record for each slot. When a particle is thrown,
 //! the CPU writes its record once: where it starts, how fast it goes, when it was thrown
-//! and when it goes. `particles.wgsl` works out where it is, and turns and sizes it, every
+//! and when it goes. `particles.wesl` works out where it is, and turns and sizes it, every
 //! frame from those and the time. So the CPU's work goes with how many are thrown, not
 //! with how many are in the air: as entities, one each, the particles cost a transform, a
 //! cull, an extraction and a sort each, every frame.
@@ -70,8 +70,8 @@ use bevy::render::storage::{GpuShaderBuffer, ShaderBuffer};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems};
 use bevy::shader::ShaderRef;
 
-/// Where `particles.wgsl` is among the embedded assets (see `add`).
-const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/particles.wgsl";
+/// Where `particles.wesl` is among the embedded assets (see `add`).
+const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/particles.wesl";
 
 /// How far apart, in seconds, the points of its path are that a particle is looked for
 /// under the ground at when it is thrown. Between the one above and the one under, the
@@ -88,9 +88,9 @@ pub fn add(app: &mut App) {
     app.world_mut()
         .resource_mut::<EmbeddedAssetRegistry>()
         .insert_asset(
-            PathBuf::from("src/shaders/particles.wgsl"),
+            PathBuf::from("src/shaders/particles.wesl"),
             Path::new(SHADER_PATH.trim_start_matches("embedded://")),
-            include_bytes!("../shaders/particles.wgsl").as_slice(),
+            include_bytes!("../shaders/particles.wesl").as_slice(),
         );
     app.add_plugins(MaterialPlugin::<ParticleMaterial>::default())
         .init_resource::<Uploads>()
@@ -167,7 +167,7 @@ pub struct Motion {
 
 impl Motion {
     /// Where a particle thrown from `from` at `velocity`, in air going at `air`, is `age`
-    /// seconds later, and how fast it goes then. As `particles.wgsl` works it out.
+    /// seconds later, and how fast it goes then. As `particles.wesl` works it out.
     ///
     /// The air slows it by `drag` times its speed through the air, and gravity pulls it
     /// down: so it tends to the speed at which the two balance, `settle`, and closes on it
@@ -212,7 +212,7 @@ impl Motion {
 }
 
 /// How the air moves that carries the particles of a pool: steadily, and in gusts on top,
-/// which are `gusts` times a mix of three swings of the shader's clock. `particles.wgsl`
+/// which are `gusts` times a mix of three swings of the shader's clock. `particles.wesl`
 /// works it out every frame (`Air::at`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Air {
@@ -236,7 +236,7 @@ impl Air {
     };
 
     /// How fast it goes, in m/s, when the shader's clock reads `time`. As `air_now` in
-    /// `particles.wgsl`, which only the tests need on the CPU.
+    /// `particles.wesl`, which only the tests need on the CPU.
     #[cfg(test)]
     pub fn at(&self, time: f32) -> Vec3 {
         let tau = std::f32::consts::TAU;
@@ -248,7 +248,7 @@ impl Air {
 }
 
 /// A surface that rises and falls with three waves rolling across it, each a sine of where
-/// and when. As `surface_height` in `particles.wgsl`.
+/// and when. As `surface_height` in `particles.wesl`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Waves {
     /// Per wave: the way it rolls, on the ground plane (world X and Z), times how many
@@ -269,7 +269,7 @@ impl Waves {
     };
 
     /// How high the surface stands at `position` (world X and Z) when the shader's clock
-    /// reads `time`, in metres. As `surface_height` in `particles.wgsl`, which only the tests
+    /// reads `time`, in metres. As `surface_height` in `particles.wesl`, which only the tests
     /// need on the CPU.
     #[cfg(test)]
     pub fn height_at(&self, position: Vec2, time: f32) -> f32 {
@@ -303,6 +303,10 @@ pub struct Particle {
     pub turning: f32,
     /// Its colour, times the pool's picture, and how solid it is, from 0 to 1.
     pub color: LinearRgba,
+    /// The colour it turns to, if it changes, and how many seconds after it is thrown it
+    /// has turned all the way: it is `color` when thrown, and goes evenly from there. How
+    /// solid it is stays `color`'s.
+    pub later: Option<(LinearRgba, f32)>,
     /// The line it trails along from where it is, in metres: it is drawn from there to the
     /// end of the line, as long as the line as the camera sees it, and no thinner. Zero for
     /// one as long as it is wide. Not for a streak.
@@ -312,7 +316,7 @@ pub struct Particle {
     pub shape: u32,
 }
 
-/// How the particles of a pool move, for `particles.wgsl`.
+/// How the particles of a pool move, for `particles.wesl`.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct ParticleMotion {
     #[uniform(100)]
@@ -326,7 +330,7 @@ pub struct ParticleMotion {
     scene_depth: Handle<Image>,
 }
 
-/// One particle as the shader reads it, as `Slot` in `particles.wgsl`: 80 bytes, in the
+/// One particle as the shader reads it, as `Slot` in `particles.wesl`: 80 bytes, in the
 /// buffer at `slot * Slot::SHADER_SIZE`.
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
 struct Slot {
@@ -335,6 +339,9 @@ struct Slot {
     velocity: Vec3,
     turned: f32,
     color: Vec4,
+    /// The colour it has turned to, and after how many seconds; 0 for one that keeps its
+    /// colour.
+    later: Vec4,
     /// When it was thrown and when it goes, on the shader's clock.
     life: Vec2,
     turning: f32,
@@ -350,6 +357,10 @@ impl Slot {
             velocity: particle.velocity,
             turned: particle.turned,
             color: particle.color.to_vec4(),
+            later: match particle.later {
+                Some((color, over)) => color.to_vec4().with_w(over),
+                None => particle.color.to_vec4().with_w(0.0),
+            },
             life: Vec2::from(life),
             turning: particle.turning,
             trail: particle.trail,
@@ -382,7 +393,7 @@ impl MaterialExtension for ParticleMotion {
     }
 }
 
-/// As `Motion` in `particles.wgsl`, where each is explained. Each `Vec3` is followed by
+/// As `Motion` in `particles.wesl`, where each is explained. Each `Vec3` is followed by
 /// an `f32`, which fills out its 16 bytes.
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
 struct MotionUniform {
@@ -540,7 +551,7 @@ pub fn pool(
     // Made on the graphics card, where it starts as zeros: every slot empty. Nothing is
     // kept on the CPU; `upload` writes the slots as they are thrown.
     let buffer = assets.buffers.add(ShaderBuffer::with_size(
-        slots * Slot::SHADER_SIZE.get() as usize,
+        slots as u64 * Slot::SHADER_SIZE.get(),
         RenderAssetUsages::default(),
     ));
     let material = assets.materials.add(ParticleMaterial {
@@ -734,6 +745,7 @@ mod tests {
             turned: 0.0,
             turning: 0.0,
             color: LinearRgba::WHITE,
+            later: None,
             trail: Vec3::ZERO,
             shape: 0,
         }
@@ -839,23 +851,24 @@ mod tests {
     fn the_shader_reads_a_slot_in_the_order_it_is_written() {
         // WGSL lays out a struct as encase does, so the fields in the same order give the
         // same 80 bytes.
-        assert_eq!(Slot::SHADER_SIZE.get(), 80);
-        let shader = include_str!("../shaders/particles.wgsl");
+        assert_eq!(Slot::SHADER_SIZE.get(), 96);
+        let shader = include_str!("../shaders/particles.wesl");
         let fields = [
-            "at", "size", "velocity", "turned", "color", "life", "turning", "trail", "shape",
+            "at", "size", "velocity", "turned", "color", "later", "life", "turning", "trail",
+            "shape",
         ];
         let mut from = shader.find("struct Slot {").expect("struct Slot");
         for field in fields {
             let at = shader[from..]
                 .find(&format!("    {field}: "))
-                .unwrap_or_else(|| panic!("{field} out of order in particles.wgsl"));
+                .unwrap_or_else(|| panic!("{field} out of order in particles.wesl"));
             from += at + 1;
         }
     }
 
     #[test]
     fn the_shader_reads_the_motion_in_the_order_it_is_written() {
-        let shader = include_str!("../shaders/particles.wgsl");
+        let shader = include_str!("../shaders/particles.wesl");
         let fields = [
             "air",
             "gravity",
@@ -881,7 +894,7 @@ mod tests {
         for field in fields {
             let at = shader[from..]
                 .find(&format!("    {field}: "))
-                .unwrap_or_else(|| panic!("{field} out of order in particles.wgsl"));
+                .unwrap_or_else(|| panic!("{field} out of order in particles.wesl"));
             from += at + 1;
         }
         let air = Air {
@@ -947,7 +960,7 @@ mod tests {
         let crest = Vec2::new(std::f32::consts::FRAC_PI_2 / 0.4, 0.0);
         assert!((first.height_at(crest, 0.0) - 0.3).abs() < 1e-5);
         assert!((first.height_at(crest + Vec2::X * 2.0 / 0.4, 1.0) - 0.3).abs() < 1e-5);
-        let shader = include_str!("../shaders/particles.wgsl");
+        let shader = include_str!("../shaders/particles.wesl");
         assert!(shader.contains(
             "let phase = motion.wave_x * position.x + motion.wave_z * position.y - motion.wave_rates * time;"
         ));
@@ -956,7 +969,7 @@ mod tests {
 
     #[test]
     fn the_shader_gusts_as_the_air_does() {
-        let shader = include_str!("../shaders/particles.wgsl");
+        let shader = include_str!("../shaders/particles.wesl");
         assert!(shader.contains(
             "motion.air + motion.gusts * dot(motion.gust_weights, sin(TAU * time / motion.gust_periods))"
         ));

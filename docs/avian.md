@@ -30,15 +30,16 @@ Marks, as in `docs/formats/`: **read** in the source of `avian3d` 0.7.0 or `parr
 
 ### 2.1 Versions
 
-| Item | Rapier | Avian | Mark |
-| --- | --- | --- | --- |
-| Bevy | 0.19.1 | 0.19.1 | read: Avian 0.7.0 depends on `bevy = "0.19.0"` |
-| Physics crate | `bevy_rapier3d` 0.36.0 | `avian3d` 0.7.0 | read |
-| Collision library | `parry3d` 0.30.2 | `parry3d` 0.27.0 | read. An older Parry: shape casts and contacts can differ. |
-| Licence | Apache 2.0 | MIT or Apache 2.0 | read |
+| Item | Rapier | Avian (at the move) | Avian (now) | Mark |
+| --- | --- | --- | --- | --- |
+| Bevy | 0.19.1 | 0.19.1 | 0.20.0 | read: Avian 0.7.0 depends on `bevy = "0.19.0"`, 0.8.0 on `0.20` |
+| Physics crate | `bevy_rapier3d` 0.36.0 | `avian3d` 0.7.0 | `avian3d` 0.8.0 | read |
+| Collision library | `parry3d` 0.30.2 | `parry3d` 0.27.0 | `parry3d` 0.31.1 | read. Shape casts and contacts can differ between Parry versions. |
+| Licence | Apache 2.0 | MIT or Apache 2.0 | The same | read |
 
-Avian features used: `3d`, `f32`, `parry-f32`, `parallel`, `debug-plugin`, with
-`default-features = false`. The game has no use for `collider-from-mesh`, `bevy_scene`,
+Avian features used: `3d`, `parry-f32`, `parallel`, `debug-plugin`, with
+`default-features = false` (`f32` was a feature of 0.7; in 0.8 single precision is the
+default, section 8). The game has no use for `collider-from-mesh`, `bevy_scene`,
 `bevy_picking` or `xpbd_joints`. `parallel` costs a little in the dev build (section 7)
 and is kept for the release build.
 
@@ -305,7 +306,7 @@ The user asked the agent to take the decision that is best for Avian in each cas
    changes a rule the game relies on.
 4. **Use Avian's default of 6 substeps.** Its solver is built round them, and they cost
    little (section 2.7).
-5. **No speculative contacts for trucks** (3.6). Loose scenery keeps them, and is not swept (3.5).
+5. **No speculative contacts for trucks** (3.6). Loose scenery keeps them, and is not swept (3.5). Since Avian 0.8 both are said on the body (section 8).
 6. **Do not apply the ground rule of 3.8.** The user asked for it to be removed.
 7. **Leave Parry's `FIX_INTERNAL_EDGES` off** on the ground, as under Rapier. It would
    change how a wheel's core rides. Try it only if driving shows cores catching.
@@ -315,7 +316,7 @@ The user asked the agent to take the decision that is best for Avian in each cas
 Measured headless by a tool in the scratch directory (not in the repository), one physics
 step for each update at 120 Hz; Rapier's figures from the same tool built against the
 last commit before the change. The tool drives the player's truck on a level track made
-from the built-in one, except in the race on Alpine. "Bigfoot" is `trucks/99BFoot.pod`.
+from the built-in one, except in the race on Alpine. "Bigfoot" is `pods/99BFoot.pod`.
 Where both trucks give the same figure, it is given once.
 
 | Case | Rapier | Avian |
@@ -391,3 +392,58 @@ where the work is worth spreading. That is the user's decision, not measured. Dr
 1280 x 720 with the whole plugin list, the frame went from 18.0 ms to 13.5 ms (the step's
 schedules alone, 17.7 ms): with every plugin, the frame has a few hundred systems, and
 the hand-offs were most of the frame too (`docs/smoothness.md`).
+
+## 8. Avian 0.8 and Bevy 0.20
+
+Upgraded 2026-10-20 from Avian 0.7.0 on Bevy 0.19.1, by the two migration guides
+([Avian](https://github.com/avianphysics/avian/blob/main/migration-guides/0.7-to-0.8.md),
+[Bevy](https://bevy.org/learn/migration-guides/0-19-to-0-20/)). Marks as in section 2:
+**read** in the source of `avian3d` 0.8.0.
+
+What changed under the game, and what was done about each:
+
+- **Speculative contacts are opt-in** (read: `SpeculativeCcd`, formerly
+  `SpeculativeMargin`; `NarrowPhaseConfig::default_speculative_margin` is gone). 0.7 made
+  them for every body as far ahead as it would go in a step; 0.8 makes none unless the body
+  carries `SpeculativeCcd`. The trucks keep `SpeculativeCcd::new(SPECULATION)` (0, as 3.6
+  decided), and loose scenery now carries `SpeculativeCcd::MAX` (`scenery/motion.rs`,
+  `loose`), which is what it had by default under 0.7 and what 3.5 relies on to keep it out
+  of the ground.
+- **Swept CCD is on by default** for a fast dynamic body against static and kinematic
+  bodies (read: `SweptCcd`, `CcdFilter::DEFAULT`). A body is fast when its step is more than
+  `SweptCcd::threshold` (0.5) of its thinnest collider's `ccd_thickness`; for a truck that is
+  a wheel core's radius, so a truck at about 18 m/s and over would have been swept against
+  the ground every step, non-linearly, and put back where it first touched. 0.7 swept
+  nothing unless asked, and the trucks were tuned without it (3.6: a contact made ahead of
+  a kerb held the tire off it). Trucks and loose scenery now carry
+  `SweptCcd::new().with_filter(CcdFilter::NONE)`, which keeps 0.7's behaviour. Not
+  measured: the decision is to change nothing that the trucks were tuned on.
+- **`Collider::convex_hull` borrows its points** (read). `truck/spawn.rs` and
+  `scenery/mod.rs` no longer clone them.
+- **The `f32` feature is gone**, single precision is the default, and the precision-generic
+  type names changed (`Scalar` to `Real`, `Vector` to `RVector`). The game names none of
+  them.
+- **`SolverBody` moved** from a component to the `SolverBodies` resource. The game reads
+  neither.
+- **Parry 0.31** (from 0.27): the version the Rapier build used was 0.30, so the shape casts
+  and contacts are now nearer that build's than at the move. `tests/physics.rs` and
+  `tests/truck.rs` (decision 3) pass unchanged.
+
+Measured after the upgrade, as section 7 was: Baja Beach HD, seven computer trucks on
+autopilot, the built-in truck, dev build, drawn off screen at 1920 x 1080 on the
+integrated GPU with the whole plugin list but sound, three runs of 25 s each build,
+alternated, the first 5 s left out:
+
+| Build | Mean | Median | 95th percentile |
+| --- | --- | --- | --- |
+| Bevy 0.19.1, Avian 0.7.0 | 18.7, 17.7, 17.2 ms | 9.9, 10.2, 10.0 ms | 97, 90, 88 ms |
+| Bevy 0.20.0, Avian 0.8.0 | 16.2, 17.7, 18.5 ms | 10.0, 10.3, 10.1 ms | 72, 91, 99 ms |
+
+No difference the runs can tell apart: the medians agree to a tenth of a millisecond,
+and the means swing more between runs of one build than between the builds. The
+probe's loop is not held to the display, so its spikes are its own; what the upgrade
+does to the frame on the user's screen is not measured.
+
+Bevy 0.20 changes that touched the physics side of the game: none. The rest of the
+Bevy migration (WESL shaders, `ScreenSpaceTransmission` on the race camera, pointer and
+UI events, the render world's depth texture) is recorded in the code it touched.

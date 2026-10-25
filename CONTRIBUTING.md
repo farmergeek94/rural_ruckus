@@ -8,22 +8,22 @@ How to build, run, test and inspect the game. `AGENTS.md` holds the short rules.
 cargo run                          # the front end: choose a truck, a track and a setup, and GO
 cargo run -- --builtin             # the front end with the built-in truck and track listed too (development only)
 cargo run -- --race --builtin      # straight to a race in the built-in truck on the built-in track
-cargo run -- tracks/MyTrack.pod --builtin             # an MTM2 track in the built-in truck
-cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod   # in one of its trucks (either order)
-cargo run -- tracks/MyTrack.pod --base-game=/path/to/MTM2   # the base game's archives from this folder, this run only
-cargo run -- tracks/AlpineMtns.pod --opponents=7      # against seven computer trucks
-cargo run -- tracks/AlpineMtns.pod --weather=storm    # clear, overcast, fog, rain, storm, snow or random (F7 in a race)
-cargo run -- tracks/AlpineMtns.pod --smooth-terrain   # the ground lit as if rounded off
-cargo run -- tracks/AlpineMtns.pod --no-blend-ground  # ground textures edge to edge, as MTM2 draws them
-cargo run -- tracks/AlpineMtns.pod --no-mipmaps       # textures without mipmaps, to compare
-cargo run -- tracks/AlpineMtns.pod --no-backdrop      # without the distant hills round the horizon
+cargo run -- pods/MyTrack.pod --builtin               # an MTM2 track in the built-in truck
+cargo run -- pods/MyTrack.pod pods/MyTruck.pod         # in one of its trucks (either order)
+cargo run -- pods/MyTrack.pod --base-game=/path/to/MTM2     # the base game's archives from this folder, this run only
+cargo run -- pods/AlpineMtns.pod --opponents=7        # against seven computer trucks
+cargo run -- pods/AlpineMtns.pod --weather=storm      # clear, overcast, fog, rain, storm, snow or random (F7 in a race)
+cargo run -- pods/AlpineMtns.pod --smooth-terrain     # the ground lit as if rounded off
+cargo run -- pods/AlpineMtns.pod --no-blend-ground    # ground textures edge to edge, as MTM2 draws them
+cargo run -- pods/AlpineMtns.pod --no-mipmaps         # textures without mipmaps, to compare
+cargo run -- pods/AlpineMtns.pod --no-backdrop        # without the distant hills round the horizon
 cargo run -- --base-game=$HOME/Documents/mtm2 --no-settle-scenery   # objects on slopes stand as the track puts them, feet floating
-cargo run -- tracks/AlpineMtns.pod --integrated-graphics   # graphics for a processor's built-in GPU (INTEGRATED GRAPHICS on the options screen)
-cargo run -- tracks/AlpineMtns.pod --antialiasing=fxaa --shadow-cascades=2 --shadow-distance=100 --anisotropy=4   # single cheaper settings (F2 changes them in a race)
+cargo run -- pods/AlpineMtns.pod --integrated-graphics     # graphics for a processor's built-in GPU (INTEGRATED GRAPHICS on the options screen)
+cargo run -- pods/AlpineMtns.pod --antialiasing=fxaa --shadow-cascades=2 --shadow-distance=100 --anisotropy=4     # single cheaper settings (F2 changes them in a race)
 cargo run -- --log-fps --no-vsync  # print the true frame time once a second
 cargo run -- --log-fps --no-vsync --one-thread-schedules   # the same with the frame's and the step's schedules on one thread (see docs/smoothness.md); --threaded-schedules is Bevy's executor, the default
 cargo run -- --fifo                # strict vsync (PresentMode::Fifo): never shows a late frame early
-cargo run -- tracks/AlpineMtns.pod --log-fps --autopilot   # measure while it drives itself
+cargo run -- pods/AlpineMtns.pod --log-fps --autopilot     # measure while it drives itself
 cargo test                         # all tests (headless, no window needed)
 cargo test --test track            # one integration test file
 cargo test -p pod                 # one crate's unit tests (the MTM2 loader; `-p ruckus_content` the content model, `-p ruckus_circuit` the lap race, `-p ruckus_rumble` the rumble)
@@ -35,8 +35,8 @@ cargo fmt                          # format
 
 ## Real files
 
-MTM2's files are copyrighted and are never committed. Git ignores `tracks/`, `trucks/`
-and `base/` (see the README for what goes where).
+MTM2's files are copyrighted and are never committed. Git ignores `pods/` and `base/`
+(see the README for what goes where).
 
 The game finds the base game's archives, which tracks and trucks borrow from, in this
 order:
@@ -49,7 +49,7 @@ order:
 In each folder, the archives that its `POD.INI` names are loaded, in its order: the base
 game's 19, and every add-on track or truck whose archive was added to `POD.INI`, as
 MTM2's README says to install one. Their tracks and trucks are listed with those in
-`tracks/` and `trucks/`. An archive in the folder that `POD.INI` does not name is not
+`pods/`. An archive in the folder that `POD.INI` does not name is not
 loaded. A folder with no `POD.INI` gives every archive in it and in its subfolders one
 level down, so `base/` with links to a CD's `Shared` and `English` folders works too.
 Only a folder with archives to load can be chosen. The front end asks for the folder when
@@ -102,7 +102,7 @@ Add one when you add a test file.
   have unit tests in their own files, which `cargo test` at the root runs too. A slice whose behaviour is physics
   (`truck`, `race`, `opponents`, `camera`) has none. Mark a test that simulates more than
   a few seconds `#[ignore]`, with a reason.
-- **No committed test reads `tracks/`, `trucks/` or `base/`.** Measure real files with a
+- **No committed test reads `pods/` or `base/`.** Measure real files with a
   probe in the scratch directory, record the result in `docs/formats/`, and delete the
   probe (see AGENTS.md).
 - Bevy keeps resources as entities too: a test that counts a race's entities

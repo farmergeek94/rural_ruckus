@@ -3,8 +3,9 @@
 //! tires and leaves a wake that spreads behind it, a wheel that comes down into the water
 //! starts a ring, the waves cross, slow in the shallows and reflect off the shore, and the
 //! foam the trucks churn up lies on the water, spreads and fades after they have gone.
-//! `water.wgsl` raises the surface by the field's height, tilts it by its slope, and
-//! whitens it by its foam.
+//! `water.wesl` raises the surface by the field's height, tilts it by its slope, whitens
+//! it by its foam, and colours it like the bed by the mud the tires stir up off the
+//! bottom, which lies in the foam as their tracks.
 //!
 //! Each frame the trucks' doings are a short list of `Source`s (written by `wake` into
 //! `Disturbances`), and the field is stepped as many times as the frame was long
@@ -15,7 +16,7 @@
 //! outer band is wide (`JUMP`), the field is cleared.
 //!
 //! The field is three textures: the state before and after a step, which swap places each
-//! step, and what `water.wgsl` reads, written at every step. A step reads the depth map
+//! step, and what `water.wesl` reads, written at every step. A step reads the depth map
 //! that `shore` makes, for how deep the water is and where the land is.
 //!
 //! Only in an app that can draw. In one that can't, nothing here runs.
@@ -57,7 +58,7 @@ use crate::weather::WeatherSettings;
 /// window is their product across: 256 m, a little more than the patch of moving water
 /// round the camera (`surface::PATCH_SIZE`). Each step is a pass over every texel, so
 /// more texels cost more; closer texels carry shorter waves. Both must match
-/// `field.wgsl` and `water.wgsl`, which a test checks.
+/// `field.wgsl` and `water.wesl`, which a test checks.
 pub(super) const TEXELS: u32 = 512;
 pub(super) const SPACING: f32 = 0.5;
 /// How long one step of the field is, in seconds, and the most steps taken in one frame:
@@ -74,9 +75,10 @@ const WINDOW: f32 = TEXELS as f32 * SPACING;
 /// window's outer band, which the shader eases flat, is about 20 m wide (a test checks).
 /// Further, and what a texel held on the other side of the window would show.
 const JUMP: f32 = WINDOW / 16.0;
-/// Four 16-bit floats a texel: the height, its rate of rise and the foam, and for what
-/// `water.wgsl` reads, the height, two slopes and the foam. 16 bits hold a height to
-/// a tenth of a millimetre, and can be read between texels, which 32-bit ones can't.
+/// Four 16-bit floats a texel: the height, its rate of rise, the foam and the mud, and
+/// for what `water.wesl` reads, the height, two slopes and the foam, and the mud again on
+/// its own. 16 bits hold a height to a tenth of a millimetre, and can be read between
+/// texels, which 32-bit ones can't.
 const FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 /// The shader's workgroup, along each side. As `@workgroup_size` in `field.wgsl`.
 const WORKGROUP: u32 = 8;
@@ -101,6 +103,8 @@ pub(super) struct Source {
     /// How much foam it churns up each second, and at once.
     pub foam: f32,
     pub burst: f32,
+    /// How much mud it stirs up off the bottom each second: a tire's tread on the bed.
+    pub mud: f32,
 }
 
 /// The sources as the shader reads them.
@@ -136,12 +140,15 @@ struct FieldUniform {
 /// The field's textures, made with each race on a track with water, and the depth map
 /// the shore gives it. Only in an app that can draw.
 #[derive(Resource, Clone, ExtractResource)]
+#[extract_app(RenderApp)]
 pub(super) struct Field {
     before: Handle<Image>,
     after: Handle<Image>,
-    /// What `water.wgsl` reads: per texel the height, in metres, how much it rises for each
+    /// What `water.wesl` reads: per texel the height, in metres, how much it rises for each
     /// metre along X and along Z, and the foam.
     pub(super) look: Handle<Image>,
+    /// What `water.wesl` reads too: per texel the mud the tires have stirred up, in its red.
+    pub(super) mud: Handle<Image>,
     /// How deep the still water is over the ground (`shore::depth_map`), and where it lies.
     pub(super) depths: Handle<Image>,
     pub(super) shore: ShoreUniform,
@@ -154,6 +161,7 @@ pub(super) struct Disturbances(pub(super) Vec<Source>);
 
 /// What the field is told for this frame, which goes to the render world.
 #[derive(Resource, Clone, ExtractResource, Default, Debug, PartialEq)]
+#[extract_app(RenderApp)]
 struct FieldFrame {
     /// How many steps to take. None: nothing to do.
     steps: u32,
@@ -221,13 +229,14 @@ pub(super) fn make_field(
         before: images.add(blank()),
         after: images.add(blank()),
         look: images.add(blank()),
+        mud: images.add(blank()),
         depths,
         shore,
     });
 }
 
 /// A texture of the field, flat and still, which the shader may both write and read, and
-/// which `water.wgsl` may read between texels, round and round.
+/// which `water.wesl` may read between texels, round and round.
 fn blank() -> Image {
     let mut image = Image::new_fill(
         Extent3d {
@@ -294,6 +303,7 @@ fn frame_field(
         for source in &mut disturbances.0 {
             source.push = 0.0;
             source.foam = 0.0;
+            source.mud = 0.0;
         }
         frame.set_if_neq(FieldFrame::default());
         return;
@@ -346,6 +356,7 @@ fn make_pipeline(
                 texture_2d(TextureSampleType::Float { filterable: false }),
                 uniform_buffer::<FieldUniform>(false),
                 storage_buffer_read_only::<Sources>(false),
+                texture_storage_2d(FORMAT, StorageTextureAccess::WriteOnly),
             ),
         ),
     );
@@ -404,10 +415,11 @@ fn prepare_field(
     };
     // The textures are made in the frame the field is, before this; a race that is over
     // has dropped them.
-    let (Some(before), Some(after), Some(look), Some(depths)) = (
+    let (Some(before), Some(after), Some(look), Some(mud), Some(depths)) = (
         images.get(&field.before),
         images.get(&field.after),
         images.get(&field.look),
+        images.get(&field.mud),
         images.get(&field.depths),
     ) else {
         return;
@@ -432,6 +444,7 @@ fn prepare_field(
                 &depths.texture_view,
                 uniform.clone(),
                 sources.clone(),
+                &mud.texture_view,
             )),
         )
     };
@@ -488,7 +501,7 @@ mod tests {
         assert!(field.contains(&format!("const SPACING: f32 = {SPACING:?};")));
         assert!(field.contains(&format!("array<Source, {MAX_SOURCES}>")));
         assert!(field.contains(&format!("@workgroup_size({WORKGROUP}, {WORKGROUP}, 1)")));
-        let water = include_str!("../shaders/water.wgsl");
+        let water = include_str!("../shaders/water.wesl");
         assert!(water.contains(&format!("const FIELD_TEXELS: f32 = {TEXELS}.0;")));
         assert!(water.contains(&format!("const FIELD_SPACING: f32 = {SPACING:?};")));
     }

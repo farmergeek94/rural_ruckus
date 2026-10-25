@@ -23,7 +23,7 @@ file formats.
 
 ## 1. Install the tools
 
-1. Install Rust with [rustup](https://rustup.rs). Bevy 0.19 needs a recent stable Rust
+1. Install Rust with [rustup](https://rustup.rs). Bevy 0.20 needs a recent stable Rust
    (`rustup update`).
 2. On Linux, install the libraries that Bevy needs. On Debian or Ubuntu:
 
@@ -36,12 +36,11 @@ file formats.
 
 ## 2. Supply the game files
 
-Put your files in these folders. Git ignores all three.
+Put your files in these folders. Git ignores both.
 
 | Folder | Put in it |
 | --- | --- |
-| `tracks/` | Track archives (`.pod`) |
-| `trucks/` | Truck archives (`.pod`) |
+| `pods/` | Track and truck archives (`.pod`). The game finds out which is which from what is in each one |
 | `base/` | Links to the `Shared` and `English` folders of your MTM2 CD, if MTM2 is not installed |
 
 Tracks and trucks borrow textures and models from the base game's archives. The first
@@ -72,10 +71,10 @@ a setup, and select GO.
 To go directly to a race, name a track and a truck (in either order), with options:
 
 ```sh
-cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod
-cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod --opponents=7     # seven computer trucks
-cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod --weather=rain    # clear, overcast, fog, rain, storm, snow or random
-cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod --time=night      # day, dusk or night
+cargo run -- pods/MyTrack.pod pods/MyTruck.pod
+cargo run -- pods/MyTrack.pod pods/MyTruck.pod --opponents=7         # seven computer trucks
+cargo run -- pods/MyTrack.pod pods/MyTruck.pod --weather=rain        # clear, overcast, fog, rain, storm, snow or random
+cargo run -- pods/MyTrack.pod pods/MyTruck.pod --time=night          # day, dusk or night
 cargo run -- --base-game=/path/to/MTM2                               # the base game from this folder, this run only
 cargo run -- --race --builtin                                        # the built-in truck and track (no files needed)
 ```
@@ -92,7 +91,7 @@ cargo run --release
 ./target/release/monster_truck_rural_ruckus   # start it without Cargo
 ```
 
-Start it from the repository folder: the game finds `tracks/`, `trucks/`, `base/` and
+Start it from the repository folder: the game finds `pods/`, `base/` and
 `saves/` relative to the current folder.
 
 If you change the code, test with the dev profile. The debugger shows more in a dev

@@ -26,15 +26,14 @@ rumble = { package = "ruckus_rumble", path = "crates/rumble" }
 # its own image loading, so it adds nothing to compile.
 png = "0.18"
 # avian3d releases are tied to one Bevy minor version: upgrade them together.
-bevy = "0.19"
+bevy = "0.20"
 # The physics engine (see `docs/avian.md`, and `physics.rs` for how it is set up). Only
 # what the game uses: no colliders from meshes, scenes or picking. `parallel` spreads a
 # step's work over the CPU's cores, with eight trucks and their wheels to solve 120 times
 # a second. In the dev build it costs a little more in hand-offs than it saves
 # (`physics.rs`); it is kept for the release build, where the work is worth spreading.
-avian3d = { version = "0.7", default-features = false, features = [
+avian3d = { version = "0.8", default-features = false, features = [
     "3d",
-    "f32",
     "parry-f32",
     "parallel",
     "debug-plugin",

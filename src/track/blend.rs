@@ -2,7 +2,7 @@
 //! the line between them, so it is soft instead of hard. A departure from Monster Truck
 //! Madness 2, which draws every cell's tile edge to edge.
 //!
-//! The ground's shader (`tiles.wgsl`) does the work. Within `FADE` of an edge of its cell,
+//! The ground's shader (`tiles.wesl`) does the work. Within `FADE` of an edge of its cell,
 //! a pixel also reads the tile of the cell across that edge, at that tile's own edge, and
 //! mixes the two: half and half on the line. The fade is narrow, so the tiles keep their
 //! shapes up to it, and a road stays a road.

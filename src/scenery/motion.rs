@@ -81,6 +81,10 @@ pub(super) fn loose(
             bouncy(),
             Settling(SETTLE_STEPS),
             LockedAxes::ALL_LOCKED,
+            // As Avian 0.7 had every body: contacts made as far ahead as it will go in a
+            // step keep it out of the ground, and no sweep (`docs/avian.md`, 3.5).
+            SpeculativeCcd::MAX,
+            SweptCcd::new().with_filter(CcdFilter::NONE),
         ))
         .id()
 }

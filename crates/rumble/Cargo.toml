@@ -8,4 +8,4 @@ description = "The rules of a Summit Rumble and the mind of a computer truck in 
 # The content model the rumble is played on: the ground, the ground boxes and the zones.
 content = { package = "ruckus_content", path = "../content" }
 # For its vectors alone, as `content` uses them. No default features: no engine.
-bevy = { version = "0.19", default-features = false }
+bevy = { version = "0.20", default-features = false }

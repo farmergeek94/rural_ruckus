@@ -354,6 +354,7 @@ pub(super) fn throw_sparks(
                 turned: 0.0,
                 turning: 0.0,
                 color: spark_color(heat),
+                later: None,
                 trail: Vec3::ZERO,
                 shape: 0,
             };

@@ -12,7 +12,7 @@ commit `81d84e1`, `src/worker/lvl-parser.js`, `parseTty`): splits each number in
 MTM2 type. Its surface names (Road, Curb, Grass, Dirt, Rocks, from `CPREDIT.EXE`) are for
 CART Precision Racing's `.TTX`, a different file.
 
-Everything else on this page is **measured** on the 12 tracks in `tracks/`.
+Everything else on this page is **measured** on 12 community tracks in `pods/`.
 
 ## Where the file is
 

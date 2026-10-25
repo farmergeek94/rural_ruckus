@@ -2,8 +2,9 @@
 // the graphics card steps: a wave spreads out from wherever a truck pushes the water, so
 // that a moving truck leaves a wake, a plunging wheel starts a ring, waves cross, slow in
 // the shallows and reflect off the shore, and the foam the trucks churn up lies on the
-// water and fades. `field.rs` says what the trucks do to it (`Source`), and `water.wgsl`
-// draws it from `look`.
+// water and fades. The mud the tires stir up off the bottom lies in the foam as their
+// tracks, and fades too. `field.rs` says what the trucks do to it (`Source`), and
+// `water.wesl` draws it from `look` and `mud_look`.
 //
 // The field is a square window of `TEXELS` texels `SPACING` metres apart, centred on the
 // camera. Texel `i` holds every cell of the world whose index is `i` modulo `TEXELS`, and
@@ -34,6 +35,8 @@ struct Source {
     // How much foam it churns up each second, and at once.
     foam: f32,
     burst: f32,
+    // How much mud it stirs up off the bottom each second.
+    mud: f32,
 }
 
 struct Sources {
@@ -64,12 +67,14 @@ struct Field {
 
 @group(0) @binding(0) var before: texture_storage_2d<rgba16float, read>;
 @group(0) @binding(1) var after: texture_storage_2d<rgba16float, write>;
-// What `water.wgsl` reads: the height, how it slopes along X and Z, and the foam.
+// What `water.wesl` reads: the height, how it slopes along X and Z, and the foam.
 @group(0) @binding(2) var look: texture_storage_2d<rgba16float, write>;
 // How deep the still water is over the ground, in metres (see `shore.rs`).
 @group(0) @binding(3) var depth_map: texture_2d<f32>;
 @group(0) @binding(4) var<uniform> field: Field;
 @group(0) @binding(5) var<storage, read> sources: Sources;
+// What `water.wesl` reads too: the mud, in the red.
+@group(0) @binding(6) var mud_look: texture_storage_2d<rgba16float, write>;
 
 // As in `field.rs`: how many texels the window is along a side, and how far apart they
 // are, in metres.
@@ -106,6 +111,16 @@ const FOAM_LIFE: f32 = 5.0;
 const FOAM_SPREAD: f32 = 0.5;
 // The most foam a texel holds: more than solid white is no whiter.
 const MOST_FOAM: f32 = 2.0;
+// The same for the mud the tires stir up: how long it takes to fade to a third, in
+// seconds, how much of the way towards its neighbours' a texel's goes each second (less
+// than the foam, so that a fresh track keeps its edges while it merges into the aged foam
+// round it), and the most a texel holds; and how
+// far out from a source it is stirred up, as a share of the source's reach: a tread's
+// width, not the bow wave's, so that each tire leaves its own track.
+const MUD_LIFE: f32 = 6.0;
+const MUD_SPREAD: f32 = 0.3;
+const MOST_MUD: f32 = 2.0;
+const MUD_REACH: f32 = 0.4;
 
 // The texel `TEXELS` wide window round, for a texel index that may be off it.
 fn wrap(texel: vec2<i32>) -> vec2<i32> {
@@ -121,7 +136,7 @@ fn world_of(texel: vec2<i32>) -> vec2<f32> {
 }
 
 // How deep the still water is over the ground at `position`, in metres. Below the
-// ground it is less than 0. As `still_depth` in `water.wgsl`.
+// ground it is less than 0. As `still_depth` in `water.wesl`.
 fn still_depth(position: vec2<f32>) -> f32 {
     let last = i32(field.shore.resolution) - 1;
     var from_origin = position - field.shore.origin;
@@ -151,6 +166,7 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
     if field.clear == 1u {
         textureStore(after, texel, vec4(0.0));
         textureStore(look, texel, vec4(0.0));
+        textureStore(mud_look, texel, vec4(0.0));
         return;
     }
     let position = world_of(texel);
@@ -164,6 +180,7 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
     // How fast it rises, in m/s.
     var rising = here.g;
     var foam = here.b;
+    var mud = here.a;
 
     let depth = still_depth(position);
     let wave_speed2 = min(RIPPLE_SPEED * RIPPLE_SPEED, GRAVITY * max(depth, 0.0));
@@ -174,6 +191,8 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
 
     foam = mix(foam, (left.b + right.b + up.b + down.b) * 0.25, min(FOAM_SPREAD * dt, 1.0));
     foam *= max(1.0 - dt / FOAM_LIFE, 0.0);
+    mud = mix(mud, (left.a + right.a + up.a + down.a) * 0.25, min(MUD_SPREAD * dt, 1.0));
+    mud *= max(1.0 - dt / MUD_LIFE, 0.0);
 
     for (var index = 0u; index < sources.count; index++) {
         let source = sources.sources[index];
@@ -191,6 +210,8 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         height += (source.lift + source.push * bow * dt) * bell;
         foam += (source.burst + source.foam * dt) * bell;
+        let track = source.radius * MUD_REACH;
+        mud += source.mud * dt * exp(-dot(offset, offset) / (track * track));
     }
 
     // Steep water breaks into foam.
@@ -204,6 +225,7 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
         height = 0.0;
         rising = 0.0;
         foam = 0.0;
+        mud = 0.0;
     }
     // The outer band of the window eases flat, so that nothing is left in a texel by the
     // time it comes round to the other side.
@@ -213,7 +235,9 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
     height *= keep;
     rising *= keep;
     foam = min(foam * keep, MOST_FOAM);
+    mud = min(mud * keep, MOST_MUD);
 
-    textureStore(after, texel, vec4(height, rising, foam, 0.0));
+    textureStore(after, texel, vec4(height, rising, foam, mud));
     textureStore(look, texel, vec4(height, slope.x, slope.y, foam));
+    textureStore(mud_look, texel, vec4(mud, 0.0, 0.0, 0.0));
 }

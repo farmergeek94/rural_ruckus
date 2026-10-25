@@ -9,13 +9,13 @@
 //
 // The rest is the standard material's: the picture, the colour, and the fog.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
-}
+};
 
 // Only the main pass: see-through things are not drawn in the prepass.
-#import bevy_pbr::forward_io::{Vertex, VertexOutput}
+import bevy_pbr::render::forward_io::{Vertex, VertexOutput};
 
 struct Fall {
     // How fast the drops fall and are blown along, in m/s.
@@ -43,10 +43,10 @@ struct Fall {
     cover_cell: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> fall: Fall;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> fall: Fall;
 // For each place of the ring: the height of the cover, in metres, the world square that it
 // holds (X, Z), and 1 if it is found, 0 if not.
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> cover: array<vec4<f32>>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage, read> cover: array<vec4<f32>>;
 
 // Whether a drop at `at` is under cover: below the highest solid above its square.
 fn under_cover(at: vec3<f32>) -> bool {
@@ -103,14 +103,11 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
         out.position = vec4(2.0, 2.0, 0.5, 1.0);
     }
     out.world_normal = vec3(0.0, 1.0, 0.0);
-#ifdef VERTEX_UVS_A
+@if(VERTEX_UVS_A)
     out.uv = mesh_vertex.uv;
-#endif
-#ifdef VERTEX_UVS_B
+@if(VERTEX_UVS_B)
     out.uv_b = mesh_vertex.uv_b;
-#endif
-#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
+@if(VERTEX_OUTPUT_INSTANCE_INDEX)
     out.instance_index = mesh_vertex.instance_index;
-#endif
     return out;
 }

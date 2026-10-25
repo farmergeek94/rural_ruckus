@@ -7,7 +7,7 @@
 //! a picture repeats evenly along it. The pieces of every ribbon are one mesh of four
 //! corners each, one for each slot, and a storage buffer with one record a slot, as the
 //! particles are (`pool`): the CPU writes a slot once when its piece is laid, and
-//! `ribbons.wgsl` places and fades it from then on, so that the CPU's work goes with how
+//! `ribbons.wesl` places and fades it from then on, so that the CPU's work goes with how
 //! many pieces are laid, not with how many lie on the ground. The mesh never changes.
 //!
 //! The slots are a ring: the piece laid longest ago is the one written over when every
@@ -48,8 +48,8 @@ use bevy::shader::ShaderRef;
 
 use super::pool::{Upload, Uploads};
 
-/// Where `ribbons.wgsl` is among the embedded assets (see `add`).
-const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/ribbons.wgsl";
+/// Where `ribbons.wesl` is among the embedded assets (see `add`).
+const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/ribbons.wesl";
 
 /// How much further off than the particles the ribbons are sorted, in metres, so that
 /// they are drawn before them: under the dust and the spray in the air over them. As the
@@ -64,9 +64,9 @@ pub fn add(app: &mut App) {
     app.world_mut()
         .resource_mut::<EmbeddedAssetRegistry>()
         .insert_asset(
-            PathBuf::from("src/shaders/ribbons.wgsl"),
+            PathBuf::from("src/shaders/ribbons.wesl"),
             Path::new(SHADER_PATH.trim_start_matches("embedded://")),
-            include_bytes!("../shaders/ribbons.wgsl").as_slice(),
+            include_bytes!("../shaders/ribbons.wesl").as_slice(),
         );
     app.add_plugins(MaterialPlugin::<RibbonMaterial>::default())
         // After every slice's `Update`, where pieces are laid, so that they are drawn in
@@ -106,7 +106,7 @@ pub struct Piece {
     pub color: LinearRgba,
 }
 
-/// As `Look` in `ribbons.wgsl`.
+/// As `Look` in `ribbons.wesl`.
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
 struct LookUniform {
     life: f32,
@@ -116,7 +116,7 @@ struct LookUniform {
     gone_at: f32,
 }
 
-/// One piece as the shader reads it, as `Slot` in `ribbons.wgsl`: 96 bytes, in the buffer
+/// One piece as the shader reads it, as `Slot` in `ribbons.wesl`: 96 bytes, in the buffer
 /// at `slot * Slot::SHADER_SIZE`.
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
 struct Slot {
@@ -146,7 +146,7 @@ impl Slot {
     }
 }
 
-/// How the pieces of a set of ribbons look, for `ribbons.wgsl`.
+/// How the pieces of a set of ribbons look, for `ribbons.wesl`.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct RibbonMaterial {
     #[uniform(0)]
@@ -252,7 +252,7 @@ pub fn ribbons(
     // Made on the graphics card, where it starts as zeros: every slot empty. Nothing is
     // kept on the CPU; `pool::upload` writes the slots as pieces are laid.
     let buffer = assets.buffers.add(ShaderBuffer::with_size(
-        slots * Slot::SHADER_SIZE.get() as usize,
+        slots as u64 * Slot::SHADER_SIZE.get(),
         RenderAssetUsages::default(),
     ));
     let material = assets.materials.add(RibbonMaterial {
@@ -427,13 +427,13 @@ mod tests {
         // WGSL lays out a struct as encase does, so the fields in the same order give the
         // same bytes.
         assert_eq!(Slot::SHADER_SIZE.get(), 96);
-        let shader = include_str!("../shaders/ribbons.wgsl");
+        let shader = include_str!("../shaders/ribbons.wesl");
         let in_order = |name: &str, fields: &[&str]| {
             let mut from = shader.find(name).unwrap_or_else(|| panic!("{name}"));
             for field in fields {
                 let at = shader[from..]
                     .find(&format!("    {field}: "))
-                    .unwrap_or_else(|| panic!("{field} out of order in ribbons.wgsl"));
+                    .unwrap_or_else(|| panic!("{field} out of order in ribbons.wesl"));
                 from += at + 1;
             }
         };

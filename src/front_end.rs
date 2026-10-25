@@ -3,7 +3,7 @@
 //! nothing of the game and those slices know nothing of `ui`; this is the only code
 //! that knows both. Nothing uses it.
 //!
-//! It lists the archives in `trucks/` and `tracks/`, the trucks and tracks in the base
+//! It lists the archives in `pods/`, the trucks and tracks in the base
 //! game's archives (`base_game::BaseGame`, several to an archive), and the built-in truck
 //! and track beside them only when `FrontEndSettings::builtin` asks for them (the `--builtin` flag),
 //! puts the highlighted truck on the showroom's turntable, paints the highlighted track's
@@ -35,7 +35,8 @@
 //! the game starts. A setting changed elsewhere (by F2 in a race, or on the command line)
 //! is shown as it is, and is only written over when the player changes that line.
 //!
-//! Listing an archive reads its name alone (`peek_pod`, a millisecond or two). Loading a
+//! Listing an archive reads its name alone (`pod::track::peek`, `pod::truck::peek`, a
+//! millisecond or two). Loading a
 //! whole truck takes 40 to 95 ms in a debug build and a track 150 ms, which is many frames,
 //! so what is highlighted is loaded on a background task, the last truck staying on show
 //! until the new one is ready, and the last few are kept so that walking back up a list is
@@ -119,8 +120,9 @@ pub struct FrontEndPlugin {
 /// with them. Insert it before adding `FrontEndPlugin`.
 #[derive(Resource, Clone, Debug)]
 pub struct FrontEndSettings {
-    pub trucks_folder: PathBuf,
-    pub tracks_folder: PathBuf,
+    /// The folder of track and truck archives. MTM2 does not keep them apart either: what
+    /// an archive is comes from what is in it, and one can hold both.
+    pub pods_folder: PathBuf,
     /// Whether the built-in truck and track are offered, first in each list. They are for
     /// development: off, only the archives in the folders are.
     pub builtin: bool,
@@ -135,8 +137,7 @@ impl Default for FrontEndSettings {
     /// Beside the working directory, as the command line's paths are, and archives alone.
     fn default() -> Self {
         Self {
-            trucks_folder: "trucks".into(),
-            tracks_folder: "tracks".into(),
+            pods_folder: "pods".into(),
             builtin: false,
             base_game_folders: vec![base_game::DEFAULT_FOLDER.into()],
             ask_for_base_game: false,
@@ -345,7 +346,7 @@ impl Browsing {
     }
 }
 
-/// The trucks and tracks to list: in the folders, and in the base game.
+/// The trucks and tracks to list: in the folder, and in the base game.
 fn catalogue_for(settings: &FrontEndSettings, base: &BaseGame) -> Catalogue {
     let base_trucks = pod::truck::peek_base(base)
         .into_iter()
@@ -361,19 +362,19 @@ fn catalogue_for(settings: &FrontEndSettings, base: &BaseGame) -> Catalogue {
         .into_iter()
         .map(|track| base_entry(&track.archive, &track.file, track.peek.map(track_peeked)))
         .collect();
+    // Each archive is read once, for both lists.
+    let archives = peek_folder(&settings.pods_folder);
     Catalogue {
         trucks: list_archives(
-            &settings.trucks_folder,
+            &archives,
             settings.builtin.then(|| TruckData::builtin().name),
-            |path| Ok(pod::truck::peek_pod(path)?.map(|name| (name, None))),
-            "no truck in this archive",
+            |archive| &archive.truck,
             base_trucks,
         ),
         tracks: list_archives(
-            &settings.tracks_folder,
+            &archives,
             settings.builtin.then(|| track::builtin_track().name),
-            |path| Ok(pod::track::peek_pod(path)?.map(track_peeked)),
-            "no track in this archive",
+            |archive| &archive.track,
             base_tracks,
         ),
     }
@@ -548,17 +549,21 @@ impl Showing {
     }
 }
 
-/// The built-in one, if it is offered, then every archive in the folder and every one of
-/// the base game's (`from_base`), by name. An archive that can't be read is listed all the
-/// same, greyed out, with the reason: community archives are often malformed, and the
-/// player should see why one is missing.
-fn list_archives(
-    folder: &Path,
-    builtin_name: Option<String>,
-    peek: impl Fn(&Path) -> Result<Option<(String, Option<&'static str>)>, String>,
-    holds_none: &str,
-    from_base: Vec<Entry>,
-) -> Vec<Entry> {
+/// What one list shows of an archive: the name it gives what it holds and what kind of
+/// event that is, or why it can't be read. `None` where the archive holds nothing for that
+/// list.
+type Peek = Option<Result<(String, Option<&'static str>), String>>;
+
+/// An archive in the folder, and what each list shows of it.
+struct PeekedArchive {
+    path: PathBuf,
+    truck: Peek,
+    track: Peek,
+}
+
+/// Every archive in `folder`, in order of path, each read once. One that can't be read at
+/// all could hold either, so it is in both lists, with why.
+fn peek_folder(folder: &Path) -> Vec<PeekedArchive> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(folder)
         .into_iter()
         .flatten()
@@ -570,7 +575,40 @@ fn list_archives(
         })
         .collect();
     paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
+            let archive = std::fs::read(&path)
+                .map_err(|error| describe(&error))
+                .and_then(|bytes| pod::PodArchive::parse(bytes).map_err(|error| describe(&error)));
+            let (truck, track) = match archive {
+                Ok(archive) => (
+                    pod::truck::peek(&archive).map(|name| {
+                        name.map(|name| (name, None))
+                            .map_err(|error| describe(&error))
+                    }),
+                    pod::track::peek(&archive).map(|peek| Ok(track_peeked(peek))),
+                ),
+                Err(error) => (Some(Err(error.clone())), Some(Err(error))),
+            };
+            PeekedArchive { path, truck, track }
+        })
+        .collect()
+}
 
+/// The built-in one, if it is offered, then every archive in the folder that holds
+/// something for this list (`holds`) and every one of the base game's (`from_base`), by
+/// name. An archive that can't be read is listed all the same, greyed out, with the
+/// reason: community archives are often malformed, and the player should see why one is
+/// missing. One that holds nothing for this list is left out: it is a truck in the list
+/// of tracks, or parts alone.
+fn list_archives(
+    archives: &[PeekedArchive],
+    builtin_name: Option<String>,
+    holds: impl Fn(&PeekedArchive) -> &Peek,
+    from_base: Vec<Entry>,
+) -> Vec<Entry> {
     let mut entries: Vec<Entry> = builtin_name
         .map(|name| Entry {
             id: BUILTIN.into(),
@@ -580,37 +618,40 @@ fn list_archives(
         })
         .into_iter()
         .collect();
-    let mut archives: Vec<Entry> = paths
+    let mut listed: Vec<Entry> = archives
         .iter()
-        .map(|path| {
-            let file = path.display().to_string();
-            let stem = path
+        .filter_map(|archive| {
+            let held = holds(archive).as_ref()?;
+            let file = archive.path.display().to_string();
+            let stem = archive
+                .path
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let (name, detail, available) = match peek(path) {
+            let (name, detail, available) = match held {
                 // Not every track gives itself a name.
-                Ok(Some((name, kind))) if name.trim().is_empty() => {
-                    (stem, with_kind(kind, file.clone()), true)
+                Ok((name, kind)) if name.trim().is_empty() => {
+                    (stem, with_kind(*kind, file.clone()), true)
                 }
-                Ok(Some((name, kind))) => {
-                    (name.trim().to_string(), with_kind(kind, file.clone()), true)
-                }
-                Ok(None) => (stem, format!("{file}: {holds_none}"), false),
+                Ok((name, kind)) => (
+                    name.trim().to_string(),
+                    with_kind(*kind, file.clone()),
+                    true,
+                ),
                 // The error names the file already.
-                Err(error) => (stem, error, false),
+                Err(error) => (stem, error.clone(), false),
             };
-            Entry {
+            Some(Entry {
                 id: file,
                 name,
                 detail,
                 available,
-            }
+            })
         })
         .collect();
-    archives.extend(from_base);
-    archives.sort_by_key(|entry| entry.name.to_lowercase());
-    entries.extend(archives);
+    listed.extend(from_base);
+    listed.sort_by_key(|entry| entry.name.to_lowercase());
+    entries.extend(listed);
     entries
 }
 
@@ -1697,13 +1738,13 @@ fn choose_the_base_game(
 }
 
 fn open(mut open: ResMut<NextState<FrontEndOpen>>, mut showing: ResMut<Showing>) {
-    open.as_mut().set_if_neq(FrontEndOpen::Open);
+    open.as_mut().set_if_different(FrontEndOpen::Open);
     // The turntable is new, and bare.
     showing.truck_on_show = None;
 }
 
 fn close(mut open: ResMut<NextState<FrontEndOpen>>) {
-    open.as_mut().set_if_neq(FrontEndOpen::Closed);
+    open.as_mut().set_if_different(FrontEndOpen::Closed);
 }
 
 fn note_what_is_highlighted(
@@ -1745,7 +1786,7 @@ fn load_track(id: &str, base: &BaseGame) -> Result<TrackData, String> {
 
 /// A truck or track of the base game's, one of several in its archive. Its id names the
 /// archive and the file in it: `base:<archive path>#<file>`. A file in an archive has no
-/// `#` in its name, and the plain path of a truck or track in `trucks/` or `tracks/`
+/// `#` in its name, and the plain path of a truck or track in `pods/`
 /// never starts with `base:`.
 fn base_entry(
     archive: &Path,
@@ -2009,7 +2050,7 @@ fn go(
     screen.0 = Some(chosen.loading_screen(LOADING));
     getting_ready.0 = Some(chosen);
     // Gone as the loading screen comes up, rather than left frozen under it.
-    open.as_mut().set_if_neq(FrontEndOpen::Closed);
+    open.as_mut().set_if_different(FrontEndOpen::Closed);
 }
 
 /// What the loading screen says while the truck and the track are loaded, and while the
@@ -2085,7 +2126,7 @@ fn get_ready(
             screen.0 = None;
             // Built again: the turntable went with it.
             showing.truck_on_show = None;
-            open.as_mut().set_if_neq(FrontEndOpen::Open);
+            open.as_mut().set_if_different(FrontEndOpen::Open);
             return;
         }
     };
@@ -2129,7 +2170,7 @@ fn get_ready(
 
     screen.0 = Some(chosen.loading_screen(BUILDING));
     time.pause();
-    game.as_mut().set_if_neq(GameState::Racing);
+    game.as_mut().set_if_different(GameState::Racing);
 }
 
 /// A frame longer than this is still the race settling in: the frame that built it, or one
@@ -2181,7 +2222,7 @@ fn exit(mut pressed: MessageReader<ExitPressed>, mut exit: MessageWriter<AppExit
 }
 
 /// The trucks that the computer drives: the ones listed after the player's, round and
-/// round the list, so that a race shows off what is in `trucks/`. One that won't load is
+/// round the list, so that a race shows off what is in `pods/`. One that won't load is
 /// the player's truck again, and each has its number's colour, which tells apart the ones
 /// that are drawn as the built-in box.
 fn opponents(
@@ -2238,8 +2279,8 @@ fn leave_the_race(
     mut open: ResMut<NextState<FrontEndOpen>>,
 ) {
     if cancelled.read().count() > 0 {
-        game.as_mut().set_if_neq(GameState::FrontEnd);
-        open.as_mut().set_if_neq(FrontEndOpen::Open);
+        game.as_mut().set_if_different(GameState::FrontEnd);
+        open.as_mut().set_if_different(FrontEndOpen::Open);
     }
 }
 
@@ -2316,8 +2357,8 @@ mod tests {
     }
 
     #[test]
-    fn a_path_in_the_tracks_folder_is_not_a_base_game_id() {
-        assert_eq!(in_base("tracks/My#Track.pod"), None);
+    fn a_path_in_the_pods_folder_is_not_a_base_game_id() {
+        assert_eq!(in_base("pods/My#Track.pod"), None);
         assert_eq!(in_base(BUILTIN), None);
     }
 
@@ -2331,5 +2372,53 @@ mod tests {
         assert!(!entry.available);
         assert_eq!(entry.name, "TRUCK\\X.TRK");
         assert_eq!(entry.detail, "broken");
+    }
+
+    #[test]
+    fn each_archive_in_the_folder_is_listed_by_what_it_holds() {
+        let archive = |stem: &str, truck: Peek, track: Peek| PeekedArchive {
+            path: PathBuf::from(format!("pods/{stem}.pod")),
+            truck,
+            track,
+        };
+        let archives = [
+            archive("Truck", Some(Ok(("Big".into(), None))), None),
+            archive("Track", None, Some(Ok(("Hills".into(), Some("Rally"))))),
+            archive(
+                "Both",
+                Some(Ok(("Both truck".into(), None))),
+                Some(Ok(("Both track".into(), None))),
+            ),
+            archive("Parts", None, None),
+            archive(
+                "Broken",
+                Some(Err("pods/Broken.pod: bad".into())),
+                Some(Err("pods/Broken.pod: bad".into())),
+            ),
+        ];
+        let names = |entries: Vec<Entry>| -> Vec<(String, bool)> {
+            entries
+                .into_iter()
+                .map(|entry| (entry.name, entry.available))
+                .collect()
+        };
+        let trucks = list_archives(&archives, None, |archive| &archive.truck, Vec::new());
+        let tracks = list_archives(&archives, None, |archive| &archive.track, Vec::new());
+        assert_eq!(
+            names(trucks),
+            [
+                ("Big".into(), true),
+                ("Both truck".into(), true),
+                ("Broken".into(), false),
+            ]
+        );
+        assert_eq!(
+            names(tracks),
+            [
+                ("Both track".into(), true),
+                ("Broken".into(), false),
+                ("Hills".into(), true),
+            ]
+        );
     }
 }

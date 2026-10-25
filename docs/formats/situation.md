@@ -115,7 +115,7 @@ The Ramps section comes before the Boxes section. Its count is 0 in most tracks.
 ## Objects on sloping ground
 
 **Measured** on the 28 tracks in the base game's archives (Community Patch 3's `GAME.POD`
-with the CD's track archives) and the 12 community tracks in `tracks/`:
+with the CD's track archives) and the 12 community tracks in `pods/`:
 
 - On the base game's tracks, nearly every box stands with its model's lowest point on the
   ground under its origin, as model.md says, and no box has a pitch or a roll (`theta`,
@@ -306,7 +306,7 @@ Between [Beta]":
 After the first course, a line `@*********** Extended Course Definitions *************`
 and a count follow. Then each extra course has a header `[Course N] c1Count,course_direction`
 and the same fields as the first course. **Measured** on 46 track files (the base game's,
-the community tracks in `tracks/`, and Community Patch 3's `GAME.POD`):
+the community tracks in `pods/`, and Community Patch 3's `GAME.POD`):
 
 - The count is 4 in every file, so every track has five courses: the first ("main") and
   `[Course 1]` to `[Course 4]`. An empty course has the count 0 and no pieces.

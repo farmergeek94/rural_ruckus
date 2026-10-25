@@ -4,7 +4,7 @@
 //! - `sky`: the sky's colour, how brightly the sun and the sky light the ground, and fog
 //!   that hides what is far off in the sky's colour. In a storm, lightning flashes.
 //! - `fall`: the rain or snow round the camera. One mesh of many small squares, made once,
-//!   which `fall.wgsl` moves on the graphics card. The drops keep to their places in the world as the camera goes through
+//!   which `fall.wesl` moves on the graphics card. The drops keep to their places in the world as the camera goes through
 //!   them, and what goes out of a box round the camera comes in again at the other side.
 //! - `cover`: what keeps the rain and snow off round the camera, such as a bridge or a
 //!   roof, found once for each square metre by a ray cast down.
@@ -70,9 +70,9 @@ impl Plugin for WeatherPlugin {
         app.world_mut()
             .resource_mut::<EmbeddedAssetRegistry>()
             .insert_asset(
-                PathBuf::from("src/shaders/fall.wgsl"),
+                PathBuf::from("src/shaders/fall.wesl"),
                 Path::new(fall::SHADER_PATH.trim_start_matches("embedded://")),
-                include_bytes!("../shaders/fall.wgsl").as_slice(),
+                include_bytes!("../shaders/fall.wesl").as_slice(),
             );
         app.add_plugins(MaterialPlugin::<fall::FallMaterial>::default())
             .add_systems(Startup, fall::make_looks)

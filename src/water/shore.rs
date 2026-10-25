@@ -3,7 +3,7 @@
 //! Two things come from the ground's heights, made once when the race starts:
 //!
 //! - A map of how deep the still water is over the ground, every `MAP_SPACING` metres,
-//!   which `water.wgsl` reads. There it draws foam at the water's edge, lines
+//!   which `water.wesl` reads. There it draws foam at the water's edge, lines
 //!   of surf that roll in over shallow water, and foam where a truck's ripples break in the
 //!   shallows. The water's edge moves up and down the ground with the swell.
 //! - The points along the water's edge, each with which way is up the bank and how steep it
@@ -11,7 +11,7 @@
 //!   over it, and when a truck's ripple comes to it. Each break is told to whatever throws
 //!   spray (`Surf`).
 //!
-//! Where the swell and the rings are comes from the same rules as `water.wgsl` draws them,
+//! Where the swell and the rings are comes from the same rules as `water.wesl` draws them,
 //! repeated here. A test checks that the two agree on their numbers.
 
 use bevy::asset::RenderAssetUsages;
@@ -23,7 +23,7 @@ use super::wind::Wind;
 use super::{Surf, SurfKind, WaterSettings};
 use crate::track::{HeightGrid, Track};
 
-/// The swell, as `water.wgsl` has it: each wave's angle to the wind (radians), length and
+/// The swell, as `water.wesl` has it: each wave's angle to the wind (radians), length and
 /// height (metres). A test checks that they match.
 const SWELL_ANGLES: [f32; 3] = [0.0, 0.45, -0.6];
 const SWELL_LENGTHS: [f32; 3] = [16.0, 10.5, 6.5];
@@ -38,7 +38,7 @@ const RIPPLE_THINNING: f32 = 0.25;
 const GRAVITY: f32 = 9.81;
 
 /// How far from the camera the water's breaking on the shore is told, in metres. Past
-/// about 80 m the swell is drawn flat (`water.wgsl`'s `PATCH_EASE`), and spray there would
+/// about 80 m the swell is drawn flat (`water.wesl`'s `PATCH_EASE`), and spray there would
 /// be too small to see.
 const SURF_REACH: f32 = 70.0;
 /// How high a crest of the swell must stand over the still water to break as it comes in,
@@ -102,7 +102,7 @@ impl Depths {
     }
 }
 
-/// Where the depth map lies, as `water.wgsl` reads it.
+/// Where the depth map lies, as `water.wesl` reads it.
 #[derive(ShaderType, Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct ShoreUniform {
     /// Where the first texel is, on the ground plane (world X and Z), in metres.
@@ -262,7 +262,7 @@ pub struct SwellWave {
     pub height: f32,
 }
 
-/// The swell's waves, with the wind blowing `towards`. As `swell` in `water.wgsl`: each
+/// The swell's waves, with the wind blowing `towards`. As `swell` in `water.wesl`: each
 /// rolls at the speed of a wave of its length on deep water.
 pub(super) fn swell_waves(towards: Vec2) -> [SwellWave; 3] {
     std::array::from_fn(|wave| {
@@ -287,7 +287,7 @@ pub(super) fn swell_height(position: Vec2, time: f32, towards: Vec2) -> f32 {
 }
 
 /// How high a ring of `strength` metres is, `age` seconds after it started, where it has
-/// spread to. As `ring` in `water.wgsl`.
+/// spread to. As `ring` in `water.wesl`.
 fn ring_height(strength: f32, age: f32) -> f32 {
     let radius = RIPPLE_SPEED * age;
     strength * (-age / RIPPLE_FADE).exp() / (1.0 + RIPPLE_THINNING * radius)
@@ -391,14 +391,14 @@ mod tests {
 
     #[test]
     fn the_shader_knows_the_numbers() {
-        let shader = include_str!("../shaders/water.wgsl");
+        let shader = include_str!("../shaders/water.wesl");
         let vec3 = |[a, b, c]: [f32; 3]| format!("vec3({a:?}, {b:?}, {c:?});");
         for line in [
             format!("const SWELL_ANGLES: vec3<f32> = {}", vec3(SWELL_ANGLES)),
             format!("const SWELL_LENGTHS: vec3<f32> = {}", vec3(SWELL_LENGTHS)),
             format!("const SWELL_HEIGHTS: vec3<f32> = {}", vec3(SWELL_HEIGHTS)),
         ] {
-            assert!(shader.contains(&line), "water.wgsl lacks `{line}`");
+            assert!(shader.contains(&line), "water.wesl lacks `{line}`");
         }
         let field = include_str!("../shaders/field.wgsl");
         let line = format!("const RIPPLE_SPEED: f32 = {RIPPLE_SPEED:?};");

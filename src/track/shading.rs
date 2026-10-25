@@ -3,7 +3,7 @@
 //!
 //! A normal map of the whole track is worked out once, as the race is built: which way a
 //! smooth surface through the grid's heights faces (`HeightGrid::smooth_normal`), several
-//! times across every cell. The ground's shader (`tiles.wgsl`) reads it at each pixel's
+//! times across every cell. The ground's shader (`tiles.wesl`) reads it at each pixel's
 //! place on the ground and lights the pixel by it, in place of the normal of the triangle
 //! the pixel is on. Nothing is done on the CPU while racing. Hill outlines and the creases
 //! against the sky keep their straight edges: only the light and shade are rounded off.

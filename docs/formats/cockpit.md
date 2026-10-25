@@ -6,7 +6,7 @@ dials, steering wheel and mirror go on the screen.
 
 No reference project reads these files, and nothing here comes from the game's program.
 Every fact is **measured** on the base game's `COCKPIT.POD` (in `Shared`) and on the 33
-truck files in `trucks/` and the base game's archives, unless marked **open** or **Own**
+truck files in `pods/` and the base game's archives, unless marked **open** or **Own**
 (the game's own choice). The parser is `crates/pod/src/cockpit.rs`.
 
 ## Where the files are

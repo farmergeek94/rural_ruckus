@@ -3,7 +3,7 @@
 //! Off: every material that can be is drawn unlit, as its plain colour and texture, the
 //! least a pixel can cost. The sun, the sky's light, the lamps and the shadows then light
 //! nothing. Simple: the tile material (the ground, the scenery and the backdrop, most of
-//! the picture) is lit the cheap way that `tiles.wgsl` has, by the sun, its shadows and
+//! the picture) is lit the cheap way that `tiles.wesl` has, by the sun, its shadows and
 //! the ambient light alone, and everything else as it always is. Measured on integrated
 //! graphics, drawing unlit saved a great deal; Simple has not been measured.
 //!

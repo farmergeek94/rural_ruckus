@@ -218,7 +218,7 @@ fn spawn_scenery(
         .iter()
         .map(|model| {
             let vertices: Vec<Vec3> = model.positions.iter().copied().map(Vec3::from).collect();
-            Collider::convex_hull(vertices)
+            Collider::convex_hull(&vertices)
         })
         .collect();
 

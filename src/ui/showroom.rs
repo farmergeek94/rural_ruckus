@@ -247,7 +247,7 @@ pub(super) fn spawn_showroom(
 }
 
 pub(super) fn dragged(
-    drag: On<Pointer<Drag>>,
+    drag: On<PointerDrag>,
     surfaces: Query<(), With<DragSurface>>,
     mut turntables: Query<&mut Turntable>,
 ) {
@@ -261,7 +261,7 @@ pub(super) fn dragged(
 }
 
 pub(super) fn let_go(
-    drag: On<Pointer<DragEnd>>,
+    drag: On<PointerDragEnd>,
     surfaces: Query<(), With<DragSurface>>,
     mut turntables: Query<&mut Turntable>,
 ) {

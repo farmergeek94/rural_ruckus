@@ -19,19 +19,19 @@
 // sun, its shadows and the light from all round, on a plain matte surface. No shine, no
 // lamps, no environment map. See `lighting.rs`.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
-}
+};
 
-#ifdef PREPASS_PIPELINE
-#import bevy_pbr::{
-    prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
-}
-#else
-#import bevy_pbr::{
+@if(PREPASS_PIPELINE)
+import bevy_pbr::{
+    prepass::io::{VertexOutput, FragmentOutput},
+    deferred::functions::deferred_output,
+};
+@else
+import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::PbrInput,
@@ -39,14 +39,14 @@
     mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT,
     mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
     shadows::fetch_directional_shadow,
-}
-#import bevy_render::maths::PI
-#endif
+};
+@if(!PREPASS_PIPELINE)
+import bevy_render::maths::PI;
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var tiles: texture_2d_array<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var tiles_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var ground_normals: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var ground_normals_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var tiles: texture_2d_array<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var tiles_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var ground_normals: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(103) var ground_normals_sampler: sampler;
 
 // `track::GroundShading`.
 struct GroundShading {
@@ -63,23 +63,23 @@ struct GroundShading {
     // 1 where the ground repeats beyond the edges of the map.
     repeats: u32,
 }
-@group(#{MATERIAL_BIND_GROUP}) @binding(104) var<uniform> ground: GroundShading;
+@group(constants::MATERIAL_BIND_GROUP) @binding(104) var<uniform> ground: GroundShading;
 
 // `track::TileCycles`: four to a vector, the first always 0.
 struct TileCycles {
     offsets: array<vec4<u32>, 8>,
 }
-@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<uniform> cycles: TileCycles;
+@group(constants::MATERIAL_BIND_GROUP) @binding(105) var<uniform> cycles: TileCycles;
 
 // `track::TileLighting`.
 struct TileLighting {
     // 1 to light the cheap way.
     simple: u32,
 }
-@group(#{MATERIAL_BIND_GROUP}) @binding(106) var<uniform> lighting: TileLighting;
+@group(constants::MATERIAL_BIND_GROUP) @binding(106) var<uniform> lighting: TileLighting;
 
 // Two texels for each ground cell: see `track/blend.rs`.
-@group(#{MATERIAL_BIND_GROUP}) @binding(107) var ground_cells: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(107) var ground_cells: texture_2d<f32>;
 
 // A ground cell, as `ground_cells` holds it.
 struct Cell {
@@ -163,10 +163,10 @@ fn on_the_map(cell: vec2<i32>) -> vec2<i32> {
     return ((cell % cells) + cells) % cells;
 }
 
-#ifndef PREPASS_PIPELINE
 // A matte surface lit by each directional light, through its shadows, and by the ambient
 // light: Bevy's own diffuse terms with the shine and everything else left out. Lambert's
 // 1/pi stands in for Burley's, which it equals on a rough surface seen square on.
+@if(!PREPASS_PIPELINE)
 fn simple_lighting(in: PbrInput) -> vec4<f32> {
     let diffuse_color = in.material.base_color.rgb * (1.0 - in.material.metallic);
     let view_z = dot(vec4<f32>(
@@ -199,7 +199,6 @@ fn simple_lighting(in: PbrInput) -> vec4<f32> {
         in.material.base_color.a,
     );
 }
-#endif
 
 @fragment
 fn fragment(
@@ -208,7 +207,7 @@ fn fragment(
 ) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
-#ifdef VERTEX_UVS_B
+@if(VERTEX_UVS_B) {
     // The tile number doesn't vary across a triangle. Rounding guards against it arriving
     // as 6.9999.
     let cycle = min(u32(round(in.uv_b.y)), 31u);
@@ -218,9 +217,9 @@ fn fragment(
         tile_color = faded_ground(tile_color, in.world_position.xz);
     }
     pbr_input.material.base_color *= tile_color;
-#endif
+}
 
-#ifndef PREPASS_PIPELINE
+@if(!PREPASS_PIPELINE)
     if ground.lit_smoothly != 0u {
         // Stored from 0 to 1 for -1 to 1. Blending between texels and mipmaps shortens a
         // normal, so it is made a unit one again.
@@ -231,14 +230,18 @@ fn fragment(
         pbr_input.N = normal;
         pbr_input.clearcoat_N = normal;
     }
-#endif
 
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    pbr_input.material.base_color = alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        pbr_input.material.base_color,
+    );
 
-#ifdef PREPASS_PIPELINE
+@if(PREPASS_PIPELINE)
     let out = deferred_output(in, pbr_input);
-#else
+@if(!PREPASS_PIPELINE)
     var out: FragmentOutput;
+@if(!PREPASS_PIPELINE)
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u {
         out.color = pbr_input.material.base_color;
     } else if lighting.simple != 0u {
@@ -246,8 +249,8 @@ fn fragment(
     } else {
         out.color = apply_pbr_lighting(pbr_input);
     }
+@if(!PREPASS_PIPELINE)
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
-#endif
 
     return out;
 }

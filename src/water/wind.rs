@@ -1,9 +1,9 @@
 //! The wind over the water. It blows one way all race, and gusts: it picks up and dies
-//! down over a few seconds, never quite still and never a gale. `water.wgsl` raises its
+//! down over a few seconds, never quite still and never a gale. `water.wesl` raises its
 //! waves with it, and the spray is blown along by it.
 //!
 //! The gusts are a function of the shader's clock (`Time::elapsed_secs_wrapped`), which
-//! `water.wgsl` and `particles.wgsl` work out for themselves, so that nothing need be sent
+//! `water.wesl` and `particles.wesl` work out for themselves, so that nothing need be sent
 //! to the graphics card again every frame. When the clock goes back to 0, once an hour, the
 //! wind changes at once, a little.
 //!
@@ -64,7 +64,7 @@ impl Wind {
     }
 
     /// How it blows when the shader's clock reads `time`, in m/s: `steady`, and `gusts`
-    /// times a mix of three swings of the clock. As `water.wgsl` has it.
+    /// times a mix of three swings of the clock. As `water.wesl` has it.
     pub fn at(&self, time: f32) -> Vec3 {
         let tau = std::f32::consts::TAU;
         let swing: f32 = (0..3)
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn the_water_gusts_as_the_spray_does() {
-        let shader = include_str!("../shaders/water.wgsl");
+        let shader = include_str!("../shaders/water.wesl");
         assert!(shader.contains(&format!("const WIND_SPEED: f32 = {WIND_SPEED:?};")));
         assert!(shader.contains(&format!("const GUSTINESS: f32 = {GUSTINESS:?};")));
         let [slow, middle, quick] = GUST_PERIODS;

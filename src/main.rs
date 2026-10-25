@@ -6,16 +6,15 @@ use monster_truck_rural_ruckus::{
     physics_debug, race, scene_depth, scenery, sky, sound, store, track, truck, water, weather,
 };
 
-/// Where what the player chose is remembered, beside the working directory as `tracks/` and
-/// `trucks/` are.
+/// Where what the player chose is remembered, beside the working directory as `pods/` is.
 const SAVES: &str = "saves/ruckus.redb";
 
 fn main() {
     let mut app = App::new();
 
     // `cargo run` opens the front end, where a truck and a track are chosen.
-    // `cargo run -- tracks/MyTrack.pod` goes straight to a race on a Monster Truck Madness 2
-    // track, and `cargo run -- tracks/MyTrack.pod trucks/MyTruck.pod` in one of its trucks,
+    // `cargo run -- pods/MyTrack.pod` goes straight to a race on a Monster Truck Madness 2
+    // track, and `cargo run -- pods/MyTrack.pod pods/MyTruck.pod` in one of its trucks,
     // so that everything measured on a race can be measured as it always was. The built-in
     // truck and track are for development, and only `--builtin` offers them: in the front
     // end's lists, as the truck when only a track is named, and with `--race`, which goes
@@ -243,13 +242,10 @@ fn main() {
     if race_at_once && !builtin {
         let track_named = app.world().contains_resource::<track::Track>();
         let truck_named = app.world().contains_resource::<truck::ChosenTruck>();
-        for (named, what, folder) in [
-            (track_named, "track", "tracks"),
-            (truck_named, "truck", "trucks"),
-        ] {
+        for (named, what) in [(track_named, "track"), (truck_named, "truck")] {
             if !named {
                 eprintln!(
-                    "No {what} named. Name a {folder}/*.pod archive, or pass --builtin to race the built-in {what}."
+                    "No {what} named. Name a pods/*.pod archive with a {what} in it, or pass --builtin to race the built-in {what}."
                 );
                 std::process::exit(2);
             }

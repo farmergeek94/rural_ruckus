@@ -26,15 +26,17 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
-use bevy::ui::widget::Button;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use super::RaceSettings;
 use super::start::BLUE;
 use crate::game_state::GameState;
 
-/// Where screenshots are saved, beside the working directory as `tracks/` and `saves/` are.
+/// Where screenshots are saved, beside the working directory as `pods/` and `saves/` are.
 const SCREENSHOT_FOLDER: &str = "screenshots";
 /// How long to wait for a screenshot before giving up on it, in real seconds. A capture
 /// takes a frame or two; an app that cannot draw never captures at all.
@@ -192,6 +194,7 @@ pub(super) fn spawn_pause_dialog(mut commands: Commands, settings: Res<RaceSetti
                         panel
                             .spawn((
                                 Button,
+                                Hovered::default(),
                                 PauseButton(index),
                                 BackgroundColor(BUTTON_GREY),
                                 Node {
@@ -219,13 +222,17 @@ pub(super) fn spawn_pause_dialog(mut commands: Commands, settings: Res<RaceSetti
         });
 }
 
+/// A button of the dialog, as the mouse has it: hovered, and pressed just now.
+type ButtonState = (&'static PauseButton, &'static Hovered, Has<Pressed>);
+type ButtonChanged = Or<(Changed<Hovered>, Added<Pressed>)>;
+
 /// Keys, the gamepad and the mouse, while the dialog is up.
 #[expect(clippy::too_many_arguments, reason = "it reads every kind of input")]
 pub(super) fn use_pause_dialog(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
-    buttons: Query<(&PauseButton, &Interaction), Changed<Interaction>>,
+    buttons: Query<ButtonState, ButtonChanged>,
     real: Res<Time<Real>>,
     settings: Res<RaceSettings>,
     mut menu: ResMut<PauseMenu>,
@@ -259,14 +266,12 @@ pub(super) fn use_pause_dialog(
     {
         chosen = Some(Choice::Continue);
     }
-    for (button, interaction) in &buttons {
-        match interaction {
-            Interaction::Hovered => menu.highlighted = button.0,
-            Interaction::Pressed => {
-                menu.highlighted = button.0;
-                chosen = Some(Choice::ALL[button.0]);
-            }
-            Interaction::None => {}
+    for (button, hovered, pressed) in &buttons {
+        if pressed {
+            menu.highlighted = button.0;
+            chosen = Some(Choice::ALL[button.0]);
+        } else if hovered.get() {
+            menu.highlighted = button.0;
         }
     }
 

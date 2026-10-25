@@ -15,7 +15,7 @@ use content::sound::EngineLoops;
 pub use pod::{archives_listed, pod_ini_in};
 
 /// Where the base archives are looked for when the command line names no folder: beside
-/// `tracks/` and `trucks/`, and git ignores it as it does them. Without a `POD.INI` its
+/// `pods/`, and git ignores it as it does that. Without a `POD.INI` its
 /// subfolders are searched too, so that it can hold links to the `Shared` and `English`
 /// folders of an MTM2 CD.
 pub const DEFAULT_FOLDER: &str = "base";

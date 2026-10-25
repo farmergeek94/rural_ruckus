@@ -43,6 +43,13 @@ to the others. **Measured:** `MonteCarlo_PZ.pod`, `ROUTE77.POD`, `rute756jam.pod
 256 x 256 heightmap `DATA\NAME.RAW`. By name alone, the heightmap reads as a flat 64-cell
 world and the texture map, sized for 256, is refused.
 
+No field of an archive says whether it is a track or a truck. Its files tell: it holds a
+track if it has a `.SIT` or a `.SI2`, and a truck if it has a `.TRK`. **Measured** on the
+29 community archives in `pods/`: 16 hold track files and no truck file, and 13 hold a
+truck file and no track file. None holds both, and none holds neither. Nothing seen rules
+out one that holds both, so the game lists such an archive with the tracks and with the
+trucks. The base game's archives can hold several of one kind (see below).
+
 ## The base game's archives
 
 A track's or truck's archive can name files it does not contain: ground textures, models,

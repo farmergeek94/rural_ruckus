@@ -9,4 +9,4 @@ description = "The rules of a lap race round a circuit and the mind of a compute
 # the scenery.
 content = { package = "ruckus_content", path = "../content" }
 # For its vectors alone, as `content` uses them. No default features: no engine.
-bevy = { version = "0.19", default-features = false }
+bevy = { version = "0.20", default-features = false }

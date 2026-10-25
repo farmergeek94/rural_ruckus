@@ -69,6 +69,9 @@ const BOW_REACH: f32 = 1.2;
 const CHURN: f32 = 0.8;
 const MOST_CHURN: f32 = 8.0;
 const MOST_SPIN: f32 = 5.0;
+/// How much mud a tire's tread stirs up off the bottom each second, for the same speed as
+/// the foam, hub-deep: the tracks it leaves in the foam, coloured like the bed.
+const STIR: f32 = 0.8;
 /// What the truck's body does to the field once the water is up to it: how hard it piles
 /// the water up in front of its bumper, in metres of height each second for each m/s it
 /// goes, up to `MOST_BOW_SPEED`; how far ahead of the front hubs the bumper is, in wheel
@@ -172,7 +175,7 @@ pub(super) fn wade(
                     born: now,
                     strength: (down * SPLASH_RIPPLE_PER_SPEED).min(MOST_SPLASH_RIPPLE),
                 });
-                // On the swell where it is drawn, as `water.wgsl` moves it.
+                // On the swell where it is drawn, as `water.wesl` moves it.
                 let swell = swell_height(hub.xz(), clock, wind.towards);
                 Plunge {
                     speed: down,
@@ -276,6 +279,7 @@ fn tire_source(
         lift: plunged.map_or(0.0, |down| -(PLUNGE_PUSH * down).min(MOST_PLUNGE)),
         foam: CHURN * churn * in_water,
         burst: plunged.map_or(0.0, |down| PLUNGE_FOAM * down),
+        mud: STIR * churn * in_water,
     }
 }
 
@@ -308,6 +312,7 @@ fn body_source(
         lift: 0.0,
         foam: BODY_CHURN * speed.min(MOST_CHURN) * share,
         burst: 0.0,
+        mud: 0.0,
     })
 }
 

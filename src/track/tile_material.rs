@@ -14,7 +14,7 @@
 //! its flat triangles. Scenery and backdrops leave it out.
 //!
 //! In the shadow maps, and in any prepass, a material with an alpha mask runs
-//! `tiles_prepass.wgsl`, which cuts the tiles' holes out of its shadows. An opaque one is
+//! `tiles_prepass.wesl`, which cuts the tiles' holes out of its shadows. An opaque one is
 //! drawn there by its depth alone, which is cheaper: see `docs/smoothness.md`.
 
 use bevy::asset::RenderAssetUsages;
@@ -59,7 +59,7 @@ pub struct TileTextures {
     pub ground_cells: Option<Handle<Image>>,
 }
 
-/// How `tiles.wgsl` lights a lit material, as it declares it.
+/// How `tiles.wesl` lights a lit material, as it declares it.
 #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
 pub struct TileLighting {
     /// 1 for the cheap way: the sun, its shadows and the ambient light on a matte surface,
@@ -70,7 +70,7 @@ pub struct TileLighting {
 /// How many animated textures one material can show: the content model's limit.
 pub use content::MAX_TEXTURE_CYCLES;
 
-/// Which frame each animated texture of a material is on, as `tiles.wgsl` declares it: how
+/// Which frame each animated texture of a material is on, as `tiles.wesl` declares it: how
 /// many tiles on from its first frame's. The shader adds that to the tile a vertex names,
 /// for the animated texture its second UV channel names. Kept on the CPU and changed only
 /// when a frame changes, rather than worked out from the time on the graphics card: the
@@ -99,7 +99,7 @@ impl TileCycles {
     }
 }
 
-/// How the shader finds the ground's normal map and its cells, as `tiles.wgsl` declares
+/// How the shader finds the ground's normal map and its cells, as `tiles.wesl` declares
 /// it.
 #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default)]
 pub struct GroundShading {
@@ -133,11 +133,11 @@ impl MaterialExtension for TileTextures {
     }
 }
 
-/// Where `tiles.wgsl` and `tiles_prepass.wgsl` are among the embedded assets (see
+/// Where `tiles.wesl` and `tiles_prepass.wesl` are among the embedded assets (see
 /// `TrackPlugin`).
-pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/tiles.wgsl";
+pub(super) const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/tiles.wesl";
 pub(super) const PREPASS_SHADER_PATH: &str =
-    "embedded://monster_truck_rural_ruckus/shaders/tiles_prepass.wgsl";
+    "embedded://monster_truck_rural_ruckus/shaders/tiles_prepass.wesl";
 
 /// The most anisotropic filtering a sampler can ask for.
 const MOST_ANISOTROPY: u16 = 16;
@@ -315,17 +315,17 @@ mod tests {
     /// Or a shadow would be cut out by the wrong tile.
     #[test]
     fn the_prepass_shader_finds_the_tile_as_the_main_shader_does() {
-        let main = include_str!("../shaders/tiles.wgsl");
-        let prepass = include_str!("../shaders/tiles_prepass.wgsl");
+        let main = include_str!("../shaders/tiles.wesl");
+        let prepass = include_str!("../shaders/tiles_prepass.wesl");
         for line in [
             "    let cycle = min(u32(round(in.uv_b.y)), 31u);",
             "    let tile = i32(round(in.uv_b.x)) + i32(cycles.offsets[cycle / 4u][cycle % 4u]);",
-            "@group(#{MATERIAL_BIND_GROUP}) @binding(100) var tiles: texture_2d_array<f32>;",
-            "@group(#{MATERIAL_BIND_GROUP}) @binding(101) var tiles_sampler: sampler;",
-            "@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<uniform> cycles: TileCycles;",
+            "@group(constants::MATERIAL_BIND_GROUP) @binding(100) var tiles: texture_2d_array<f32>;",
+            "@group(constants::MATERIAL_BIND_GROUP) @binding(101) var tiles_sampler: sampler;",
+            "@group(constants::MATERIAL_BIND_GROUP) @binding(105) var<uniform> cycles: TileCycles;",
         ] {
-            assert!(main.contains(line), "tiles.wgsl lacks {line}");
-            assert!(prepass.contains(line), "tiles_prepass.wgsl lacks {line}");
+            assert!(main.contains(line), "tiles.wesl lacks {line}");
+            assert!(prepass.contains(line), "tiles_prepass.wesl lacks {line}");
         }
     }
 

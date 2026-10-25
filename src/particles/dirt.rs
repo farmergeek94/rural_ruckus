@@ -408,6 +408,7 @@ pub(super) fn throw_dirt(
                         turned: random.between(0.0, std::f32::consts::TAU),
                         turning: random.between(-0.5, 0.5),
                         color: dust_color,
+                        later: None,
                         // Back from the tire: one that reached forward came in over the
                         // tire, which flickered as each one appeared.
                         trail: dust_trail(moving, rate),
@@ -433,6 +434,7 @@ pub(super) fn throw_dirt(
                         turned: random.between(0.0, std::f32::consts::TAU),
                         turning: random.between(-CLOD_TUMBLE, CLOD_TUMBLE),
                         color: clod_color,
+                        later: None,
                         trail: Vec3::ZERO,
                         shape: random.shape(),
                     };
@@ -454,6 +456,7 @@ pub(super) fn throw_dirt(
                             turned: random.between(0.0, std::f32::consts::TAU),
                             turning: random.between(-CLOD_TUMBLE, CLOD_TUMBLE),
                             color: clod_color,
+                            later: None,
                             trail: Vec3::ZERO,
                             shape: random.shape(),
                         };

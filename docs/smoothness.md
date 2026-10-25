@@ -283,7 +283,7 @@ fragment shader instead of by depth alone. So the scenery has two materials on t
 texture array (`scenery/mod.rs`): an opaque one for models whose tiles have no texel under
 the mask's cutoff, which draws exactly as the mask did since filtering and mipmaps only
 mix texels, and a masked one for the rest. The masked one's shadows are cut out by
-`shaders/tiles_prepass.wgsl`: Bevy's own prepass shader reads the standard material's
+`shaders/tiles_prepass.wesl`: Bevy's own prepass shader reads the standard material's
 texture, which the tile material has not got, so a cut-out tile cast the shadow of its
 whole square. **Not yet measured on screen**: the F2 panel with `--no-vsync`, on a track
 with much scenery, with the shadow cascades at 4 and at 0.

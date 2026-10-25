@@ -3,7 +3,7 @@
 //!
 //! - `forces`: how it holds trucks up and slows them down. Monster trucks drive through
 //!   water, so it never stops one or sends it back.
-//! - `surface`: the surface, drawn with `water.wgsl`, which moves it with waves: a swell
+//! - `surface`: the surface, drawn with `water.wesl`, which moves it with waves: a swell
 //!   that rolls downwind, and a chop that the wind's gusts ruffle as they sweep over it.
 //! - `wind`: the wind that raises the waves and carries the spray, which gusts.
 //! - `field`: the water round the camera as a field of heights that the trucks disturb,
@@ -12,7 +12,7 @@
 //!   they come to the shore.
 //! - `wake`: where trucks' tires break the surface, what they do to the field, and the
 //!   ripples they leave.
-//! - `shore`: where the water meets the land: the foam and surf that `water.wgsl` draws
+//! - `shore`: where the water meets the land: the foam and surf that `water.wesl` draws
 //!   there, and where the swell and the trucks' ripples break on it.
 //!
 //! The spray is the `particles` slice's. This slice tells it where the water is broken
@@ -55,7 +55,7 @@ use crate::track::{DRAWN_PAST_EDGE, TrackData, TrackSystems};
 use crate::truck::TruckSystems;
 
 pub use shore::SwellWave;
-pub use surface::WATER_COLOR;
+pub use surface::{Mud, WATER_COLOR};
 pub use wake::SPLASH_SPEED;
 pub use wind::Wind;
 
@@ -93,9 +93,9 @@ impl Plugin for WaterPlugin {
             app.world_mut()
                 .resource_mut::<EmbeddedAssetRegistry>()
                 .insert_asset(
-                    PathBuf::from("src/shaders/water.wgsl"),
+                    PathBuf::from("src/shaders/water.wesl"),
                     Path::new(surface::SHADER_PATH.trim_start_matches("embedded://")),
-                    include_bytes!("../shaders/water.wgsl").as_slice(),
+                    include_bytes!("../shaders/water.wesl").as_slice(),
                 );
             field::add(app);
             app.add_plugins(MaterialPlugin::<surface::WaterMaterial>::default())
@@ -212,7 +212,7 @@ pub struct WaterSettings {
     /// turned off falls as it would.
     pub splashes: bool,
     /// Draws the water as one flat see-through plane in its colour, with no waves, ripples
-    /// or foam: no patch of fine mesh round the camera and none of `water.wgsl`, the least
+    /// or foam: no patch of fine mesh round the camera and none of `water.wesl`, the least
     /// it can cost. How it holds trucks up and the splashes are as ever.
     pub flat: bool,
     /// Whether the moving water mirrors the scenery round it, as well as the sky's colour.

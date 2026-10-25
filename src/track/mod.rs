@@ -167,13 +167,13 @@ impl Plugin for TrackPlugin {
             for (path, file, bytes) in [
                 (
                     tile_material::SHADER_PATH,
-                    "src/shaders/tiles.wgsl",
-                    include_bytes!("../shaders/tiles.wgsl").as_slice(),
+                    "src/shaders/tiles.wesl",
+                    include_bytes!("../shaders/tiles.wesl").as_slice(),
                 ),
                 (
                     tile_material::PREPASS_SHADER_PATH,
-                    "src/shaders/tiles_prepass.wgsl",
-                    include_bytes!("../shaders/tiles_prepass.wgsl").as_slice(),
+                    "src/shaders/tiles_prepass.wesl",
+                    include_bytes!("../shaders/tiles_prepass.wesl").as_slice(),
                 ),
             ] {
                 embedded.insert_asset(
@@ -465,7 +465,7 @@ fn spawn_chunk<M: Material>(
     meshes: &mut Assets<Mesh>,
     material: &Handle<M>,
 ) {
-    let bounds = chunk.compute_aabb();
+    let bounds = chunk.get_aabb();
     let mesh = meshes.add(chunk);
     commands.spawn((
         Mesh3d(mesh.clone()),

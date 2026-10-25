@@ -31,8 +31,8 @@ published, so every fact is marked with where it came from:
 | [sound.md](sound.md) | `.WAV` sounds: a truck's three, and the engine's loops | `crates/pod/src/wave.rs` |
 | [conventions.md](conventions.md) | Units and axes, and how the game converts them | `crates/pod/src/track/mod.rs`, `crates/pod/src/truck.rs` |
 
-Real archives are copyrighted and never committed: tracks go in `tracks/` and trucks in
-`trucks/`, which git ignores. No committed test needs them: measure them with a probe in
+Real archives are copyrighted and never committed: tracks and trucks go in `pods/`,
+which git ignores. No committed test needs them: measure them with a probe in
 the scratch directory (see AGENTS.md).
 
 Archives examined first:

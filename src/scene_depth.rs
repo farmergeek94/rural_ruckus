@@ -38,7 +38,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};
 use bevy::render::texture::GpuImage;
-use bevy::render::view::{Msaa, ViewDepthTexture};
+use bevy::render::view::{Msaa, ViewDepthStencilTexture};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
 
@@ -55,9 +55,9 @@ impl Plugin for SceneDepthPlugin {
         app.world_mut()
             .resource_mut::<EmbeddedAssetRegistry>()
             .insert_asset(
-                PathBuf::from("src/shaders/scene_depth.wgsl"),
+                PathBuf::from("src/shaders/scene_depth.wesl"),
                 Path::new(SHADER_PATH.trim_start_matches("embedded://")),
-                include_bytes!("shaders/scene_depth.wgsl").as_slice(),
+                include_bytes!("shaders/scene_depth.wesl").as_slice(),
             );
         // Sized to the camera as soon as there is one.
         let size = UVec2::ONE;
@@ -92,6 +92,7 @@ impl Plugin for SceneDepthPlugin {
 /// which is when the window changes size: the image is then a new one, and a material keeps
 /// the one it was prepared with.
 #[derive(Resource, Clone, ExtractResource)]
+#[extract_app(RenderApp)]
 pub struct SceneDepth {
     pub image: Handle<Image>,
     /// The image's size, in pixels. Kept here: the image is for the render world only, so
@@ -99,8 +100,8 @@ pub struct SceneDepth {
     size: UVec2,
 }
 
-/// Where `scene_depth.wgsl` is among the embedded assets.
-const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/scene_depth.wgsl";
+/// Where `scene_depth.wesl` is among the embedded assets.
+const SHADER_PATH: &str = "embedded://monster_truck_rural_ruckus/shaders/scene_depth.wesl";
 
 /// 32 bits, as the depth buffer has: the particles fade over centimetres.
 const FORMAT: TextureFormat = TextureFormat::R32Float;
@@ -238,7 +239,7 @@ fn prepare_pipelines(
 
 /// The pass: the view's depth buffer, one sample a pixel, into the image.
 fn copy_depth(
-    view: ViewQuery<(&ViewDepthTexture, &SceneDepthPipelineId)>,
+    view: ViewQuery<(&ViewDepthStencilTexture, &SceneDepthPipelineId)>,
     depth: Res<SceneDepth>,
     images: Res<RenderAssets<GpuImage>>,
     pipeline: Res<SceneDepthPipeline>,
@@ -247,6 +248,7 @@ fn copy_depth(
     mut ctx: RenderContext,
 ) {
     let (depth_texture, pipeline_id) = view.into_inner();
+    let depth_texture = &depth_texture.attachment;
     let (Some(render_pipeline), Some(image)) = (
         cache.get_render_pipeline(pipeline_id.0),
         images.get(&depth.image),
@@ -254,14 +256,15 @@ fn copy_depth(
         return;
     };
     // The frame after the window changes size: the image is still the old size.
-    if image.texture.size() != depth_texture.texture.size() {
+    if image.texture.size() != depth_texture.texture.texture.size() {
         return;
     }
-    let multisampled = depth_texture.texture.sample_count() > 1;
+    let multisampled = depth_texture.texture.texture.sample_count() > 1;
     let bind_group = device.create_bind_group(
         "scene_depth_bind_group",
         &cache.get_bind_group_layout(&pipeline.layouts[multisampled as usize]),
-        &BindGroupEntries::single(depth_texture.view()),
+        // The depth aspect alone: a view of depth and stencil together cannot be read.
+        &BindGroupEntries::single(depth_texture.depth_stencil_views().attachment_view()),
     );
     let mut pass = ctx
         .command_encoder()

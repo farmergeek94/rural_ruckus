@@ -52,18 +52,14 @@ const CHECKPOINT_HALF_WIDTH_FEET: f32 = FEET_PER_CELL;
 /// start inside each other and be thrown apart.
 const PLACE_CLEARANCE: f32 = 4.0;
 
-/// The name of the track in an archive on disk, for a list of tracks: the archive's
-/// directory and its track file, and none of its ground, models or textures. `Ok(None)`
-/// for an archive with no track in it, and an error for one that can't be read. A track
-/// that gives itself no name comes back as an empty one.
-pub fn peek_pod(path: &Path) -> Result<Option<TrackPeek>, String> {
-    let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
-    let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
-    let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    Ok(crate::Track::name_in(&archive).map(|name| TrackPeek {
+/// What a list of tracks shows of the track in an archive: read from its track file, and
+/// none of its ground, models or textures. `None` for an archive with no track in it. A
+/// track that gives itself no name comes back with an empty one.
+pub fn peek(archive: &PodArchive) -> Option<TrackPeek> {
+    crate::Track::name_in(archive).map(|name| TrackPeek {
         name,
-        race_type: race_type_of(crate::Track::race_type_in(&archive)),
-    }))
+        race_type: race_type_of(crate::Track::race_type_in(archive)),
+    })
 }
 
 /// What a list of tracks shows of one, read from its track file alone.

@@ -11,18 +11,17 @@
 // ribbon's strength fades with its age, in the distance, and in the fog, where the ground
 // under it is hidden: a dark streak over fogged ground would hang in the fog.
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
-}
+};
 // The view binds its fog only when it has one.
-#ifdef DISTANCE_FOG
-#import bevy_pbr::{
+@if(DISTANCE_FOG)
+import bevy_pbr::render::{
     fog::{atmospheric_fog, exponential_fog, exponential_squared_fog, linear_fog},
     mesh_view_bindings::fog,
     mesh_view_types::{FOG_MODE_ATMOSPHERIC, FOG_MODE_EXPONENTIAL, FOG_MODE_EXPONENTIAL_SQUARED, FOG_MODE_LINEAR},
-}
-#endif
+};
 
 struct Look {
     // How long a piece lasts, in seconds, and how old it is when it starts to fade out.
@@ -51,10 +50,10 @@ struct Slot {
     padding: vec2<f32>,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> look: Look;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<storage, read> pieces: array<Slot>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var picture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var picture_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> look: Look;
+@group(constants::MATERIAL_BIND_GROUP) @binding(1) var<storage, read> pieces: array<Slot>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2) var picture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var picture_sampler: sampler;
 
 struct Vertex {
     @builtin(vertex_index) index: u32,
@@ -110,7 +109,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 // How much of the contrast of the ground `distance` metres off the fog leaves: the
 // difference the fog leaves between white and black there. 1 without fog.
 fn fog_contrast(distance: f32) -> f32 {
-#ifdef DISTANCE_FOG
+@if(DISTANCE_FOG) {
     let white = vec4(1.0, 1.0, 1.0, 1.0);
     let black = vec4(0.0, 0.0, 0.0, 1.0);
     let none = vec3(0.0);
@@ -132,9 +131,8 @@ fn fog_contrast(distance: f32) -> f32 {
         return 1.0;
     }
     return clamp(dot(lit.rgb - dark.rgb, vec3(1.0 / 3.0)), 0.0, 1.0);
-#else
+}
     return 1.0;
-#endif
 }
 
 @fragment

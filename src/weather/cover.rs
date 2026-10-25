@@ -1,6 +1,6 @@
 //! What keeps the rain and snow off: for each square metre round the camera, the height
 //! of the highest solid that does not move above it, such as a bridge, a roof or the
-//! ground. `fall.wgsl` draws no drop below it, so none falls under a bridge or a roof, and
+//! ground. `fall.wesl` draws no drop below it, so none falls under a bridge or a roof, and
 //! rain still falls beyond its edge.
 //!
 //! Each square metre (`COVER_CELL`) is found once, by a ray cast straight down onto the
@@ -131,7 +131,8 @@ pub(super) fn find_cover(
         if !wanted.is_empty()
             && let Some(mut buffer) = buffers.get_mut(&cover.buffer)
         {
-            buffer.set_data(for_shader(&cover.places));
+            buffer.clear();
+            buffer.extend(for_shader(&cover.places));
         }
     }
 }
@@ -160,7 +161,7 @@ fn squares_to_find(places: &[Place], centre: IVec2) -> Vec<IVec2> {
     wanted
 }
 
-/// The ring as `fall.wgsl` reads it: for each place, the cover's height, the world
+/// The ring as `fall.wesl` reads it: for each place, the cover's height, the world
 /// square's X and Z, and 1 if it is found (0 if not).
 fn for_shader(places: &[Place]) -> Vec<Vec4> {
     places
@@ -301,7 +302,11 @@ mod tests {
         // Every square round the camera found, and the shader told.
         assert!(cover.places.iter().all(|place| place.square.is_some()));
         let buffers = app.world().resource::<Assets<ShaderBuffer>>();
-        let sent = buffers.get(&cover.buffer).unwrap().data.as_ref().unwrap();
+        let sent = buffers
+            .get(&cover.buffer)
+            .unwrap()
+            .cast_slice::<u8>()
+            .unwrap();
         assert_eq!(sent.len(), COVER_CELLS * COVER_CELLS * 16);
     }
 

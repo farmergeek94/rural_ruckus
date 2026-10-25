@@ -12,15 +12,15 @@
 // It fades out near what is behind it, read from the depth of the picture drawn before
 // the particles (`scene_depth`).
 
-#import bevy_pbr::{
+import bevy_pbr::render::{
     mesh_view_bindings::{globals, view},
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, main_pass_post_lighting_processing},
     view_transformations::{depth_ndc_to_view_z, position_world_to_clip},
-}
+};
 
 // Only the main pass: see-through things are not drawn in the prepass.
-#import bevy_pbr::forward_io::{FragmentOutput, Vertex, VertexOutput}
+import bevy_pbr::render::forward_io::{FragmentOutput, Vertex, VertexOutput};
 
 struct Motion {
     // How fast the air goes between gusts, in m/s.
@@ -69,6 +69,8 @@ struct Slot {
     velocity: vec3<f32>,
     turned: f32,
     color: vec4<f32>,
+    // The colour it has turned to, and after how many seconds (0: it keeps its colour).
+    later: vec4<f32>,
     // When it was thrown and when it goes, on `globals.time`.
     life: vec2<f32>,
     // How fast it turns, in radians a second.
@@ -79,11 +81,11 @@ struct Slot {
     shape: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> motion: Motion;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> slots: array<Slot>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> motion: Motion;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage, read> slots: array<Slot>;
 // The depth of the picture drawn before the particles, at each pixel. 32-bit, so not
 // filterable.
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var scene_depth: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var scene_depth: texture_2d<f32>;
 
 const TAU: f32 = 6.283185307179586;
 
@@ -104,21 +106,19 @@ fn surface_height(position: vec2<f32>, time: f32) -> f32 {
 fn vertex(mesh_vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
     out.world_normal = vec3(0.0, 1.0, 0.0);
-#ifdef VERTEX_UVS_B
+@if(VERTEX_UVS_B)
     out.uv_b = mesh_vertex.uv_b;
-#endif
-#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
+@if(VERTEX_OUTPUT_INSTANCE_INDEX)
     out.instance_index = mesh_vertex.instance_index;
-#endif
 
     let particle = slots[u32(mesh_vertex.uv_b.x)];
-#ifdef VERTEX_UVS_A
+@if(VERTEX_UVS_A) {
     // Its own picture, of the grid of them in the pool's picture.
     let shapes = max(motion.shapes, 1u);
     let cell = particle.shape % (shapes * shapes);
     let first = vec2(f32(cell % shapes), f32(cell / shapes));
     out.uv = (mesh_vertex.uv + first) / f32(shapes);
-#endif
+}
     let now = globals.time;
     let thrown = particle.life.x;
     let goes = particle.life.y;
@@ -126,9 +126,8 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
     if age < 0.0 || now >= goes {
         out.world_position = vec4(0.0, 0.0, 0.0, 1.0);
         out.position = vec4(0.0, 0.0, 0.0, 1.0);
-#ifdef VERTEX_COLORS
+@if(VERTEX_COLORS)
         out.color = vec4(0.0);
-#endif
         return out;
     }
 
@@ -208,16 +207,20 @@ fn vertex(mesh_vertex: Vertex) -> VertexOutput {
 
     out.world_position = vec4(world_position, 1.0);
     out.position = position_world_to_clip(world_position);
-#ifdef VERTEX_COLORS
-    out.color = vec4(particle.color.rgb, particle.color.a * fade);
-#endif
+@if(VERTEX_COLORS)
+    let turned_to = clamp(age / max(particle.later.a, 1e-4), 0.0, 1.0);
+    out.color = vec4(mix(particle.color.rgb, particle.later.rgb, turned_to), particle.color.a * fade);
     return out;
 }
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    pbr_input.material.base_color = alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        pbr_input.material.base_color,
+    );
     var out: FragmentOutput;
     // Particles are not lit (see `mod.rs`).
     out.color = pbr_input.material.base_color;

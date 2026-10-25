@@ -167,7 +167,11 @@ fn run_traced(s: Scenario, trace: bool) -> Outcome {
             // Positions along the approach: how far the trucks are past the origin the
             // way the player came.
             let other_along = other.map_or(f32::NAN, |o| {
-                app.world().get::<Transform>(o).unwrap().translation.dot(heading)
+                app.world()
+                    .get::<Transform>(o)
+                    .unwrap()
+                    .translation
+                    .dot(heading)
             });
             println!(
                 "t={:5.2} along={:7.3} y={:6.3} pitch={:6.1} v={:7.2} vy={:6.2} dv={:6.2} other_along={:7.3}",
@@ -482,7 +486,7 @@ fn box_test() {
             LinearVelocity(Vec3::new(0.0, 0.0, -20.0)),
             Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
             Restitution::new(0.0).with_combine_rule(CoefficientCombine::Min),
-            SpeculativeMargin(0.0),
+            SpeculativeCcd::ZERO,
         ))
         .id();
     for step in 0..30 {

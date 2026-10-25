@@ -3,7 +3,7 @@
 A truck is a truck file, `TRUCK\NAME.TRK`, and the models and textures it names. A
 community truck is an archive of its own that holds those.
 
-**Measured** on the two archives in `trucks/`:
+**Measured** on two truck archives in `pods/`:
 
 | Archive | What it is | Contents |
 | --- | --- | --- |

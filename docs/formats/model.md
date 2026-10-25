@@ -185,7 +185,7 @@ The only support is that several rates are simple fractions of 65536 (1024, 3276
 43690 are 1/64, about 1/2 and about 2/3 of it), as the format's other 16.16 numbers are
 (texture coordinates and a material's base alpha). No file shows the unit. The scenery
 puts a cycle's frames in consecutive tiles and steps through them in its material
-(`track/tiles.wgsl`); a truck switches the texture of the material (`truck/looks.rs`).
+(`track/tiles.wesl`); a truck switches the texture of the material (`truck/looks.rs`).
 The backdrop shows the first frame. **Measured**: every frame is in its archive, on every
 track and truck we have.
 

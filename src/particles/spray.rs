@@ -4,14 +4,16 @@
 //! Where a tire breaks the surface, and whether it came down into it fast, the `water`
 //! slice says (`water::TireInWater`). The water a tire pushes aside is in the water's
 //! surface itself (`water::field`): the bow wave, the wake and the foam it leaves. What
-//! stands up out of the water round the tire is froth: white lumps of broken water, piled
+//! stands up out of the water round the tire is froth: lumps of broken water, piled
 //! up at the front of the tire and round its sides where they meet the water, which go
 //! along with the tire, rise a little, and fall behind into its wake. More the faster the
 //! tire goes, or its tread spins. Most where the water is a quarter of the way up the tire:
 //! little where it only wets the bottom, and less where it is over the hub. A tire that
 //! comes down into the water fast throws a crown of froth out from all round its footprint,
 //! low and wide rather than up like a fountain, and leaves a ring of foam that spreads on
-//! the water. Over it all hangs mist: fine water off the tires' pushing fronts, more the
+//! the water. The froth and the foam break white, and turn to the colour of the mud the
+//! tires stir up off the bed (`water::Mud`) as they go, as the foam on the water does.
+//! Over it all hangs mist: fine water off the tires' pushing fronts, more the
 //! faster they go, that the wind carries off. Drops thrown off the tires were tried and
 //! taken out: foam on the water, froth and mist read as water; a scatter of drops read as
 //! beads.
@@ -47,7 +49,7 @@ use crate::game_state::GameState;
 use crate::scene_depth::SceneDepth;
 use crate::track::Track;
 use crate::truck::TruckVisual;
-use crate::water::{SPLASH_SPEED, TireInWater, WATER_COLOR, WaterSettings, Wind};
+use crate::water::{Mud, SPLASH_SPEED, TireInWater, WATER_COLOR, WaterSettings, Wind};
 
 /// How far ahead of and behind the hub the crown of a splash leaves the water, as a share
 /// of the wheel's radius, and how many lumps of froth go out with it, at the least, and
@@ -174,6 +176,11 @@ const SPRAY_COLOR: Vec3 = Vec3::new(0.9, 0.95, 1.0);
 /// thick, in the middle of a droplet and in a splash's ring, from 0 (white) to 1 (as blue
 /// as the water), so that it looks to be of the same water. Higher is bluer and darker.
 const SPRAY_BLUE: f32 = 0.4;
+
+/// How many seconds after it is churned up a lump of froth has turned all the way from
+/// white to the mud's colour, and a patch of foam, which lasts longer.
+const FROTH_TURNS: f32 = 0.067;
+const FOAM_TURNS: f32 = 0.33;
 
 /// Thick spray's colour, as see-through as `opacity` (from 0 to 1).
 fn spray_color(opacity: f32) -> Color {
@@ -598,6 +605,8 @@ pub(super) fn throw_spray(
     time: Res<Time>,
     track: Res<Track>,
     looks: Option<Res<DropletLooks>>,
+    // Absent on a track without water, where nothing is thrown.
+    mud: Option<Res<Mud>>,
     trucks: Query<(), With<TruckVisual>>,
     mut tires: MessageReader<TireInWater>,
     mut mist: PoolOf<Mist, Drops, Foam>,
@@ -609,6 +618,7 @@ pub(super) fn throw_spray(
     let (Some(level), Some(looks)) = (track.water_level, looks) else {
         return;
     };
+    let mud = mud.map_or(spray_edge().to_linear(), |mud| mud.0);
     let (Ok(mut mists), Ok(mut foam), Ok(mut froth)) =
         (mist.single_mut(), foam.single_mut(), froth.single_mut())
     else {
@@ -626,6 +636,7 @@ pub(super) fn throw_spray(
             turned: random.between(0.0, std::f32::consts::TAU),
             turning: random.between(-0.4, 0.4),
             color: spray_edge().to_linear().with_alpha(FOAM_OPACITY),
+            later: Some((mud.with_alpha(FOAM_OPACITY), FOAM_TURNS)),
             trail: Vec3::ZERO,
             shape: (random.next() * (FOAM_SHAPES * FOAM_SHAPES) as f32) as u32,
         };
@@ -671,7 +682,11 @@ pub(super) fn throw_spray(
                     (away * random.between(0.2, 0.5) + Vec3::Y * random.between(0.2, 0.5)) * down
                         + along;
                 let size = random.between(FROTH_SIZE[0], FROTH_SIZE[1]) * 1.3;
-                froth.throw(clock, froth_puff(at, velocity, size, &mut random), floor);
+                froth.throw(
+                    clock,
+                    froth_puff(at, velocity, size, mud, &mut random),
+                    floor,
+                );
             }
             // Mist over it, slow, and only a little up and out.
             let puffs = random.between(SPLASH_MIST[0] as f32, SPLASH_MIST[1] as f32 + 1.0);
@@ -727,7 +742,11 @@ pub(super) fn throw_spray(
                 + away * random.between(FROTH_OUT[0], FROTH_OUT[1])
                 + Vec3::Y * froth_up(churn, tire.wet) * random.between(0.5, 1.0);
             let size = random.between(FROTH_SIZE[0], FROTH_SIZE[1]) * reach;
-            froth.throw(clock, froth_puff(at, velocity, size, &mut random), floor);
+            froth.throw(
+                clock,
+                froth_puff(at, velocity, size, mud, &mut random),
+                floor,
+            );
         }
     }
 }
@@ -793,15 +812,22 @@ pub(super) fn throw_droplet(
         turning: 0.0,
         // Its picture gives it its colour (see `make_droplet_looks`).
         color: LinearRgba::WHITE.with_alpha(opacity),
+        later: None,
         trail: Vec3::ZERO,
         shape: 0,
     };
     pool.throw(now, droplet, floor)
 }
 
-/// A puff of froth at `at`, going at `velocity`, `size` metres in radius: one of the foam's
-/// pictures, turned any way and turning.
-fn froth_puff(at: Vec3, velocity: Vec3, size: f32, random: &mut Random) -> Particle {
+/// A puff of froth at `at`, going at `velocity`, `size` metres in radius, which turns to
+/// `mud`'s colour: one of the foam's pictures, turned any way and turning.
+fn froth_puff(
+    at: Vec3,
+    velocity: Vec3,
+    size: f32,
+    mud: LinearRgba,
+    random: &mut Random,
+) -> Particle {
     Particle {
         at,
         velocity,
@@ -809,6 +835,7 @@ fn froth_puff(at: Vec3, velocity: Vec3, size: f32, random: &mut Random) -> Parti
         turned: random.between(0.0, std::f32::consts::TAU),
         turning: random.between(-1.5, 1.5),
         color: spray_edge().to_linear().with_alpha(FROTH_OPACITY),
+        later: Some((mud.with_alpha(FROTH_OPACITY), FROTH_TURNS)),
         trail: Vec3::ZERO,
         shape: (random.next() * (FOAM_SHAPES * FOAM_SHAPES) as f32) as u32,
     }

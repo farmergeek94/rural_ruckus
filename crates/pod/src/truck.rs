@@ -90,16 +90,11 @@ pub fn pod_holds_truck(path: &Path) -> bool {
         .is_some_and(|archive| crate::Truck::is_in(&archive))
 }
 
-/// The name of the truck in an archive on disk, for a list of trucks: the archive's
-/// directory and the first lines of its truck file, and none of its models or textures.
-/// `Ok(None)` for an archive with no truck in it, and an error for one that can't be read.
-pub fn peek_pod(path: &Path) -> Result<Option<String>, String> {
-    let describe = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
-    let bytes = std::fs::read(path).map_err(|error| describe(&error))?;
-    let archive = PodArchive::parse(bytes).map_err(|error| describe(&error))?;
-    crate::Truck::name_in(&archive)
-        .transpose()
-        .map_err(|error| describe(&error))
+/// The name of the truck in an archive, for a list of trucks: read from the first lines of
+/// its truck file, and none of its models or textures. `None` for an archive with no truck
+/// in it, and an error for a truck file that can't be read.
+pub fn peek(archive: &PodArchive) -> Option<Result<String, String>> {
+    crate::Truck::name_in(archive).map(|name| name.map_err(|error| error.to_string()))
 }
 
 /// A truck in one of the base game's archives.

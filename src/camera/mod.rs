@@ -23,6 +23,7 @@ mod views;
 use avian3d::prelude::LinearVelocity;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
+use bevy::pbr::ScreenSpaceTransmission;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 
@@ -161,6 +162,10 @@ fn spawn_camera(mut commands: Commands, settings: Res<CameraSettings>) {
     let camera = commands
         .spawn((
             Camera3d::default(),
+            // What the water's reflections are drawn with (`water::surface`): the picture
+            // behind it, copied in Bevy's transmissive pass. Part of every 3D camera until
+            // Bevy 0.20; a camera without it draws the water blind.
+            ScreenSpaceTransmission::default(),
             settings.msaa(),
             DespawnOnExit(GameState::Racing),
             // Until the truck has been seen, which is before anything is drawn.
